@@ -1,5 +1,5 @@
 import { existsSync, statSync, readdirSync, unlinkSync, rmdirSync } from 'node:fs';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import chalk from 'chalk';
 
 // Default: 1GB in bytes
@@ -64,6 +64,11 @@ export interface StorageInfo {
   needsCleanup: boolean;
 }
 
+export interface StorageGuidance {
+  setLimitCommand: string;
+  cleanupCommand: string;
+}
+
 export function checkStorageLimit(dirPath: string): StorageInfo {
   const currentSize = getDirectorySize(dirPath);
   const maxSize = getMaxStorageBytes();
@@ -75,6 +80,23 @@ export function checkStorageLimit(dirPath: string): StorageInfo {
     maxSize,
     usagePercent,
     needsCleanup,
+  };
+}
+
+export function getStorageGuidance(
+  configDir: string,
+  platform: NodeJS.Platform = process.platform
+): StorageGuidance {
+  if (platform === 'win32') {
+    return {
+      setLimitCommand: '$env:SC_MAX_STORAGE_GB = "2"',
+      cleanupCommand: `Remove-Item -Recurse -Force "${path.win32.join(configDir, 'old-files')}"`,
+    };
+  }
+
+  return {
+    setLimitCommand: 'export SC_MAX_STORAGE_GB=2',
+    cleanupCommand: `rm -rf "${path.posix.join(configDir, 'old-files')}"`,
   };
 }
 
