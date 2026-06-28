@@ -12,6 +12,22 @@ const { version: packageVersion } = require('../package.json') as { version: str
 
 const program = new Command();
 
+function exitWithCommandError(err: unknown): never {
+  const errorMsg = err instanceof Error ? err.message : String(err);
+  console.error(chalk.red(`Error: ${errorMsg}`));
+  process.exit(1);
+}
+
+function wrapAction<TArgs extends unknown[]>(action: (...args: TArgs) => Promise<void> | void) {
+  return async (...args: TArgs): Promise<void> => {
+    try {
+      await action(...args);
+    } catch (err: unknown) {
+      exitWithCommandError(err);
+    }
+  };
+}
+
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
@@ -24,22 +40,16 @@ program
   .argument('[prompt]', 'Optional prompt for non-interactive mode')
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
   .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
-  .action(async (prompt: string | undefined, options) => {
-    try {
-      const config = await loadConfig(process.cwd());
-      await startChatSession({
-        workspaceRoot: process.cwd(),
-        config,
-        autoApprove: options.yes,
-        initialPrompt: prompt,
-        quiet: options.quiet,
-      });
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(chalk.red(`Error: ${errorMsg}`));
-      process.exit(1);
-    }
-  });
+  .action(wrapAction(async (prompt: string | undefined, options) => {
+    const config = await loadConfig(process.cwd());
+    await startChatSession({
+      workspaceRoot: process.cwd(),
+      config,
+      autoApprove: options.yes,
+      initialPrompt: prompt,
+      quiet: options.quiet,
+    });
+  }));
 
 // Profile management
 const profileCommand = program.command('profile').description('Manage model profiles');
@@ -47,44 +57,38 @@ const profileCommand = program.command('profile').description('Manage model prof
 profileCommand
   .command('list')
   .description('List all available profiles')
-  .action(listProfiles);
+  .action(wrapAction(listProfiles));
 
 profileCommand
   .command('add [name]')
   .description('Add a new profile')
-  .action(addProfile);
+  .action(wrapAction(addProfile));
 
 profileCommand
   .command('use [name]')
   .description('Switch to a profile')
-  .action(useProfile);
+  .action(wrapAction(useProfile));
 
 profileCommand
   .command('remove [name]')
   .description('Remove a profile')
-  .action(removeProfile);
+  .action(wrapAction(removeProfile));
 
 // Init command
 program
   .command('init')
   .description('Initialize a new project with AGENTS.md')
-  .action(async () => {
+  .action(wrapAction(async () => {
     await initProject(process.cwd());
-  });
+  }));
 
 // Config init
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .action(async () => {
-    try {
-      await initConfig();
-      console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error(chalk.red(`Error: ${errorMsg}`));
-      process.exit(1);
-    }
-  });
+  .action(wrapAction(async () => {
+    await initConfig();
+    console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
+  }));
 
-program.parse();
+await program.parseAsync(process.argv);
