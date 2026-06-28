@@ -157,7 +157,8 @@ See [docs/available-models.md](docs/available-models.md) for detailed comparison
 ### `sc init`
 
 Initialize a project with a default `AGENTS.md` file for providing context to the agent.
-If `AGENTS.md` already exists, `sc init` preserves it and prints guidance instead of overwriting it.
+If `AGENTS.md` already exists, the CLI will ask before overwriting it.
+Use `sc init --force` to overwrite without prompting.
 
 ### `sc config-init`
 
