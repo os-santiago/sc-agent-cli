@@ -1,0 +1,224 @@
+name: Security Vulnerability Scanning
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Generate audit report
+        run: npm audit --json > npm-audit.json
+        continue-on-error: true
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: npm-audit.json
+
+  codeql-analysis:
+    name: CodeQL Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  malware-scan:
+    name: Malware & Backdoor Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan for suspicious patterns
+        run: |
+          echo "🔍 Scanning for malicious patterns..."
+
+          # Check for tracking/telemetry code
+          if grep -r -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Potential tracking code detected"
+            grep -r -n -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for data exfiltration patterns
+          if grep -r -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"; then
+            echo "⚠️  WARNING: Suspicious HTTP requests detected"
+            grep -r -n -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"
+            exit 1
+          fi
+
+          # Check for base64 encoded strings (potential obfuscation)
+          if grep -r -E "atob|btoa|Buffer\.from.*base64" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Base64 encoding/decoding detected (potential obfuscation)"
+            grep -r -n -E "atob|btoa|Buffer\.from.*base64" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for eval() usage
+          if grep -r -E "eval\(" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: eval() usage detected (security risk)"
+            grep -r -n -E "eval\(" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for credential harvesting patterns
+          if grep -r -E "(password|token|secret|key|credential).*=.*process\.env" --include="*.ts" --include="*.js" src/ | grep -E "(send|post|fetch|upload)"; then
+            echo "⚠️  WARNING: Potential credential exfiltration detected"
+            exit 1
+          fi
+
+          # Check for crypto mining patterns
+          if grep -r -E "(crypto.?miner|coinhive|monero|bitcoin|mining.?pool)" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Cryptocurrency mining code detected"
+            exit 1
+          fi
+
+          echo "✅ No suspicious patterns detected"
+
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive scan
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  supply-chain-security:
+    name: Supply Chain Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Check for dependency confusion
+        run: |
+          echo "🔍 Checking for dependency confusion attacks..."
+
+          # Check if package.json has suspicious package names
+          if grep -E "^  \"(@.+/)?[A-Z]" package.json; then
+            echo "⚠️  WARNING: Suspicious package names with capital letters"
+            exit 1
+          fi
+
+          # Check for packages with unusual version formats
+          if grep -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json; then
+            echo "⚠️  WARNING: Packages installed from unusual sources"
+            grep -n -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json
+            exit 1
+          fi
+
+          echo "✅ No supply chain issues detected"
+
+      - name: Check package integrity
+        run: |
+          npm ci
+          npm ls --all
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check licenses
+        run: |
+          npx license-checker --summary
+
+          # Fail on GPL licenses (copyleft)
+          if npx license-checker --json | grep -E "GPL"; then
+            echo "⚠️  WARNING: GPL licensed dependencies detected"
+            npx license-checker --json | grep -B 5 "GPL"
+            exit 1
+          fi
+
+  static-analysis:
+    name: Static Code Analysis (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ESLint security rules
+        run: |
+          npm ci
+          npx eslint --ext .ts,.js src/ --max-warnings=0 || true
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Check for potential hardcoded API keys
+          if grep -r -E "(api.?key|secret.?key|password|token).*=.*['\"][a-zA-Z0-9]{20,}" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Potential hardcoded secrets detected"
+            grep -r -n -E "(api.?key|secret.?key|password|token).*=.*['\"][a-zA-Z0-9]{20,}" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets detected"
