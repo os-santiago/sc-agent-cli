@@ -21,14 +21,18 @@ program
 program
   .command('chat', { isDefault: true })
   .description('Start an interactive chat session')
+  .argument('[prompt]', 'Optional prompt for non-interactive mode')
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
-  .action(async (options) => {
+  .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
+  .action(async (prompt: string | undefined, options) => {
     try {
       const config = await loadConfig(process.cwd());
       await startChatSession({
         workspaceRoot: process.cwd(),
         config,
         autoApprove: options.yes,
+        initialPrompt: prompt,
+        quiet: options.quiet,
       });
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
