@@ -43,15 +43,20 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(this.formatNetworkError(url, err));
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(this.formatApiError(response.status, response.statusText, errorText));
     }
 
     if (options.stream && response.body) {
@@ -153,5 +158,54 @@ export class OpenAICompatibleProvider {
       content: fullContent,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
+  }
+
+  private formatNetworkError(url: string, err: unknown): string {
+    const message = err instanceof Error ? err.message : String(err);
+    return `Network error while reaching ${url}: ${message}`;
+  }
+
+  private formatApiError(status: number, statusText: string, errorText: string): string {
+    const detail = this.extractErrorDetail(errorText);
+    const statusLabel = statusText ? ` ${statusText}` : '';
+    return detail
+      ? `API Error ${status}${statusLabel}: ${detail}`
+      : `API Error ${status}${statusLabel}`;
+  }
+
+  private extractErrorDetail(errorText: string): string {
+    const normalized = errorText.trim();
+    if (!normalized) {
+      return '';
+    }
+
+    try {
+      const parsed = JSON.parse(normalized) as {
+        error?: { message?: unknown };
+        message?: unknown;
+      };
+
+      if (typeof parsed.error?.message === 'string' && parsed.error.message.trim()) {
+        return this.truncateErrorDetail(parsed.error.message);
+      }
+
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return this.truncateErrorDetail(parsed.message);
+      }
+    } catch {
+      // Fall back to raw text when the response is not JSON.
+    }
+
+    return this.truncateErrorDetail(normalized.replace(/\s+/g, ' '));
+  }
+
+  private truncateErrorDetail(detail: string): string {
+    const maxLength = 300;
+    const normalized = detail.trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+
+    return `${normalized.slice(0, maxLength - 3)}...`;
   }
 }
