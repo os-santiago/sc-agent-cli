@@ -16,7 +16,7 @@ Guidelines:
 
 Platform-specific commands:
 - On Windows use: dir (not ls), cd (not pwd), type (not cat), where (not which)
-- For list_dir tool: use "." for current directory, never use empty string
+- For list_dir tool: ALWAYS provide a path value - use "." for current directory (empty string will cause validation errors)
 - For paths: "~" works for home directory, "." for current directory
 - If a command fails, try an alternative approach instead of retrying the same command
 - Stop after 3 failed attempts of the same operation
