@@ -17,6 +17,9 @@ program
   .description('Provider-agnostic CLI agent with tool use')
   .version(packageVersion);
 
+program.showSuggestionAfterError();
+program.showHelpAfterError('\nRun "sc --help" for usage.');
+
 // Chat command (default)
 program
   .command('chat', { isDefault: true })
@@ -43,6 +46,9 @@ program
 
 // Profile management
 const profileCommand = program.command('profile').description('Manage model profiles');
+
+profileCommand.showSuggestionAfterError();
+profileCommand.showHelpAfterError('\nRun "sc profile --help" for usage.');
 
 profileCommand
   .command('list')
