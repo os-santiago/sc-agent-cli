@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 
@@ -25,6 +25,18 @@ This file provides context to the SC-Agent when working in this project.
 
 export async function initProject(cwd: string): Promise<void> {
   const agentsPath = path.join(cwd, 'AGENTS.md');
+
+  try {
+    await access(agentsPath);
+    console.log(chalk.yellow(`! AGENTS.md already exists at ${agentsPath}`));
+    console.log(chalk.gray('  Keeping the existing file unchanged'));
+    console.log(chalk.gray('  Remove or rename it first if you want to regenerate the template'));
+    return;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
 
   try {
     await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
