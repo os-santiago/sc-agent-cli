@@ -61,7 +61,7 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config = deepMerge(config, JSON.parse(data));
   } catch (err: unknown) {
     // No global config, use defaults
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const _err = err;
   }
 
@@ -73,7 +73,7 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
       config = deepMerge(config, JSON.parse(data));
     } catch (err: unknown) {
       // No project config
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       const _err = err;
     }
   }
