@@ -626,7 +626,7 @@ export class Agent {
             toolsUsed.push({name: toolName, success: true, args});
 
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: result,
               tool_call_id: toolCall.id,
               name: toolName,
@@ -636,7 +636,7 @@ export class Agent {
             console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
             toolsUsed.push({name: toolName, success: false, error: errorMsg, args: JSON.parse(toolCall.function.arguments)});
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: `Error: ${errorMsg}`,
               tool_call_id: toolCall.id,
               name: toolName,
@@ -657,6 +657,15 @@ export class Agent {
           }
         }
         console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+
+        // WORKAROUND: Some models (NVIDIA Nemotron, older LLaMA variants) don't auto-generate
+        // a final response after receiving tool results. Adding a continuation signal forces them
+        // to synthesize the results into a coherent answer.
+        // Using a minimal continuation token instead of a full prompt to avoid bias.
+        messages.push({
+          role: 'user',
+          content: '...',
+        });
       } else {
         // No tool calls, finish the loop
         continueLoop = false;
