@@ -29,8 +29,16 @@ export async function addProfile(name?: string): Promise<void> {
     name = response.name;
   }
 
+  name = name?.trim();
+
   if (!name) {
     console.log(chalk.red('Profile name is required'));
+    return;
+  }
+
+  if (config.profiles?.[name]) {
+    console.log(chalk.red(`Profile "${name}" already exists`));
+    console.log(chalk.gray('  Choose a different name or run "sc profile use <name>".\n'));
     return;
   }
 
@@ -54,13 +62,27 @@ export async function addProfile(name?: string): Promise<void> {
     },
   ]);
 
+  const baseUrl = response.baseUrl?.trim();
+  const model = response.model?.trim();
+
+  if (!baseUrl) {
+    console.log(chalk.red('Base URL is required'));
+    return;
+  }
+
+  if (!model) {
+    console.log(chalk.red('Model name is required'));
+    return;
+  }
+
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl,
+    model,
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  const apiKey = response.apiKey?.trim();
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};
