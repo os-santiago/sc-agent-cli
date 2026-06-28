@@ -30,11 +30,11 @@ npm link  # Makes 'sc' available globally
 sc config-init
 ```
 
-This creates `~/.sc/config.json` with default profiles (Ollama, OpenAI, Anthropic).
+This creates `~/.sc-agent/config.json` with default profiles (Ollama, OpenAI, Anthropic).
 
 ### 2. Configure your preferred model
 
-Edit `~/.sc/config.json` or use the CLI:
+Edit `~/.sc-agent/config.json` or use the CLI:
 
 ```bash
 # List available profiles
