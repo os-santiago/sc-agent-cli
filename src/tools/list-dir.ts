@@ -13,10 +13,11 @@ export const listDirTool: Tool = {
         properties: {
           path: {
             type: 'string',
-            description: 'Path to directory (relative to workspace root). Use "." for current directory. If empty or not provided, defaults to current directory "."',
+            description: 'Directory path relative to workspace root. IMPORTANT: Always provide "." (dot) for current directory. Empty strings are NOT allowed - use "." instead.',
+            pattern: '^.+$'
           },
         },
-        required: [],
+        required: ['path'],
       },
     },
   },
