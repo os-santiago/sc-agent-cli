@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createRequire } from 'node:module';
-import { loadConfig, initConfig } from './core/config.js';
+import { loadConfig, initConfig, getGlobalConfigPath } from './core/config.js';
 import { startChatSession } from './commands/chat-session.js';
 import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
@@ -75,7 +75,7 @@ program
   .action(async () => {
     try {
       await initConfig();
-      console.log(chalk.green('✓ Config initialized at ~/.sc-agent/config.json'));
+      console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Error: ${errorMsg}`));

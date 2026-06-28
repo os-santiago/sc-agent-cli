@@ -110,6 +110,10 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   return config;
 }
 
+export function getGlobalConfigPath(): string {
+  return CONFIG_PATH;
+}
+
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
   const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
 
