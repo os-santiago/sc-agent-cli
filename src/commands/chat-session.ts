@@ -36,7 +36,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
   let currentConfig = options.config;
-  let inputHistory: string[] = [];
+  const inputHistory: string[] = [];
   let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
 
   // Check storage limit on startup
@@ -102,7 +102,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // Process the prompt
     console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
-    const response = await agent.run(userInput, history);
+    await agent.run(userInput, history);
     console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
 
     // Exit after processing
@@ -295,7 +295,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             fs.mkdirSync(configDir, { recursive: true });
           }
 
-          let config: any = {};
+          let config: Record<string, unknown> = {};
           if (fs.existsSync(configPath)) {
             const configContent = fs.readFileSync(configPath, 'utf-8');
             config = JSON.parse(configContent);
@@ -304,7 +304,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           if (!config.permissions) {
             config.permissions = {};
           }
-          config.permissions.profile = profileChoice.profile;
+          (config.permissions as {profile?: string}).profile = profileChoice.profile;
 
           fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -450,7 +450,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             }
 
             // Read existing config or create new
-            let config: any = {};
+            let config: Record<string, unknown> = {};
             if (fs.existsSync(configPath)) {
               const configContent = fs.readFileSync(configPath, 'utf-8');
               config = JSON.parse(configContent);
@@ -460,7 +460,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             if (!config.permissions) {
               config.permissions = {};
             }
-            config.permissions.autoApprove = preApprovedTools;
+            (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
 
             // Write config
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
