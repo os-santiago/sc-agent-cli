@@ -1,0 +1,44 @@
+{
+  "name": "sc-agent-cli",
+  "version": "0.3.1",
+  "description": "Provider-agnostic CLI agent with tool use, compatible with any OpenAI-compatible API",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "sc": "bin/sc.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node bin/sc-agent.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "ai",
+    "llm",
+    "openai",
+    "ollama",
+    "anthropic"
+  ],
+  "author": "Sergio Canales",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "diff": "^5.2.0",
+    "fast-glob": "^3.3.0",
+    "ignore": "^5.3.0",
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.0",
+    "@types/node": "^22.0.0",
+    "@types/prompts": "^2.4.9",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
