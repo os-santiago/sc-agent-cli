@@ -4,7 +4,6 @@ import * as readline from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ProjectConfig } from '../core/types.js';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
