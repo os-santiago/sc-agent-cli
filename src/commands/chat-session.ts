@@ -43,22 +43,30 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   const configDir = join(homedir(), '.sc-agent');
   const storageInfo = checkStorageLimit(configDir);
 
-  console.log(chalk.gray('╔════════════════════════════════════════════════════════════╗'));
-  console.log(chalk.bold.cyan('  🤖 SC-Agent CLI'));
-  console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
-  console.log(chalk.gray(`  Workspace: ${options.workspaceRoot}`));
-  console.log(chalk.gray(`  Model:     ${currentConfig.model.model}`));
-  console.log(chalk.gray(`  Provider:  ${currentConfig.model.baseUrl}`));
-  console.log(chalk.gray(`  Storage:   ${formatBytes(storageInfo.currentSize)} / ${formatBytes(storageInfo.maxSize)} (${storageInfo.usagePercent.toFixed(1)}%)`));
-  console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
-  console.log(chalk.gray('  Type "exit" or "quit" to end the session'));
-  console.log(chalk.gray('  Type "/help" for available commands'));
-  console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
+  // Non-interactive mode: skip UI decorations if quiet flag is set
+  const isQuiet = options.quiet || false;
+  const isNonInteractive = Boolean(options.initialPrompt);
 
-  // Warn if storage is getting high
-  if (storageInfo.usagePercent > 80 && !storageInfo.needsCleanup) {
-    console.log(chalk.yellow(`⚠️  Storage usage is at ${storageInfo.usagePercent.toFixed(1)}%`));
-    console.log(chalk.gray(`   Consider increasing SC_MAX_STORAGE_GB or cleaning old files\n`));
+  if (!isQuiet) {
+    console.log(chalk.gray('╔════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.bold.cyan('  🤖 SC-Agent CLI'));
+    console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
+    console.log(chalk.gray(`  Workspace: ${options.workspaceRoot}`));
+    console.log(chalk.gray(`  Model:     ${currentConfig.model.model}`));
+    console.log(chalk.gray(`  Provider:  ${currentConfig.model.baseUrl}`));
+    console.log(chalk.gray(`  Storage:   ${formatBytes(storageInfo.currentSize)} / ${formatBytes(storageInfo.maxSize)} (${storageInfo.usagePercent.toFixed(1)}%)`));
+    console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
+    if (!isNonInteractive) {
+      console.log(chalk.gray('  Type "exit" or "quit" to end the session'));
+      console.log(chalk.gray('  Type "/help" for available commands'));
+    }
+    console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
+
+    // Warn if storage is getting high
+    if (storageInfo.usagePercent > 80 && !storageInfo.needsCleanup) {
+      console.log(chalk.yellow(`⚠️  Storage usage is at ${storageInfo.usagePercent.toFixed(1)}%`));
+      console.log(chalk.gray(`   Consider increasing SC_MAX_STORAGE_GB or cleaning old files\n`));
+    }
   }
 
   // Auto-cleanup if over limit
@@ -66,29 +74,61 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     enforceStorageLimit(configDir, true);
   }
 
-  // Show status bar at bottom
-  statusBar.show(getShortcutsBar());
+  // Show status bar at bottom (only in interactive mode)
+  if (!isNonInteractive && !isQuiet) {
+    statusBar.show(getShortcutsBar());
+  }
 
   // Handle Ctrl+C gracefully
   process.on('SIGINT', () => {
-    statusBar.hide();
-    console.log(chalk.gray('\n\n╔════════════════════════════════════════════════════════════╗'));
-    console.log(chalk.cyan('  👋 Goodbye!'));
-    console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
+    if (!isQuiet) {
+      statusBar.hide();
+      console.log(chalk.gray('\n\n╔════════════════════════════════════════════════════════════╗'));
+      console.log(chalk.cyan('  👋 Goodbye!'));
+      console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
+    }
     process.exit(0);
   });
 
+  // Non-interactive mode: process single prompt and exit
+  if (isNonInteractive && options.initialPrompt) {
+    const userInput = options.initialPrompt;
+
+    if (!isQuiet) {
+      console.log(chalk.blue('\n┌─ Prompt ──────────────────────────────────────────────────┐'));
+      console.log(chalk.gray(`│ ${userInput}`));
+      console.log(chalk.blue('└───────────────────────────────────────────────────────────┘'));
+    }
+
+    // Process the prompt
+    console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
+    const response = await agent.run(userInput, history);
+    console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
+
+    // Exit after processing
+    return;
+  }
+
+  // Interactive mode loop
   while (true) {
     // Show status bar before each input
-    statusBar.show(getShortcutsBar());
+    if (!isQuiet) {
+      statusBar.show(getShortcutsBar());
+    }
 
     // User input separator
-    console.log(chalk.blue('\n┌─ You ─────────────────────────────────────────────────────┐'));
+    if (!isQuiet) {
+      console.log(chalk.blue('\n┌─ You ─────────────────────────────────────────────────────┐'));
+    }
     const userInput = await readUserInput(inputHistory, options.workspaceRoot);
-    console.log(chalk.blue('└───────────────────────────────────────────────────────────┘'));
+    if (!isQuiet) {
+      console.log(chalk.blue('└───────────────────────────────────────────────────────────┘'));
+    }
 
     // Hide status bar while processing
-    statusBar.hide();
+    if (!isQuiet) {
+      statusBar.hide();
+    }
 
     if (!userInput) {
       continue;
