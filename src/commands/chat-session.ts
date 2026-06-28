@@ -9,7 +9,12 @@ import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
 import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
-import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
+import {
+  checkStorageLimit,
+  enforceStorageLimit,
+  formatBytes,
+  getStorageGuidanceLines,
+} from '../utils/storage-limit.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
 
@@ -65,7 +70,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     // Warn if storage is getting high
     if (storageInfo.usagePercent > 80 && !storageInfo.needsCleanup) {
       console.log(chalk.yellow(`⚠️  Storage usage is at ${storageInfo.usagePercent.toFixed(1)}%`));
-      console.log(chalk.gray(`   Consider increasing SC_MAX_STORAGE_GB or cleaning old files\n`));
+      console.log(chalk.gray('   Run /storage for platform-specific guidance and cleanup options\n'));
     }
   }
 
@@ -526,9 +531,10 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           }
         } else if (info.usagePercent > 80) {
           console.log(chalk.yellow('💡 Tips:\n'));
-          console.log(chalk.gray('  • Increase limit: export SC_MAX_STORAGE_GB=2'));
-          console.log(chalk.gray('  • Clean manually: rm -rf ~/.sc-agent/old-files'));
-          console.log(chalk.gray('  • Auto-cleanup runs when limit is exceeded\n'));
+          getStorageGuidanceLines(configDir).forEach((line) => {
+            console.log(chalk.gray(`  • ${line}`));
+          });
+          console.log(chalk.gray('  • Auto-cleanup runs when the limit is exceeded\n'));
         } else {
           console.log(chalk.green('✓ Storage usage is healthy\n'));
         }
