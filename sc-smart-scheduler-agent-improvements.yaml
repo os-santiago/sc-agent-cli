@@ -1,0 +1,746 @@
+# SC Smart Scheduler Automation Definition
+# Automated UX/Error Handling/Code Quality Improvements for sc-agent-cli
+# Runs every 15 minutes to make small, safe improvements
+
+version: "1.0"
+name: "sc-agent-cli-auto-improvements"
+description: "Continuous automated improvements for SC-Agent CLI - UX, error handling, code quality"
+
+# ============================================================================
+# SCHEDULE & TRIGGERS
+# ============================================================================
+schedule:
+  type: "interval"
+  interval: "15m"                    # Every 15 minutes
+  timezone: "UTC"
+  max_concurrent_runs: 1             # Prevent overlapping runs
+  catch_up: false                    # Don't run missed intervals
+
+# Alternative: cron expression
+# schedule:
+#   type: "cron"
+#   expression: "*/15 * * * *"
+
+# Manual trigger support
+triggers:
+  - type: "manual"
+    name: "force-improvement-run"
+
+# ============================================================================
+# GLOBAL CONFIGURATION
+# ============================================================================
+config:
+  project_path: "D:/git/sc-agent-cli"
+  working_dir: "D:/git/sc-agent-cli"
+  default_branch: "main"
+  max_improvements_per_run: 1        # Only one improvement per run
+  min_pr_size: "tiny"                # tiny | small | medium
+  max_file_changes: 3                # Limit scope per PR
+
+# ============================================================================
+# ENVIRONMENT & SECRETS
+# ============================================================================
+environment:
+  variables:
+    NODE_ENV: "production"
+    SC_AGENT_AUTO_APPROVE: "true"
+    GIT_AUTHOR_NAME: "sc-agent-bot"
+    GIT_AUTHOR_EMAIL: "sc-agent-bot@sc-scheduler.local"
+  secrets:
+    - name: "GITHUB_TOKEN"
+      required: true
+    - name: "SC_AGENT_API_KEY"
+      required: false
+
+# ============================================================================
+# TASK DEFINITIONS
+# ============================================================================
+tasks:
+  # ----------------------------------------------------------------------------
+  # PHASE 1: ANALYSIS - Find improvement opportunities
+  # ----------------------------------------------------------------------------
+  - id: "analyze-codebase"
+    name: "Analyze Codebase for Improvements"
+    type: "scc-prompt"
+    description: "Scan the codebase and identify one small, safe improvement"
+    timeout: 120000                  # 2 minutes
+    retries: 2
+    retry_delay: 10000               # 10 seconds
+    continue_on_error: false
+    inputs:
+      project_path: "${config.project_path}"
+      focus_areas:
+        - "UX improvements (better error messages, clearer prompts, improved defaults)"
+        - "Error handling (try/catch coverage, meaningful error messages, graceful degradation)"
+        - "Code quality (TypeScript strictness, unused imports, dead code, consistency)"
+        - "Documentation (JSDoc comments, README updates, inline comments)"
+        - "Performance (unnecessary allocations, redundant computations)"
+        - "Security (input validation, path traversal prevention, safe defaults)"
+      exclude_patterns:
+        - "**/node_modules/**"
+        - "**/dist/**"
+        - "**/*.d.ts"
+        - "**/*.test.ts"
+        - "**/*.spec.ts"
+      max_suggestions: 3
+      safety_filters:
+        - "no_breaking_changes"
+        - "no_api_changes"
+        - "no_config_changes"
+        - "no_database_migrations"
+        - "no_dependency_updates"
+        - "test_must_pass"
+    prompt_template: |
+      You are an expert TypeScript developer reviewing the SC-Agent CLI codebase for small, safe improvements.
+      
+      Project: {{project_path}}
+      Focus areas: {{focus_areas}}
+      Safety constraints: {{safety_filters}}
+      
+      Analyze the codebase and identify ONE specific, small improvement that:
+      1. Is LOW RISK (no breaking changes, no API changes, no config changes)
+      2. Can be implemented in < 30 minutes
+      3. Improves UX, error handling, or code quality
+      4. Has existing tests that will validate the change
+      5. Follows existing code patterns and conventions
+      
+      Return a JSON object with:
+      {
+        "improvement": {
+          "id": "unique-id",
+          "title": "Brief title",
+          "description": "Detailed description of the change",
+          "type": "ux|error-handling|code-quality|docs|performance|security",
+          "files_to_modify": ["relative/path/to/file.ts"],
+          "estimated_lines_changed": 10,
+          "risk_level": "very-low|low|medium",
+          "test_validation": "npm test",
+          "implementation_steps": ["step 1", "step 2", "step 3"]
+        },
+        "reasoning": "Why this improvement was selected"
+      }
+      
+      If no safe improvement found, return: {"improvement": null, "reasoning": "No safe improvements found"}
+
+  # ----------------------------------------------------------------------------
+  # PHASE 2: IMPLEMENTATION - Apply the improvement
+  # ----------------------------------------------------------------------------
+  - id: "create-branch"
+    name: "Create Feature Branch"
+    type: "shell"
+    description: "Create a new git branch for the improvement"
+    timeout: 30000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: false
+    depends_on: ["analyze-codebase"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      git fetch origin
+      git checkout "${config.default_branch}"
+      git pull origin "${config.default_branch}"
+      BRANCH_NAME="auto/improvement-${tasks.analyze-codebase.outputs.improvement.id}-$(date +%s)"
+      git checkout -b "$BRANCH_NAME"
+      echo "BRANCH_NAME=$BRANCH_NAME" >> $SC_OUTPUTS
+
+  - id: "implement-improvement"
+    name: "Implement the Improvement"
+    type: "scc-prompt"
+    description: "Implement the identified improvement in the codebase"
+    timeout: 300000                  # 5 minutes
+    retries: 2
+    retry_delay: 15000
+    continue_on_error: false
+    depends_on: ["create-branch"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    inputs:
+      improvement: "${tasks.analyze-codebase.outputs.improvement}"
+      branch_name: "${tasks.create-branch.outputs.BRANCH_NAME}"
+      project_path: "${config.project_path}"
+    prompt_template: |
+      Implement the following improvement in the SC-Agent CLI codebase:
+      
+      Improvement: {{improvement}}
+      Branch: {{branch_name}}
+      Project: {{project_path}}
+      
+      Requirements:
+      1. Make ONLY the changes described in the improvement
+      2. Follow existing code style and patterns exactly
+      3. Add/update JSDoc comments if modifying public APIs
+      4. Ensure TypeScript strict mode compliance
+      5. Do not modify test files unless the improvement requires it
+      6. Keep changes minimal and focused
+      
+      Files to modify: {{improvement.files_to_modify}}
+      Implementation steps: {{improvement.implementation_steps}}
+      
+      Return:
+      {
+        "success": true,
+        "files_changed": ["file1.ts", "file2.ts"],
+        "summary": "Brief summary of changes made",
+        "warnings": ["any warnings or notes"]
+      }
+
+  # ----------------------------------------------------------------------------
+  # PHASE 3: VALIDATION - Test the changes locally
+  # ----------------------------------------------------------------------------
+  - id: "run-typecheck"
+    name: "Run TypeScript Type Check"
+    type: "shell"
+    description: "Validate TypeScript compilation"
+    timeout: 120000
+    retries: 1
+    retry_delay: 10000
+    continue_on_error: false
+    depends_on: ["implement-improvement"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      npm run build
+      echo "TYPECHECK=passed" >> $SC_OUTPUTS
+
+  - id: "run-tests"
+    name: "Run Test Suite"
+    type: "shell"
+    description: "Execute all tests to ensure no regressions"
+    timeout: 180000
+    retries: 1
+    retry_delay: 10000
+    continue_on_error: false
+    depends_on: ["run-typecheck"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      npm test 2>&1
+      echo "TESTS=passed" >> $SC_OUTPUTS
+
+  - id: "run-lint"
+    name: "Run Linter"
+    type: "shell"
+    description: "Check code style and quality"
+    timeout: 60000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: false
+    depends_on: ["run-tests"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      npm run lint 2>&1 || true  # Lint warnings are non-blocking
+      echo "LINT=completed" >> $SC_OUTPUTS
+
+  # ----------------------------------------------------------------------------
+  # PHASE 4: COMMIT & PR - Create commit and pull request
+  # ----------------------------------------------------------------------------
+  - id: "commit-changes"
+    name: "Commit Changes"
+    type: "shell"
+    description: "Commit the implemented improvement"
+    timeout: 30000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: false
+    depends_on: ["run-lint"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      git add -A
+      git config user.name "${environment.variables.GIT_AUTHOR_NAME}"
+      git config user.email "${environment.variables.GIT_AUTHOR_EMAIL}"
+      
+      IMPROVEMENT="${tasks.analyze-codebase.outputs.improvement}"
+      COMMIT_MSG="auto: ${IMPROVEMENT.title}
+
+${IMPROVEMENT.description}
+
+Type: ${IMPROVEMENT.type}
+Risk: ${IMPROVEMENT.risk_level}
+Files: ${IMPROVEMENT.files_to_modify | join(', ')}
+
+🤖 Generated by SC Smart Scheduler"
+      
+      git commit -m "$COMMIT_MSG"
+      echo "COMMIT_HASH=$(git rev-parse HEAD)" >> $SC_OUTPUTS
+
+  - id: "push-branch"
+    name: "Push Branch to Remote"
+    type: "shell"
+    description: "Push the feature branch to origin"
+    timeout: 60000
+    retries: 2
+    retry_delay: 10000
+    continue_on_error: false
+    depends_on: ["commit-changes"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      BRANCH_NAME="${tasks.create-branch.outputs.BRANCH_NAME}"
+      git push -u origin "$BRANCH_NAME"
+      echo "PUSHED=true" >> $SC_OUTPUTS
+
+  - id: "create-pull-request"
+    name: "Create Pull Request"
+    type: "shell"
+    description: "Create a PR for the improvement"
+    timeout: 60000
+    retries: 2
+    retry_delay: 10000
+    continue_on_error: false
+    depends_on: ["push-branch"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      BRANCH_NAME="${tasks.create-branch.outputs.BRANCH_NAME}"
+      IMPROVEMENT="${tasks.analyze-codebase.outputs.improvement}"
+      
+      PR_TITLE="[Auto] ${IMPROVEMENT.title}"
+      PR_BODY="## Automated Improvement
+      
+**Type:** ${IMPROVEMENT.type}
+**Risk Level:** ${IMPROVEMENT.risk_level}
+**Estimated Lines Changed:** ${IMPROVEMENT.estimated_lines_changed}
+
+### Description
+${IMPROVEMENT.description}
+
+### Changes
+${IMPROVEMENT.files_to_modify | map(f => "- " + f) | join('\n')}
+
+### Validation
+- TypeScript: ✅ Passed
+- Tests: ✅ Passed
+- Lint: ✅ Completed
+
+### Implementation Steps
+${IMPROVEMENT.implementation_steps | map((s, i) => "${i+1}. " + s) | join('\n')}
+
+---
+🤖 This PR was created automatically by SC Smart Scheduler.
+Please review the changes carefully before merging."
+      
+      gh pr create \
+        --title "$PR_TITLE" \
+        --body "$PR_BODY" \
+        --base "${config.default_branch}" \
+        --head "$BRANCH_NAME" \
+        --label "automated,${IMPROVEMENT.type},low-risk"
+      
+      PR_URL=$(gh pr view --json url --jq ".url")
+      echo "PR_URL=$PR_URL" >> $SC_OUTPUTS
+      echo "PR_NUMBER=$(gh pr view --json number --jq ".number")" >> $SC_OUTPUTS
+
+  # ----------------------------------------------------------------------------
+  # PHASE 5: MONITOR & MERGE - Wait for checks and merge
+  # ----------------------------------------------------------------------------
+  - id: "wait-for-checks"
+    name: "Wait for CI Checks to Pass"
+    type: "shell"
+    description: "Poll GitHub for CI check status"
+    timeout: 600000                  # 10 minutes max wait
+    retries: 0
+    continue_on_error: false
+    depends_on: ["create-pull-request"]
+    condition: "${tasks.analyze-codebase.outputs.improvement != null}"
+    working_dir: "${config.project_path}"
+    command: |
+      PR_NUMBER="${tasks.create-pull-request.outputs.PR_NUMBER}"
+      MAX_WAIT=600
+      INTERVAL=30
+      ELAPSED=0
+      
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        STATUS=$(gh pr checks "$PR_NUMBER" --json name,conclusion --jq '.[] | select(.conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL") | .name')
+        
+        if [ -z "$STATUS" ]; then
+          echo "All checks passed!"
+          echo "CHECKS=passed" >> $SC_OUTPUTS
+          exit 0
+        fi
+        
+        echo "Waiting for checks: $STATUS"
+        sleep $INTERVAL
+        ELAPSED=$((ELAPSED + INTERVAL))
+      done
+      
+      echo "Timeout waiting for checks"
+      echo "CHECKS=timeout" >> $SC_OUTPUTS
+      exit 1
+
+  - id: "merge-pull-request"
+    name: "Merge Pull Request"
+    type: "shell"
+    description: "Merge the PR when all checks pass"
+    timeout: 60000
+    retries: 2
+    retry_delay: 10000
+    continue_on_error: false
+    depends_on: ["wait-for-checks"]
+    condition: "${tasks.wait-for-checks.outputs.CHECKS == 'passed'}"
+    working_dir: "${config.project_path}"
+    command: |
+      PR_NUMBER="${tasks.create-pull-request.outputs.PR_NUMBER}"
+      IMPROVEMENT="${tasks.analyze-codebase.outputs.improvement}"
+      
+      gh pr merge "$PR_NUMBER" \
+        --merge \
+        --delete-branch \
+        --body "Auto-merged after all checks passed.
+
+Improvement: ${IMPROVEMENT.title}
+Type: ${IMPROVEMENT.type}
+Risk: ${IMPROVEMENT.risk_level}"
+      
+      echo "MERGED=true" >> $SC_OUTPUTS
+
+  # ----------------------------------------------------------------------------
+  # PHASE 6: CLEANUP & NOTIFICATION
+  # ----------------------------------------------------------------------------
+  - id: "cleanup-local"
+    name: "Cleanup Local Branch"
+    type: "shell"
+    description: "Clean up local git state"
+    timeout: 30000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: true          # Non-blocking cleanup
+    depends_on: ["merge-pull-request"]
+    condition: "${tasks.merge-pull-request.outputs.MERGED == 'true'}"
+    working_dir: "${config.project_path}"
+    command: |
+      git checkout "${config.default_branch}"
+      git pull origin "${config.default_branch}"
+      git branch -D "${tasks.create-branch.outputs.BRANCH_NAME}" 2>/dev/null || true
+      echo "CLEANUP=done" >> $SC_OUTPUTS
+
+  - id: "send-success-notification"
+    name: "Send Success Notification"
+    type: "shell"
+    description: "Notify about successful improvement"
+    timeout: 10000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: true
+    depends_on: ["merge-pull-request"]
+    condition: "${tasks.merge-pull-request.outputs.MERGED == 'true'}"
+    command: |
+      IMPROVEMENT="${tasks.analyze-codebase.outputs.improvement}"
+      PR_URL="${tasks.create-pull-request.outputs.PR_URL}"
+      
+      echo "✅ SC Smart Scheduler: Improvement merged successfully!"
+      echo "Title: ${IMPROVEMENT.title}"
+      echo "Type: ${IMPROVEMENT.type}"
+      echo "PR: ${PR_URL}"
+      echo "Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+
+  - id: "send-failure-notification"
+    name: "Send Failure Notification"
+    type: "shell"
+    description: "Notify about failed improvement run"
+    timeout: 10000
+    retries: 1
+    retry_delay: 5000
+    continue_on_error: true
+    depends_on: [
+      "analyze-codebase",
+      "implement-improvement",
+      "run-typecheck",
+      "run-tests",
+      "run-lint",
+      "commit-changes",
+      "push-branch",
+      "create-pull-request",
+      "wait-for-checks",
+      "merge-pull-request"
+    ]
+    condition: "failed"
+    command: |
+      FAILED_TASK="${SC_FAILED_TASK_ID}"
+      ERROR="${SC_FAILED_TASK_ERROR}"
+      
+      echo "❌ SC Smart Scheduler: Improvement run failed!"
+      echo "Failed task: ${FAILED_TASK}"
+      echo "Error: ${ERROR}"
+      echo "Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+      
+      # Log to file for debugging
+      echo "$(date -u +"%Y-%m-%d %H:%M:%S UTC") | ${FAILED_TASK} | ${ERROR}" >> /var/log/sc-scheduler-improvements.log
+
+# ============================================================================
+# ERROR HANDLING & RETRY POLICIES
+# ============================================================================
+error_handling:
+  global_retry_policy:
+    max_retries: 3
+    base_delay: 5000
+    max_delay: 60000
+    exponential_backoff: true
+    jitter: true
+  
+  task_specific:
+    "analyze-codebase":
+      max_retries: 2
+      fallback: "skip_run"
+    "implement-improvement":
+      max_retries: 2
+      fallback: "abort_branch"
+    "run-tests":
+      max_retries: 1
+      fallback: "abort_pr"
+    "wait-for-checks":
+      max_retries: 0
+      fallback: "leave_pr_open"
+    "merge-pull-request":
+      max_retries: 3
+      fallback: "manual_merge_required"
+
+  # Circuit breaker for repeated failures
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5           # 5 consecutive failures
+    reset_timeout: 3600000         # 1 hour
+    half_open_requests: 2
+
+# ============================================================================
+# SELF-CORRECTION & ADAPTIVE BEHAVIOR
+# ============================================================================
+self_correction:
+  enabled: true
+  
+  # Learn from past runs
+  learning:
+    enabled: true
+    history_file: "/var/lib/sc-scheduler/improvement-history.json"
+    max_history: 1000
+    
+    # Track what works
+    track:
+      - improvement_type
+      - files_modified
+      - test_pass_rate
+      - merge_success_rate
+      - review_feedback
+      - time_to_merge
+  
+  # Adaptive scheduling
+  adaptive_schedule:
+    enabled: true
+    min_interval: "5m"
+    max_interval: "60m"
+    adjustment_factor: 1.5
+    
+    # Slow down if:
+    - test_failure_rate > 0.2      # >20% test failures
+    - merge_failure_rate > 0.1     # >10% merge failures
+    - review_requests > 3          # >3 PRs awaiting review
+    
+    # Speed up if:
+    - success_rate > 0.95          # >95% success
+    - no_pending_prs: true
+    - low_repo_activity: true
+  
+  # Quality gates that trigger self-correction
+  quality_gates:
+    - name: "test_regression"
+      condition: "tests_failed_after_passing"
+      action: "revert_and_analyze"
+      severity: "critical"
+    
+    - name: "merge_conflicts"
+      condition: "pr_has_conflicts"
+      action: "rebase_and_retry"
+      severity: "warning"
+    
+    - name: "review_changes_requested"
+      condition: "pr_review_decision == CHANGES_REQUESTED"
+      action: "analyze_feedback_and_retry"
+      severity: "warning"
+    
+    - name: "large_pr"
+      condition: "files_changed > ${config.max_file_changes}"
+      action: "split_into_smaller_prs"
+      severity: "info"
+
+# ============================================================================
+# MONITORING & ALERTS
+# ============================================================================
+monitoring:
+  metrics:
+    - name: "runs_total"
+      type: "counter"
+      labels: ["status"]
+    - name: "improvements_merged"
+      type: "counter"
+      labels: ["type"]
+    - name: "run_duration_seconds"
+      type: "histogram"
+      buckets: [30, 60, 120, 300, 600, 1800]
+    - name: "pr_size_lines"
+      type: "histogram"
+      buckets: [10, 25, 50, 100, 200, 500]
+    - name: "time_to_merge_minutes"
+      type: "histogram"
+      buckets: [5, 15, 30, 60, 120, 240]
+    - name: "test_pass_rate"
+      type: "gauge"
+    - name: "circuit_breaker_state"
+      type: "gauge"
+  
+  alerts:
+    - name: "high_failure_rate"
+      condition: "failure_rate_5m > 0.3"
+      severity: "critical"
+      channels: ["slack", "email", "pagerduty"]
+      message: "SC Scheduler: High failure rate ({{value}}%) in last 5 minutes"
+      cooldown: 300
+    
+    - name: "circuit_breaker_open"
+      condition: "circuit_breaker_state == 1"
+      severity: "critical"
+      channels: ["slack", "email", "pagerduty"]
+      message: "SC Scheduler: Circuit breaker OPEN - automation paused"
+      cooldown: 600
+    
+    - name: "no_improvements_found"
+      condition: "improvements_found_1h == 0"
+      severity: "warning"
+      channels: ["slack"]
+      message: "SC Scheduler: No improvements found in 1 hour"
+      cooldown: 3600
+    
+    - name: "pr_stuck_in_review"
+      condition: "pr_open_duration_hours > 24"
+      severity: "warning"
+      channels: ["slack"]
+      message: "SC Scheduler: PR #{{pr_number}} open for >24h"
+      cooldown: 86400
+    
+    - name: "merge_conflict_detected"
+      condition: "pr_has_conflicts == true"
+      severity: "warning"
+      channels: ["slack"]
+      message: "SC Scheduler: PR #{{pr_number}} has merge conflicts"
+      cooldown: 3600
+    
+    - name: "test_regression"
+      condition: "tests_passed_before && tests_failed_now"
+      severity: "critical"
+      channels: ["slack", "email", "pagerduty"]
+      message: "SC Scheduler: TEST REGRESSION in PR #{{pr_number}}"
+      cooldown: 300
+
+  # Health check endpoint
+  health_check:
+    enabled: true
+    port: 8080
+    path: "/health"
+    interval: 30000
+
+# ============================================================================
+# SAFETY & GUARDRAILS
+# ============================================================================
+safety:
+  # Maximum concurrent improvements
+  max_concurrent_prs: 3
+  
+  # Require human approval for certain changes
+  require_approval:
+    - type: "security"
+    - type: "breaking-change"
+    - risk_level: "medium"
+    - risk_level: "high"
+    - files_match: ["**/auth/**", "**/security/**", "**/config/**"]
+  
+  # Auto-merge only for very low risk
+  auto_merge_criteria:
+    risk_level: "very-low"
+    tests_pass: true
+    typecheck_pass: true
+    no_conflicts: true
+    review_decision: "APPROVED"  # or no review required
+    labels_contain: ["low-risk", "automated"]
+  
+  # Rollback on failure
+  rollback_on_failure:
+    enabled: true
+    trigger: "test_regression_after_merge"
+    action: "revert_commit"
+  
+  # Dry run mode
+  dry_run:
+    enabled: false
+    log_only: true
+
+# ============================================================================
+# LOGGING & AUDIT
+# ============================================================================
+logging:
+  level: "info"
+  format: "json"
+  outputs:
+    - type: "file"
+      path: "/var/log/sc-scheduler/automation.log"
+      rotation: "daily"
+      max_files: 30
+    - type: "stdout"
+      level: "info"
+    - type: "syslog"
+      facility: "local0"
+  
+  audit:
+    enabled: true
+    path: "/var/log/sc-scheduler/audit.log"
+    events:
+      - "run_started"
+      - "improvement_selected"
+      - "branch_created"
+      - "changes_committed"
+      - "pr_created"
+      - "pr_merged"
+      - "pr_rejected"
+      - "rollback_executed"
+      - "circuit_breaker_triggered"
+      - "alert_fired"
+
+# ============================================================================
+# NOTIFICATION CHANNELS (configured separately)
+# ============================================================================
+notifications:
+  slack:
+    webhook_url: "${secrets.SLACK_WEBHOOK_URL}"
+    channel: "#sc-agent-automation"
+  email:
+    smtp_host: "${secrets.SMTP_HOST}"
+    smtp_port: 587
+    from: "sc-scheduler@company.com"
+    to: ["team@company.com"]
+  pagerduty:
+    integration_key: "${secrets.PAGERDUTY_KEY}"
+    severity_map:
+      critical: "critical"
+      warning: "warning"
+      info: "info"
+
+# ============================================================================
+# EXECUTION METADATA
+# ============================================================================
+metadata:
+  created: "2025-01-15"
+  version: "1.0.0"
+  author: "SC Smart Scheduler"
+  tags: ["automation", "improvements", "sc-agent-cli", "continuous-improvement"]
+  repository: "sc-agent-cli"
+  maintainer: "platform-team"
+
+# ============================================================================
+# VARIABLE INTERPOLATION HELPERS
+# ============================================================================
+# Variables available in templates:
+# ${config.*}          - Configuration values
+# ${environment.variables.*} - Environment variables
+# ${secrets.*}         - Secret values (masked in logs)
+# ${tasks.<id>.outputs.*} - Task outputs
+# ${SC_FAILED_TASK_ID} - ID of failed task (in failure handlers)
+# ${SC_FAILED_TASK_ERROR} - Error message (in failure handlers)
