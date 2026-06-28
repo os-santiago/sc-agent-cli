@@ -517,6 +517,8 @@ export interface AgentOptions {
   config: ProjectConfig;
   autoApprove?: boolean;
   systemPrompt?: string;
+  initialPrompt?: string;
+  quiet?: boolean;
 }
 
 export class Agent {

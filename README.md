@@ -11,6 +11,7 @@ No dependency on a specific subscription or provider — configure your preferre
 - **Permission system**: Configurable auto-approval for safe tools, explicit permission for sensitive operations
 - **Profile management**: Easily switch between models and providers
 - **Project context**: Loads `AGENTS.md` / `SC-AGENT.md` / `CLAUDE.md` for project-specific instructions
+- **Non-interactive mode**: Accept prompts as CLI parameters for automation and scripting
 - **Cross-platform**: Works on Windows, Linux, and macOS
 
 ## Installation
@@ -90,11 +91,30 @@ The agent will maintain conversation context and can use tools to help you with 
 
 ## Commands
 
-### `sc chat` (default)
+### `sc chat [prompt]` (default)
 
-Start an interactive chat session. Options:
+Start an interactive chat session, or run a single prompt non-interactively.
+
+**Options:**
 
 - `-y, --yes`: Auto-approve all tool executions (use with caution)
+- `-q, --quiet`: Suppress UI decorations (for non-interactive use)
+
+**Examples:**
+
+```bash
+# Interactive mode
+sc chat
+
+# Non-interactive mode
+sc "summarize README.md"
+
+# Non-interactive with auto-approve
+sc -y "create a file test.txt with content 'Hello World'"
+
+# Fully automated (quiet + auto-approve)
+sc -yq "count .ts files in src/"
+```
 
 **Chat Commands:**
 
