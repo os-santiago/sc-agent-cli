@@ -563,6 +563,7 @@ export class Agent {
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
       iterations++;
+      const showUi = !this.options.quiet;
 
       const response = await this.provider.chatCompletion(
         {
@@ -583,10 +584,12 @@ export class Agent {
 
       // Handle tool calls if any
       if (response.tool_calls && response.tool_calls.length > 0) {
-        console.log(chalk.gray('\n  ┌─ Tools ─────────────────────────────────────────────────┐'));
+        if (showUi) {
+          console.log(chalk.gray('\n  ┌─ Tools ─────────────────────────────────────────────────┐'));
+        }
 
         // Group message for multiple tools
-        if (response.tool_calls.length > 1) {
+        if (showUi && response.tool_calls.length > 1) {
           console.log(chalk.gray(`  │ 🔧 Executing ${response.tool_calls.length} tools...`));
         }
 
@@ -595,7 +598,9 @@ export class Agent {
           const tool = getToolByName(toolName);
 
           if (!tool) {
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
+            if (showUi) {
+              console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
+            }
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
             messages.push({
               role: 'assistant',
@@ -610,16 +615,16 @@ export class Agent {
             const args = JSON.parse(toolCall.function.arguments);
 
             // Compact output for multiple tools
-            if (response.tool_calls.length === 1) {
+            if (showUi && response.tool_calls.length === 1) {
               console.log(chalk.gray(`  │ 🔧 Using tool: ${toolName}`));
               console.log(chalk.gray(`  │    Args: ${JSON.stringify(args)}`));
-            } else {
+            } else if (showUi) {
               console.log(chalk.gray(`  │    → ${toolName}: ${JSON.stringify(args)}`));
             }
 
             const result = await tool.execute(args, this.toolContext);
 
-            if (response.tool_calls.length === 1) {
+            if (showUi && response.tool_calls.length === 1) {
               console.log(chalk.gray(`  │ ${chalk.green('✓')} Tool completed`));
             }
 
@@ -633,7 +638,9 @@ export class Agent {
             });
           } catch (err: unknown) {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
+            if (showUi) {
+              console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
+            }
             toolsUsed.push({name: toolName, success: false, error: errorMsg, args: JSON.parse(toolCall.function.arguments)});
             messages.push({
               role: 'assistant',
@@ -645,7 +652,7 @@ export class Agent {
         }
 
         // Summary for multiple tools
-        if (response.tool_calls.length > 1) {
+        if (showUi && response.tool_calls.length > 1) {
           const successful = toolsUsed.filter(t => t.success).length;
           const failed = toolsUsed.filter(t => !t.success).length;
           if (failed > 0) {
@@ -656,7 +663,9 @@ export class Agent {
             console.log(chalk.gray(`  │ ${chalk.green('✓')} All ${successful} tools completed successfully`));
           }
         }
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        if (showUi) {
+          console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        }
       } else {
         // No tool calls, finish the loop
         continueLoop = false;
@@ -751,14 +760,14 @@ export class Agent {
     const hasCompatibilityIssues = compatibilityErrors.length > 0;
     const taskCompleted = hasSubstantialWork && hasOnlyExpectableErrors && !hitIterationLimit;
 
-    if (hitIterationLimit) {
+    if (!this.options.quiet && hitIterationLimit) {
       console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
       console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Maximum iteration limit reached`));
       console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
     }
 
     // Warning for repeated errors (loop detection)
-    if (hasRepeatedErrors) {
+    if (!this.options.quiet && hasRepeatedErrors) {
       console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
       console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Detected repeated errors (possible infinite loop)`));
       console.log(chalk.gray('  │'));
@@ -773,7 +782,7 @@ export class Agent {
     }
 
     // Final summary if tools were used
-    if (toolsUsed.length > 0) {
+    if (!this.options.quiet && toolsUsed.length > 0) {
       if (hadErrors) {
         console.log(chalk.gray('\n  ┌─ Summary ───────────────────────────────────────────────┐'));
         console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')}  ${failedTools.length} error(s) encountered`));
@@ -883,10 +892,12 @@ export class Agent {
     if (delta.content) {
       // Add newline before first chunk
       if (this.isFirstChunk) {
-        process.stdout.write('\n');
+        if (!this.options.quiet) {
+          process.stdout.write('\n');
+        }
         this.isFirstChunk = false;
       }
-      process.stdout.write(chalk.green(delta.content));
+      process.stdout.write(this.options.quiet ? delta.content : chalk.green(delta.content));
     }
   }
 }
