@@ -266,7 +266,7 @@ export const DANGEROUS_COMMANDS: DangerousPattern[] = [
   {
     pattern: /\bgit\s+clean\s+-[dfx]/,
     category: 'git-destructive',
-    description: 'Delete untracked files',
+    description: 'Delete git untracked files',
     severity: 'medium',
   },
 ];
