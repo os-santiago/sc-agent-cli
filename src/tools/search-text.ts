@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import fg from 'fast-glob';
 import type { Tool, ToolContext } from './tool.js';
 
@@ -38,7 +39,16 @@ export const searchTextTool: Tool = {
       throw new Error('Missing required argument: pattern');
     }
 
-    const regex = useRegex ? new RegExp(pattern, 'i') : null;
+    let regex: RegExp | null = null;
+    if (useRegex) {
+      try {
+        regex = new RegExp(pattern, 'i');
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid regex pattern "${pattern}": ${errorMsg}`);
+      }
+    }
+
     const files = await fg(globPattern, {
       cwd: ctx.workspaceRoot,
       absolute: true,
@@ -61,7 +71,8 @@ export const searchTextTool: Tool = {
         });
 
         if (matches.length > 0) {
-          results.push(`${file}:\n${matches.join('\n')}`);
+          const displayPath = path.relative(ctx.workspaceRoot, file) || path.basename(file);
+          results.push(`${displayPath}:\n${matches.join('\n')}`);
         }
       } catch {
         // Skip files that can't be read (binary, etc.)
