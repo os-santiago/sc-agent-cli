@@ -90,7 +90,7 @@ export function validateMessageSequence(messages: Message[]): void {
   // Rule 5: All tool calls should have responses (warning only, not error)
   if (pendingToolCalls.size > 0) {
     const unresolvedCalls = Array.from(pendingToolCalls.entries())
-      .map(([id, info]) => `${info.name} (index ${info.index})`)
+      .map(([_id, info]) => `${info.name} (index ${info.index})`)
       .join(', ');
 
     // This is a warning, not an error - some models might send incomplete sequences
@@ -145,7 +145,7 @@ export function isMessageSequenceValid(messages: Message[]): boolean {
   try {
     validateMessageSequence(messages);
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }

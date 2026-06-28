@@ -4,7 +4,7 @@ import { OpenAICompatibleProvider } from './provider.js';
 import { loadProjectContext } from './project-context.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
-import { validateMessageSequence, autoCorrectMessageSequence } from './message-validator.js';
+import { autoCorrectMessageSequence } from './message-validator.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files and executing commands.
 
