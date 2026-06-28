@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 
@@ -27,6 +27,15 @@ export async function initProject(cwd: string): Promise<void> {
   const agentsPath = path.join(cwd, 'AGENTS.md');
 
   try {
+    try {
+      await access(agentsPath);
+      console.log(chalk.yellow(`! AGENTS.md already exists at ${agentsPath}`));
+      console.log(chalk.gray('  Rename or remove it before running sc init again'));
+      return;
+    } catch {
+      // File does not exist yet, continue with initialization.
+    }
+
     await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
     console.log(chalk.green(`✓ Created ${agentsPath}`));
     console.log(chalk.gray('  Edit this file to provide context for the agent'));
