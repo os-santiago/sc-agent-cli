@@ -57,6 +57,18 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }
 
+export function getStorageLimitExample(platform = process.platform): string {
+  return platform === 'win32'
+    ? '$env:SC_MAX_STORAGE_GB = "2"'
+    : 'export SC_MAX_STORAGE_GB=2';
+}
+
+export function getStorageCleanupHint(platform = process.platform): string {
+  return platform === 'win32'
+    ? 'Remove old files under $HOME\\.sc-agent'
+    : 'Remove old files under ~/.sc-agent';
+}
+
 export interface StorageInfo {
   currentSize: number;
   maxSize: number;
