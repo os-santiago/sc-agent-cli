@@ -305,7 +305,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           if (!config.permissions) {
             config.permissions = {};
           }
-          (config.permissions as ProjectConfig['permissions']).profile = profileChoice.profile;
+          (config.permissions as {profile?: string}).profile = profileChoice.profile;
 
           fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -461,7 +461,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             if (!config.permissions) {
               config.permissions = {};
             }
-            (config.permissions as ProjectConfig['permissions']).autoApprove = preApprovedTools;
+            (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
 
             // Write config
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));

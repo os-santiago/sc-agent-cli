@@ -4,6 +4,7 @@ import { OpenAICompatibleProvider } from './provider.js';
 import { loadProjectContext } from './project-context.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
+import { validateMessageSequence, autoCorrectMessageSequence } from './message-validator.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files and executing commands.
 
@@ -538,7 +539,7 @@ export class Agent {
   }
 
   async run(userMessage: string, history: Message[] = []): Promise<Message[]> {
-    const messages: Message[] = [...history];
+    let messages: Message[] = [...history];
 
     // Inject system prompt if not already present
     const hasSystemMessage = messages.some((m) => m.role === 'system');
@@ -563,6 +564,16 @@ export class Agent {
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
       iterations++;
+
+      // CRITICAL: Validate message sequence before sending to LLM.
+      // Auto-correct common errors (role:'assistant' → role:'tool').
+      // This prevents cryptic API errors and broken response generation.
+      try {
+        messages = autoCorrectMessageSequence(messages);
+      } catch (error) {
+        console.error(chalk.red('Message sequence validation failed:'), error);
+        throw error;
+      }
 
       const response = await this.provider.chatCompletion(
         {
