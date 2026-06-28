@@ -39,7 +39,7 @@ npm link
    ```bash
    sc config-init
    ```
-3. Edit `~/.sc/config.json` and replace `<YOUR_OPENAI_KEY>` with your actual key
+3. Edit `~/.sc-agent/config.json` and replace `<YOUR_OPENAI_KEY>` with your actual key
 4. Run:
    ```bash
    sc profile use openai
@@ -94,7 +94,7 @@ This is normal! The agent asks for permission before sensitive operations. To au
 sc chat -y  # Auto-approve all (use with caution)
 ```
 
-Or edit `~/.sc/config.json` and add tools to `permissions.autoApprove`.
+Or edit `~/.sc-agent/config.json` and add tools to `permissions.autoApprove`.
 
 ### Connection refused (Ollama)
 
@@ -106,7 +106,7 @@ ollama serve
 
 ### API key errors (OpenAI)
 
-Check that you replaced `<YOUR_OPENAI_KEY>` in `~/.sc/config.json` with your actual API key.
+Check that you replaced `<YOUR_OPENAI_KEY>` in `~/.sc-agent/config.json` with your actual API key.
 
 ## Need Help?
 

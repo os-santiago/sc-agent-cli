@@ -55,11 +55,11 @@ alias sc='node /d/git/sc-cli/bin/sc.js'
 sc config-init
 ```
 
-This creates `~/.sc/config.json` with default profiles (Ollama, OpenAI, Anthropic).
+This creates `~/.sc-agent/config.json` with default profiles (Ollama, OpenAI, Anthropic).
 
 ## Step 5: Configure Your Model
 
-Edit `~/.sc/config.json` or use the CLI to set up your preferred provider:
+Edit `~/.sc-agent/config.json` or use the CLI to set up your preferred provider:
 
 ### Using Ollama (local)
 
@@ -77,7 +77,7 @@ sc profile use ollama
 sc profile use openai
 ```
 
-Then edit `~/.sc/config.json` and replace `<YOUR_OPENAI_KEY>` with your actual API key.
+Then edit `~/.sc-agent/config.json` and replace `<YOUR_OPENAI_KEY>` with your actual API key.
 
 ### Using a custom endpoint
 

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import ignore from 'ignore';
+import { getGlobalConfigPath } from '../core/config.js';
 import type { ProjectConfig } from '../core/types.js';
 
 export function resolveSafePath(
@@ -32,7 +33,7 @@ export function resolveSafePath(
         `Access denied: "${inputPath}" matches a deny pattern.\n` +
         `  Denied patterns: ${denyPatterns.join(', ')}\n\n` +
         `💡 Tip: This file is blocked for security (likely contains secrets).\n` +
-        `   To modify deny patterns, edit: ~/.sc-agent/config.json`
+        `   To modify deny patterns, edit: ${getGlobalConfigPath()}`
       );
     }
   }
