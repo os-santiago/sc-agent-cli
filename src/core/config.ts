@@ -128,9 +128,17 @@ export async function loadConfigFile(
   filePath: string,
   scope: 'global' | 'project'
 ): Promise<Partial<ProjectConfig> | null> {
+  const resolvedPath = resolveConfigFilePath(filePath, scope);
+
   try {
-    const data = await readFile(filePath, 'utf-8');
-    return JSON.parse(data) as Partial<ProjectConfig>;
+    const data = await readFile(resolvedPath, 'utf-8');
+    const parsed = JSON.parse(data) as unknown;
+
+    if (!isPlainObject(parsed)) {
+      throw new SyntaxError('Config file must contain a JSON object');
+    }
+
+    return parsed as Partial<ProjectConfig>;
   } catch (err: unknown) {
     if (isMissingFileError(err)) {
       return null;
@@ -138,10 +146,10 @@ export async function loadConfigFile(
 
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (err instanceof SyntaxError) {
-      throw new Error(`Invalid ${scope} config at ${filePath}: ${errorMsg}`);
+      throw new Error(`Invalid ${scope} config at ${resolvedPath}: ${errorMsg}`);
     }
 
-    throw new Error(`Failed to load ${scope} config at ${filePath}: ${errorMsg}`);
+    throw new Error(`Failed to load ${scope} config at ${resolvedPath}: ${errorMsg}`);
   }
 }
 
@@ -169,4 +177,27 @@ function isMissingFileError(err: unknown): boolean {
     && err !== null
     && 'code' in err
     && err.code === 'ENOENT';
+}
+
+function resolveConfigFilePath(filePath: string, scope: 'global' | 'project'): string {
+  const resolvedPath = path.resolve(filePath);
+
+  if (scope === 'global') {
+    if (resolvedPath !== CONFIG_PATH) {
+      throw new Error(`Invalid global config path: ${resolvedPath}`);
+    }
+    return resolvedPath;
+  }
+
+  if (path.basename(resolvedPath) !== '.sc-agent.json') {
+    throw new Error(`Invalid project config path: ${resolvedPath}`);
+  }
+
+  return resolvedPath;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value);
 }
