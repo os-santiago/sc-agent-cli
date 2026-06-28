@@ -27,7 +27,7 @@ export const runShellTool: Tool = {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const command = args.command as string;
-    const timeout = (args.timeout as number) || 30000;
+    const timeout = parseTimeout(args.timeout);
 
     if (!command) {
       throw new Error('Missing required argument: command');
@@ -49,8 +49,12 @@ export const runShellTool: Tool = {
       const child = spawn(command, [], {
         shell: true,
         cwd: ctx.workspaceRoot,
-        timeout,
       });
+      let timedOut = false;
+      const timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, timeout);
 
       let stdout = '';
       let stderr = '';
@@ -63,18 +67,35 @@ export const runShellTool: Tool = {
         stderr += data.toString();
       });
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
+        clearTimeout(timeoutHandle);
         const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
-        if (code !== 0) {
-          reject(new Error(`Command exited with code ${code}\n${output}`));
+        if (timedOut) {
+          reject(new Error(`Command timed out after ${timeout}ms`));
+        } else if (code !== 0) {
+          const signalInfo = signal ? ` (signal: ${signal})` : '';
+          reject(new Error(`Command exited with code ${code}${signalInfo}\n${output}`));
         } else {
           resolve(output || '(no output)');
         }
       });
 
       child.on('error', (err) => {
+        clearTimeout(timeoutHandle);
         reject(new Error(`Failed to execute command: ${err.message}`));
       });
     });
   },
 };
+
+function parseTimeout(timeoutArg: unknown): number {
+  if (timeoutArg === undefined) {
+    return 30000;
+  }
+
+  if (typeof timeoutArg !== 'number' || !Number.isFinite(timeoutArg) || timeoutArg <= 0) {
+    throw new Error('Invalid timeout: must be a positive number in milliseconds');
+  }
+
+  return Math.floor(timeoutArg);
+}
