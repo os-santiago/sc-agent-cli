@@ -57,6 +57,22 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }
 
+export function getStorageLimitCommand(platform = process.platform): string {
+  return platform === 'win32'
+    ? '$env:SC_MAX_STORAGE_GB="2"'
+    : 'export SC_MAX_STORAGE_GB=2';
+}
+
+export function getStorageGuidanceLines(configDir: string, platform = process.platform): string[] {
+  const limitCommand = getStorageLimitCommand(platform);
+
+  return [
+    `Increase limit: ${limitCommand}`,
+    `Review stored files in: ${configDir}`,
+    'Use /storage for guided cleanup when needed',
+  ];
+}
+
 export interface StorageInfo {
   currentSize: number;
   maxSize: number;
