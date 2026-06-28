@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node bin/sc-agent.js",
+    "start": "node bin/sc.js",
     "clean": "rm -rf dist"
   },
   "keywords": [
