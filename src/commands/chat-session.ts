@@ -238,7 +238,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           agent = new Agent({
             ...options,
             config: currentConfig,
-            autoApprove: false,
+            autoApprove: false, // default behavior with session memory
           });
           console.log(chalk.cyan('\n✓ Permission mode: Ask once per command (recommended)'));
           console.log(chalk.gray('   First use prompts, then auto-approves for session\n'));
