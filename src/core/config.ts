@@ -53,24 +53,20 @@ const DEFAULT_CONFIG: ProjectConfig = {
 };
 
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
-  let config = { ...DEFAULT_CONFIG };
+  let config: ProjectConfig = { ...DEFAULT_CONFIG };
 
   // Load global config
-  try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
-  } catch (err: unknown) {
-    // No global config, use defaults
+  const globalConfig = await loadConfigFile(CONFIG_PATH, 'global');
+  if (globalConfig) {
+    config = deepMerge(config, globalConfig);
   }
 
   // Load project-local config if in a project
   if (projectRoot) {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
-    try {
-      const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
-    } catch (err: unknown) {
-      // No project config
+    const projectConfig = await loadConfigFile(projectConfigPath, 'project');
+    if (projectConfig) {
+      config = deepMerge(config, projectConfig);
     }
   }
 
@@ -128,15 +124,37 @@ export async function initConfig(): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
-function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
-  const result = { ...base };
+export async function loadConfigFile(
+  filePath: string,
+  scope: 'global' | 'project'
+): Promise<Partial<ProjectConfig> | null> {
+  try {
+    const data = await readFile(filePath, 'utf-8');
+    return JSON.parse(data) as Partial<ProjectConfig>;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return null;
+    }
+
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    if (err instanceof SyntaxError) {
+      throw new Error(`Invalid ${scope} config at ${filePath}: ${errorMsg}`);
+    }
+
+    throw new Error(`Failed to load ${scope} config at ${filePath}: ${errorMsg}`);
+  }
+}
+
+function deepMerge<T extends object>(base: T, override: Partial<T>): T {
+  const result = { ...base } as T;
   for (const key in override) {
     const val = override[key];
     if (val !== undefined) {
       if (typeof val === 'object' && !Array.isArray(val) && val !== null) {
+        const current = result[key] as object | undefined;
         result[key] = deepMerge(
-          (result[key] as Record<string, unknown>) || {},
-          val as Record<string, unknown>
+          current ?? {},
+          val as object
         ) as T[Extract<keyof T, string>];
       } else {
         result[key] = val as T[Extract<keyof T, string>];
@@ -144,4 +162,11 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+function isMissingFileError(err: unknown): boolean {
+  return typeof err === 'object'
+    && err !== null
+    && 'code' in err
+    && err.code === 'ENOENT';
 }
