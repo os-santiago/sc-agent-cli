@@ -1,0 +1,190 @@
+name: PR Security Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: always
+
+  code-diff-analysis:
+    name: Analyze Code Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            **/*.ts
+            **/*.js
+            package.json
+            package-lock.json
+
+      - name: Analyze changed files for security risks
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "🔍 Analyzing changed files for security risks..."
+
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            echo "Checking: $file"
+
+            # Check for new external dependencies
+            if [[ "$file" == "package.json" ]] || [[ "$file" == "package-lock.json" ]]; then
+              echo "⚠️  Dependencies modified - review carefully"
+            fi
+
+            # Check for new network calls
+            if grep -E "(fetch|axios|http\.request|https\.request)" "$file"; then
+              echo "⚠️  WARNING: New network call detected in $file"
+              grep -n -E "(fetch|axios|http\.request|https\.request)" "$file"
+            fi
+
+            # Check for new file system operations
+            if grep -E "(fs\.write|fs\.unlink|fs\.rm|child_process\.exec)" "$file"; then
+              echo "⚠️  WARNING: New file system operation detected in $file"
+              grep -n -E "(fs\.write|fs\.unlink|fs\.rm|child_process\.exec)" "$file"
+            fi
+
+            # Check for new environment variable access
+            if grep -E "process\.env\.[A-Z_]+" "$file" | grep -v "process\.env\.NODE_ENV"; then
+              echo "ℹ️  INFO: Environment variable access in $file"
+              grep -n -E "process\.env\.[A-Z_]+" "$file" | grep -v "process\.env\.NODE_ENV"
+            fi
+          done
+
+          echo "✅ Code diff analysis complete"
+
+  permission-changes:
+    name: Check Permission Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for permission-related changes
+        run: |
+          echo "🔍 Checking for permission-related changes..."
+
+          # Check if permissions.ts was modified
+          if git diff origin/main...HEAD --name-only | grep "permissions.ts"; then
+            echo "⚠️  ALERT: Permissions system modified"
+            git diff origin/main...HEAD src/utils/permissions.ts
+
+            # Check if auto-approve was added
+            if git diff origin/main...HEAD src/utils/permissions.ts | grep "+.*autoApprove"; then
+              echo "🚨 CRITICAL: Auto-approve functionality added"
+              exit 1
+            fi
+          fi
+
+          # Check for changes to dangerous commands list
+          if git diff origin/main...HEAD --name-only | grep "dangerous-commands.ts"; then
+            echo "⚠️  ALERT: Dangerous commands list modified"
+            git diff origin/main...HEAD src/utils/dangerous-commands.ts
+          fi
+
+          echo "✅ Permission check complete"
+
+  backdoor-detection:
+    name: Backdoor Pattern Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Advanced backdoor detection
+        run: |
+          echo "🔍 Running advanced backdoor detection..."
+
+          # Check for obfuscated code
+          if grep -r -E "\\\\x[0-9a-f]{2}|\\\\u[0-9a-f]{4}" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Hex/Unicode escapes detected (potential obfuscation)"
+            grep -r -n -E "\\\\x[0-9a-f]{2}|\\\\u[0-9a-f]{4}" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for suspicious setTimeout/setInterval with functions
+          if grep -r -E "set(Timeout|Interval)\s*\(.*function" --include="*.ts" --include="*.js" src/; then
+            echo "ℹ️  INFO: Delayed execution detected - review manually"
+            grep -r -n -E "set(Timeout|Interval)\s*\(.*function" --include="*.ts" --include="*.js" src/
+          fi
+
+          # Check for WebSocket connections (unusual for CLI tool)
+          if grep -r -E "WebSocket|ws://" --include="*.ts" --include="*.js" src/; then
+            echo "🚨 CRITICAL: WebSocket connection detected (unusual for CLI)"
+            grep -r -n -E "WebSocket|ws://" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for child process spawning with user input
+          if grep -r -E "(exec|spawn|fork)\s*\(" --include="*.ts" --include="*.js" src/ | grep -E "(req\.|input|args|argv)"; then
+            echo "⚠️  WARNING: Potential command injection risk"
+            grep -r -n -E "(exec|spawn|fork)\s*\(" --include="*.ts" --include="*.js" src/ | grep -E "(req\.|input|args|argv)"
+          fi
+
+          echo "✅ Backdoor detection complete"
+
+  data-exfiltration-check:
+    name: Data Exfiltration Prevention
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for data exfiltration patterns
+        run: |
+          echo "🔍 Checking for data exfiltration patterns..."
+
+          # Check for file uploads
+          if grep -r -E "(FormData|multipart/form-data|file.*upload)" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: File upload functionality detected"
+            grep -r -n -E "(FormData|multipart/form-data|file.*upload)" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for clipboard access
+          if grep -r -E "(clipboard|navigator\.clipboard)" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Clipboard access detected"
+            grep -r -n -E "(clipboard|navigator\.clipboard)" --include="*.ts" --include="*.js" src/
+            exit 1
+          fi
+
+          # Check for screenshot/screen capture
+          if grep -r -E "(screenshot|capture|screen)" --include="*.ts" --include="*.js" src/; then
+            echo "⚠️  WARNING: Screen capture related code detected"
+            grep -r -n -E "(screenshot|capture|screen)" --include="*.ts" --include="*.js" src/
+          fi
+
+          # Check for system information gathering
+          if grep -r -E "(os\.userInfo|os\.hostname|os\.networkInterfaces)" --include="*.ts" --include="*.js" src/; then
+            echo "ℹ️  INFO: System information gathering detected - review context"
+            grep -r -n -E "(os\.userInfo|os\.hostname|os\.networkInterfaces)" --include="*.ts" --include="*.js" src/
+          fi
+
+          echo "✅ Data exfiltration check complete"
