@@ -36,7 +36,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
   let currentConfig = options.config;
-  let inputHistory: string[] = [];
+  const inputHistory: string[] = [];
   let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
 
   // Check storage limit on startup
@@ -102,7 +102,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // Process the prompt
     console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
-    const response = await agent.run(userInput, history);
+    await agent.run(userInput, history);
     console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
 
     // Exit after processing
