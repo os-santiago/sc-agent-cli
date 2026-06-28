@@ -1,29 +1,42 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import test from 'node:test';
 import { initProject } from './init-command.js';
 
-test('initProject preserves an existing AGENTS.md file', async () => {
-  const cwd = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
-  const agentsPath = path.join(cwd, 'AGENTS.md');
-  const existingContent = '# Existing instructions\n';
-  await writeFile(agentsPath, existingContent, 'utf-8');
+test('initProject creates AGENTS.md when missing', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
 
-  const logs: string[] = [];
-  const originalLog = console.log;
-  console.log = (...args: unknown[]) => {
-    logs.push(args.map(String).join(' '));
-  };
+  await initProject(workspace);
 
-  try {
-    await initProject(cwd);
-  } finally {
-    console.log = originalLog;
-  }
+  const agentsPath = path.join(workspace, 'AGENTS.md');
+  const content = await readFile(agentsPath, 'utf-8');
+  assert.match(content, /# Agent Instructions/);
+});
 
-  const finalContent = await readFile(agentsPath, 'utf-8');
-  assert.equal(finalContent, existingContent);
-  assert.ok(logs.some((line) => line.includes('AGENTS.md already exists')));
+test('initProject preserves existing AGENTS.md when overwrite is denied', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
+  const agentsPath = path.join(workspace, 'AGENTS.md');
+
+  await writeFile(agentsPath, 'existing instructions', 'utf-8');
+
+  await initProject(workspace, {
+    confirmOverwrite: async () => false,
+  });
+
+  const content = await readFile(agentsPath, 'utf-8');
+  assert.equal(content, 'existing instructions');
+});
+
+test('initProject overwrites existing AGENTS.md when force is enabled', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
+  const agentsPath = path.join(workspace, 'AGENTS.md');
+
+  await writeFile(agentsPath, 'existing instructions', 'utf-8');
+
+  await initProject(workspace, { force: true });
+
+  const content = await readFile(agentsPath, 'utf-8');
+  assert.match(content, /# Agent Instructions/);
 });
