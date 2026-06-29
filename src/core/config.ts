@@ -1,7 +1,7 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
+import type { ProjectConfig } from './types.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -52,6 +52,61 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
+function formatMissingFieldError(field: 'model.baseUrl' | 'model.model'): Error {
+  return new Error(
+    [
+      `Missing required config field: ${field}.`,
+      `Run "sc config-init" to create a default config, or update ${CONFIG_PATH} manually.`,
+    ].join(' ')
+  );
+}
+
+function getProviderApiKeyEnvVar(baseUrl: string): string | undefined {
+  if (baseUrl.includes('api.openai.com')) {
+    return 'OPENAI_API_KEY';
+  }
+
+  if (baseUrl.includes('api.anthropic.com')) {
+    return 'ANTHROPIC_API_KEY';
+  }
+
+  if (baseUrl.includes('integrate.api.nvidia.com')) {
+    return 'NVIDIA_API_KEY';
+  }
+
+  return undefined;
+}
+
+function formatMissingApiKeyError(config: ProjectConfig): Error {
+  const providerName = config.activeProfile || config.model.baseUrl;
+  const envVar = getProviderApiKeyEnvVar(config.model.baseUrl);
+  const envVarGuidance = envVar
+    ? `Set ${envVar} (or SC_API_KEY),`
+    : 'Set SC_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or NVIDIA_API_KEY,';
+
+  return new Error(
+    [
+      `Missing API key for "${providerName}".`,
+      envVarGuidance,
+      `or add model.apiKey to ${CONFIG_PATH}.`,
+    ].join(' ')
+  );
+}
+
+function validateConfig(config: ProjectConfig): void {
+  if (!config.model.baseUrl) {
+    throw formatMissingFieldError('model.baseUrl');
+  }
+
+  if (!config.model.model) {
+    throw formatMissingFieldError('model.model');
+  }
+
+  if (getProviderApiKeyEnvVar(config.model.baseUrl) && !config.model.apiKey) {
+    throw formatMissingApiKeyError(config);
+  }
+}
+
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
@@ -61,6 +116,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config = deepMerge(config, JSON.parse(data));
   } catch (err: unknown) {
     // No global config, use defaults
+     
+    const _err = err;
   }
 
   // Load project-local config if in a project
@@ -71,6 +128,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
       config = deepMerge(config, JSON.parse(data));
     } catch (err: unknown) {
       // No project config
+       
+      const _err = err;
     }
   }
 
@@ -96,16 +155,7 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model.apiKey = envApiKey;
   }
 
-  // Validate required fields
-  if (!config.model.baseUrl) {
-    throw new Error('Missing model.baseUrl in config');
-  }
-  if (!config.model.model) {
-    throw new Error('Missing model.model in config');
-  }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
-    throw new Error('OpenAI API requires apiKey in config');
-  }
+  validateConfig(config);
 
   return config;
 }
@@ -124,7 +174,20 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  if (!force) {
+    try {
+      await access(CONFIG_PATH);
+      throw new Error(
+        `Config already exists at ${CONFIG_PATH}. Use "sc config-init --force" to overwrite it.`
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('Config already exists at ')) {
+        throw err;
+      }
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
