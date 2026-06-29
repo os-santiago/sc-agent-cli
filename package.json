@@ -11,7 +11,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node bin/sc.js",
-    "clean": "rm -rf dist"
+    "clean": "node scripts/clean-dist.js"
   },
   "keywords": [
     "agent",
