@@ -18,6 +18,15 @@ export interface ChatCompletionResponse {
   tool_calls?: ToolCall[];
 }
 
+interface ProviderResponsePayload {
+  choices?: Array<{
+    message?: {
+      content?: string;
+      tool_calls?: ToolCall[];
+    };
+  }>;
+}
+
 export class OpenAICompatibleProvider {
   constructor(private config: ModelConfig) {}
 
@@ -62,16 +71,30 @@ export class OpenAICompatibleProvider {
   }
 
   private async handleNonStreamResponse(response: Response): Promise<ChatCompletionResponse> {
-    const data = await response.json();
+    const data = await this.parseJsonResponse(response);
     const choice = data.choices?.[0];
     if (!choice) {
-      throw new Error('No choices in response');
+      throw new Error(
+        `Provider returned no completion choices. Check that ${this.config.baseUrl} ` +
+        'supports the OpenAI-compatible /chat/completions format and that the selected model can answer this request.'
+      );
     }
 
     return {
       content: choice.message?.content || '',
       tool_calls: choice.message?.tool_calls,
     };
+  }
+
+  private async parseJsonResponse(response: Response): Promise<ProviderResponsePayload> {
+    try {
+      return await response.json() as ProviderResponsePayload;
+    } catch {
+      throw new Error(
+        `Provider returned invalid JSON from ${this.config.baseUrl}/chat/completions. ` +
+        'Check whether the configured endpoint is OpenAI-compatible.'
+      );
+    }
   }
 
   private async handleStreamResponse(
