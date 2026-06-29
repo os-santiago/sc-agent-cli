@@ -3,6 +3,11 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+function normalizeProfileName(name?: string): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -29,8 +34,20 @@ export async function addProfile(name?: string): Promise<void> {
     name = response.name;
   }
 
+  name = normalizeProfileName(name);
+
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    console.log(chalk.red('Profile name cannot be empty'));
+    return;
+  }
+
+  if (config.profiles?.[name]) {
+    console.log(
+      chalk.red(
+        `Profile "${name}" already exists. Use "sc profile use ${name}" to switch to it or ` +
+        `"sc profile remove ${name}" before re-adding it.`
+      )
+    );
     return;
   }
 
