@@ -13,6 +13,14 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
 
+export function getModelProfileEmptyStateGuidance(commandName = 'sc'): string[] {
+  return [
+    'No model profiles available.',
+    `Run \`${commandName} profile add <name>\` to create one.`,
+    `Run \`${commandName} config-init\` to restore the default profiles.`,
+  ];
+}
+
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve) => {
@@ -614,7 +622,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         const profileNames = Object.keys(profiles);
 
         if (profileNames.length === 0) {
-          console.log(chalk.yellow('\nNo profiles available\n'));
+          const [headline, ...nextSteps] = getModelProfileEmptyStateGuidance();
+          console.log(chalk.yellow(`\n${headline}`));
+          nextSteps.forEach((line) => {
+            console.log(chalk.gray(`  ${line}`));
+          });
+          console.log();
           continue;
         }
 
