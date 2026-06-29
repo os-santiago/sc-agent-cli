@@ -45,6 +45,16 @@ program
 const profileCommand = program.command('profile').description('Manage model profiles');
 
 profileCommand
+  .addHelpText('after', `
+Examples:
+  $ sc profile list
+  $ sc profile use openai
+`)
+  .action(() => {
+    profileCommand.outputHelp();
+  });
+
+profileCommand
   .command('list')
   .description('List all available profiles')
   .action(listProfiles);
