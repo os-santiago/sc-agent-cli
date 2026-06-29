@@ -69,7 +69,13 @@ program
   .command('init')
   .description('Initialize a new project with AGENTS.md')
   .action(async () => {
-    await initProject(process.cwd());
+    try {
+      await initProject(process.cwd());
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Error: ${errorMsg}`));
+      process.exit(1);
+    }
   });
 
 // Config init
