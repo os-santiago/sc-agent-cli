@@ -2,6 +2,30 @@ import { readFile } from 'node:fs/promises';
 import type { Tool, ToolContext } from './tool.js';
 import { resolveSafePath } from '../utils/path-security.js';
 
+function formatReadFileError(filePath: string, error: unknown): Error {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = String((error as { code?: unknown }).code);
+
+    if (code === 'ENOENT') {
+      return new Error(
+        `File not found: ${filePath}. Check the path and use list_dir to inspect nearby files.`
+      );
+    }
+
+    if (code === 'EISDIR') {
+      return new Error(
+        `Cannot read ${filePath} because it is a directory. Use list_dir to inspect its contents.`
+      );
+    }
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(String(error));
+}
+
 export const readFileTool: Tool = {
   definition: {
     type: 'function',
@@ -28,7 +52,11 @@ export const readFileTool: Tool = {
     }
 
     const safePath = resolveSafePath(filePath, ctx.workspaceRoot, ctx.config);
-    const content = await readFile(safePath, 'utf-8');
-    return content;
+    try {
+      const content = await readFile(safePath, 'utf-8');
+      return content;
+    } catch (error: unknown) {
+      throw formatReadFileError(filePath, error);
+    }
   },
 };
