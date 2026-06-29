@@ -58,7 +58,11 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   // Load global config
   try {
     const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
+    const globalConfig = JSON.parse(data) as Partial<ProjectConfig>;
+    config = deepMerge(config, globalConfig) as unknown as ProjectConfig;
+    if (hasExplicitEmptyProfiles(globalConfig)) {
+      config.profiles = {};
+    }
   } catch (err: unknown) {
     // No global config, use defaults
      
@@ -70,7 +74,11 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
     try {
       const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
+      const projectConfig = JSON.parse(data) as Partial<ProjectConfig>;
+      config = deepMerge(config, projectConfig) as unknown as ProjectConfig;
+      if (hasExplicitEmptyProfiles(projectConfig)) {
+        config.profiles = {};
+      }
     } catch (err: unknown) {
       // No project config
        
@@ -161,4 +169,8 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+function hasExplicitEmptyProfiles(config: Partial<ProjectConfig>): boolean {
+  return 'profiles' in config && config.profiles !== null && Object.keys(config.profiles || {}).length === 0;
 }
