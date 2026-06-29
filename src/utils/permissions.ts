@@ -13,15 +13,41 @@ export interface PermissionContext {
   autoApprove?: boolean; // Override from CLI flag
 }
 
+interface PermissionDependencies {
+  prompt?: (
+    questions: Parameters<typeof prompts>[0],
+    options?: Parameters<typeof prompts>[1]
+  ) => ReturnType<typeof prompts>;
+}
+
 // Track session-level permissions (reset when process ends)
 const sessionAutoApprove = new Set<string>();
+const shownPermissionTips = new Set<string>();
 
 // Clear session permissions (used when switching to "always ask" mode)
 export function clearSessionPermissions(): void {
   sessionAutoApprove.clear();
+  shownPermissionTips.clear();
 }
 
-export async function requestPermission(ctx: PermissionContext): Promise<boolean> {
+export function getPermissionTip(toolName: string): string | undefined {
+  switch (toolName) {
+    case 'run_shell':
+      return 'Need fewer prompts? Start with "sc chat -y" to auto-approve tools for this run.';
+    case 'write_file':
+    case 'edit_file':
+      return 'Choose "Always" to add this tool to permissions.autoApprove in your config.';
+    default:
+      return undefined;
+  }
+}
+
+export async function requestPermission(
+  ctx: PermissionContext,
+  deps: PermissionDependencies = {}
+): Promise<boolean> {
+  const prompt = deps.prompt ?? prompts;
+
   // Auto-approve if explicitly set in context
   if (ctx.autoApprove) return true;
 
@@ -51,7 +77,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
 
     console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
 
-    const response = await prompts({
+    const response = await prompt({
       type: 'confirm',
       name: 'approved',
       message: chalk.red('This command is potentially dangerous. Allow anyway?'),
@@ -84,7 +110,13 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   console.log(chalk.gray(`  │    Args: ${JSON.stringify(ctx.args)}`));
   console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
 
-  const response = await prompts({
+  const tip = getPermissionTip(ctx.toolName);
+  if (tip && !shownPermissionTips.has(ctx.toolName)) {
+    shownPermissionTips.add(ctx.toolName);
+    console.log(chalk.gray(`\n   ${chalk.cyan('💡')} ${tip}`));
+  }
+
+  const response = await prompt({
     type: 'select',
     name: 'choice',
     message: 'Allow this action?',
