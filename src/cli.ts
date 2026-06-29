@@ -12,6 +12,15 @@ const { version: packageVersion } = require('../package.json') as { version: str
 
 const program = new Command();
 
+function showConfigInitSuccess(configPath: string): void {
+  console.log(chalk.green(`✓ Config initialized at ${configPath}`));
+  console.log(chalk.cyan('\nNext steps:'));
+  console.log(chalk.gray(`  1. Review the generated profiles in ${configPath}`));
+  console.log(chalk.gray('  2. Replace any <YOUR_*_KEY> placeholders for hosted providers'));
+  console.log(chalk.gray('  3. Run "sc profile use <name>" to switch providers if needed'));
+  console.log(chalk.gray('  4. Start a session with "sc chat"\n'));
+}
+
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
@@ -79,7 +88,7 @@ program
   .action(async () => {
     try {
       await initConfig();
-      console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
+      showConfigInitSuccess(getGlobalConfigPath());
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Error: ${errorMsg}`));
