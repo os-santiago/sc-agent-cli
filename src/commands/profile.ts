@@ -136,7 +136,7 @@ export async function removeProfile(name?: string): Promise<void> {
   delete config.profiles[name];
 
   if (config.activeProfile === name) {
-    config.activeProfile = undefined;
+    config.activeProfile = null;
   }
 
   await saveConfig(config, true);

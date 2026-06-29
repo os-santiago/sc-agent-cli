@@ -84,6 +84,10 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model = { ...config.model, ...profile };
   }
 
+  if (config.activeProfile === null) {
+    config.activeProfile = undefined;
+  }
+
   // Replace placeholder API keys with undefined (for local models)
   if (config.model.apiKey?.startsWith('<YOUR_')) {
     config.model.apiKey = undefined;
@@ -150,6 +154,11 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
   for (const key in override) {
     const val = override[key];
     if (val !== undefined) {
+      if (key === 'profiles' && typeof val === 'object' && !Array.isArray(val) && val !== null) {
+        result[key] = { ...(val as Record<string, unknown>) } as T[Extract<keyof T, string>];
+        continue;
+      }
+
       if (typeof val === 'object' && !Array.isArray(val) && val !== null) {
         result[key] = deepMerge(
           (result[key] as Record<string, unknown>) || {},
