@@ -597,8 +597,10 @@ export class Agent {
           if (!tool) {
             console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
+            // CRITICAL: Tool error responses use role:'tool', not 'assistant'
+            // DO NOT CHANGE - see CRITICAL-FIXES.md
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: `Error: Unknown tool ${toolName}`,
               tool_call_id: toolCall.id,
               name: toolName,
