@@ -4,6 +4,7 @@ import { OpenAICompatibleProvider } from './provider.js';
 import { loadProjectContext } from './project-context.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
+import { autoCorrectMessageSequence } from './message-validator.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files and executing commands.
 
@@ -538,7 +539,7 @@ export class Agent {
   }
 
   async run(userMessage: string, history: Message[] = []): Promise<Message[]> {
-    const messages: Message[] = [...history];
+    let messages: Message[] = [...history];
 
     // Inject system prompt if not already present
     const hasSystemMessage = messages.some((m) => m.role === 'system');
@@ -563,6 +564,16 @@ export class Agent {
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
       iterations++;
+
+      // CRITICAL: Validate message sequence before sending to LLM.
+      // Auto-correct common errors (role:'assistant' → role:'tool').
+      // This prevents cryptic API errors and broken response generation.
+      try {
+        messages = autoCorrectMessageSequence(messages);
+      } catch (error) {
+        console.error(chalk.red('Message sequence validation failed:'), error);
+        throw error;
+      }
 
       const response = await this.provider.chatCompletion(
         {
@@ -597,8 +608,10 @@ export class Agent {
           if (!tool) {
             console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
+            // CRITICAL: Tool error responses use role:'tool', not 'assistant'
+            // DO NOT CHANGE - see CRITICAL-FIXES.md
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: `Error: Unknown tool ${toolName}`,
               tool_call_id: toolCall.id,
               name: toolName,
@@ -625,8 +638,10 @@ export class Agent {
 
             toolsUsed.push({name: toolName, success: true, args});
 
+            // CRITICAL: Tool results use role:'tool', not 'assistant'
+            // DO NOT CHANGE - see CRITICAL-FIXES.md
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: result,
               tool_call_id: toolCall.id,
               name: toolName,
@@ -635,8 +650,10 @@ export class Agent {
             const errorMsg = err instanceof Error ? err.message : String(err);
             console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
             toolsUsed.push({name: toolName, success: false, error: errorMsg, args: JSON.parse(toolCall.function.arguments)});
+            // CRITICAL: Tool error responses use role:'tool', not 'assistant'
+            // DO NOT CHANGE - see CRITICAL-FIXES.md
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: `Error: ${errorMsg}`,
               tool_call_id: toolCall.id,
               name: toolName,
@@ -657,6 +674,21 @@ export class Agent {
           }
         }
         console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+
+        // CRITICAL: Check if the model only responded with tool calls and no text
+        // Some models (NVIDIA Nemotron, older Llama) don't auto-generate synthesis
+        // Force a continuation prompt to get a visible response for the user
+        const hasToolCallsWithoutContent =
+          response.tool_calls &&
+          response.tool_calls.length > 0 &&
+          (!response.content || response.content.trim() === '');
+
+        if (hasToolCallsWithoutContent) {
+          messages.push({
+            role: 'user',
+            content: 'Please provide a text summary of the tool results above. DO NOT call more tools.',
+          });
+        }
       } else {
         // No tool calls, finish the loop
         continueLoop = false;

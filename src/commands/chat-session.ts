@@ -10,8 +10,10 @@ import type { Message } from '../core/types.js';
 import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
+import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { getPermissionModeChoices, getPermissionModeInitial, type PermissionMode } from '../utils/permission-mode.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -36,8 +38,8 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
   let currentConfig = options.config;
-  let inputHistory: string[] = [];
-  let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
+  const inputHistory: string[] = [];
+  let currentPermissionMode: PermissionMode = options.autoApprove ? 'unlimited' : 'ask_once';
 
   // Check storage limit on startup
   const configDir = join(homedir(), '.sc-agent');
@@ -102,7 +104,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // Process the prompt
     console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
-    const response = await agent.run(userInput, history);
+    await agent.run(userInput, history);
     console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
 
     // Exit after processing
@@ -185,24 +187,8 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           type: 'select',
           name: 'mode',
           message: 'Select permission mode:',
-          choices: [
-            {
-              title: 'Ask once per command (recommended)',
-              value: 'ask_once',
-              description: 'Prompt once per unique tool, then auto-approve for session'
-            },
-            {
-              title: 'Always ask (safer)',
-              value: 'always_ask',
-              description: 'Prompt every time a tool is used'
-            },
-            {
-              title: 'Unlimited (dangerous)',
-              value: 'unlimited',
-              description: 'Auto-approve all tools without asking'
-            },
-          ],
-          initial: 0,
+          choices: getPermissionModeChoices(currentPermissionMode),
+          initial: getPermissionModeInitial(currentPermissionMode),
         });
 
         if (!permissionMode.mode) {
@@ -211,7 +197,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         }
 
         // Update agent with new permission mode
-        const selectedMode = permissionMode.mode as 'ask_once' | 'always_ask' | 'unlimited';
+        const selectedMode = permissionMode.mode as PermissionMode;
         currentPermissionMode = selectedMode;
 
         if (selectedMode === 'unlimited') {
@@ -295,7 +281,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             fs.mkdirSync(configDir, { recursive: true });
           }
 
-          let config: any = {};
+          let config: Record<string, unknown> = {};
           if (fs.existsSync(configPath)) {
             const configContent = fs.readFileSync(configPath, 'utf-8');
             config = JSON.parse(configContent);
@@ -304,7 +290,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           if (!config.permissions) {
             config.permissions = {};
           }
-          config.permissions.profile = profileChoice.profile;
+          (config.permissions as {profile?: string}).profile = profileChoice.profile;
 
           fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -450,7 +436,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             }
 
             // Read existing config or create new
-            let config: any = {};
+            let config: Record<string, unknown> = {};
             if (fs.existsSync(configPath)) {
               const configContent = fs.readFileSync(configPath, 'utf-8');
               config = JSON.parse(configContent);
@@ -460,7 +446,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             if (!config.permissions) {
               config.permissions = {};
             }
-            config.permissions.autoApprove = preApprovedTools;
+            (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
 
             // Write config
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -526,9 +512,10 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           }
         } else if (info.usagePercent > 80) {
           console.log(chalk.yellow('💡 Tips:\n'));
-          console.log(chalk.gray('  • Increase limit: export SC_MAX_STORAGE_GB=2'));
-          console.log(chalk.gray('  • Clean manually: rm -rf ~/.sc-agent/old-files'));
-          console.log(chalk.gray('  • Auto-cleanup runs when limit is exceeded\n'));
+          for (const tip of getStorageGuidance()) {
+            console.log(chalk.gray(tip));
+          }
+          console.log();
         } else {
           console.log(chalk.green('✓ Storage usage is healthy\n'));
         }
@@ -590,7 +577,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
       // Show permission profile
       const permProfile = currentConfig.permissions?.profile || 'traditional';
-      console.log(chalk.white('  Profile:     ') + (
+      console.log(chalk.white('  Perm Profile:') + (
         permProfile === 'blacklist' ? chalk.cyan('Blacklist (smart)') :
         chalk.gray('Traditional')
       ));
