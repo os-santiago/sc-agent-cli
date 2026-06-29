@@ -25,13 +25,7 @@ This file provides context to the SC-Agent when working in this project.
 
 export async function initProject(cwd: string): Promise<void> {
   const agentsPath = path.join(cwd, 'AGENTS.md');
-
-  try {
-    await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
-    console.log(chalk.green(`✓ Created ${agentsPath}`));
-    console.log(chalk.gray('  Edit this file to provide context for the agent'));
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.log(chalk.red(`✗ Failed to create AGENTS.md: ${errorMsg}`));
-  }
+  await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
+  console.log(chalk.green(`✓ Created ${agentsPath}`));
+  console.log(chalk.gray('  Edit this file to provide context for the agent'));
 }
