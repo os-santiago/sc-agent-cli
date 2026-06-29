@@ -4,7 +4,7 @@ import type { ProjectConfig } from '../core/types.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { isDangerousCommand, formatDangerousWarning, getHighestSeverity } from './dangerous-commands.js';
+import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
 
 export interface PermissionContext {
   toolName: string;
@@ -116,20 +116,24 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       }
 
       // Read or create config
-      let configContent: any = {};
+      let configContent: Record<string, unknown> = {};
       if (existsSync(configPath)) {
         const fileContent = readFileSync(configPath, 'utf-8');
         configContent = JSON.parse(fileContent);
       }
 
-      if (!configContent.permissions) {
-        configContent.permissions = {};
+      interface PermissionsConfig {
+        autoApprove?: string[];
+        profile?: 'traditional' | 'blacklist';
+        denyPaths?: string[];
       }
-      if (!configContent.permissions.autoApprove) {
-        configContent.permissions.autoApprove = [];
+      const permissions = (configContent.permissions as PermissionsConfig) || {};
+      if (!permissions.autoApprove) {
+        permissions.autoApprove = [];
       }
-      if (!configContent.permissions.autoApprove.includes(ctx.toolName)) {
-        configContent.permissions.autoApprove.push(ctx.toolName);
+      if (!permissions.autoApprove.includes(ctx.toolName)) {
+        permissions.autoApprove.push(ctx.toolName);
+        configContent.permissions = permissions;
         writeFileSync(configPath, JSON.stringify(configContent, null, 2));
         console.log(chalk.gray(`\n   ✓ Added "${ctx.toolName}" to auto-approve list\n`));
       }
