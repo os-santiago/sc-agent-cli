@@ -3,12 +3,35 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type MissingProfileHelp = {
+  suggestion?: string;
+  availableProfiles: string[];
+};
+
+export function describeMissingProfile(name: string, profiles: string[]): MissingProfileHelp {
+  const availableProfiles = [...profiles].sort((left, right) => left.localeCompare(right));
+  const suggestion = findClosestProfileName(name, availableProfiles);
+
+  return {
+    suggestion,
+    availableProfiles,
+  };
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
+  const profileNames = Object.keys(profiles).sort((left, right) => left.localeCompare(right));
+
+  if (profileNames.length === 0) {
+    console.log(chalk.yellow('\nNo profiles configured yet.'));
+    console.log(chalk.gray('Run "sc config-init" to install defaults or "sc profile add <name>" to add one.\n'));
+    return;
+  }
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
-  for (const [name, profile] of Object.entries(profiles)) {
+  for (const name of profileNames) {
+    const profile = profiles[name];
     const active = name === config.activeProfile ? chalk.green(' (active)') : '';
     console.log(chalk.cyan(`  ${name}${active}`));
     console.log(chalk.gray(`    Model: ${profile.model || config.model.model}`));
@@ -76,7 +99,8 @@ export async function useProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.yellow('No profiles configured yet.'));
+      console.log(chalk.gray('Run "sc config-init" to install defaults or "sc profile add <name>" to add one.'));
       return;
     }
 
@@ -95,7 +119,12 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    const help = describeMissingProfile(name, Object.keys(config.profiles || {}));
+    console.log(chalk.red(`Profile "${name}" not found.`));
+    if (help.suggestion) {
+      console.log(chalk.gray(`Did you mean "${help.suggestion}"?`));
+    }
+    console.log(chalk.gray(`Available profiles: ${help.availableProfiles.join(', ')}`));
     return;
   }
 
@@ -110,7 +139,8 @@ export async function removeProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.yellow('No profiles configured yet.'));
+      console.log(chalk.gray('Run "sc config-init" to install defaults or "sc profile add <name>" to add one.'));
       return;
     }
 
@@ -129,7 +159,12 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    const help = describeMissingProfile(name, Object.keys(config.profiles || {}));
+    console.log(chalk.red(`Profile "${name}" not found.`));
+    if (help.suggestion) {
+      console.log(chalk.gray(`Did you mean "${help.suggestion}"?`));
+    }
+    console.log(chalk.gray(`Available profiles: ${help.availableProfiles.join(', ')}`));
     return;
   }
 
@@ -141,4 +176,52 @@ export async function removeProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
+}
+
+function findClosestProfileName(input: string, profiles: string[]): string | undefined {
+  const normalizedInput = input.trim().toLowerCase();
+  if (!normalizedInput) {
+    return undefined;
+  }
+
+  const exactPrefixMatch = profiles.find((profile) => profile.toLowerCase().startsWith(normalizedInput));
+  if (exactPrefixMatch) {
+    return exactPrefixMatch;
+  }
+
+  let bestMatch: string | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const profile of profiles) {
+    const distance = levenshteinDistance(normalizedInput, profile.toLowerCase());
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMatch = profile;
+    }
+  }
+
+  const maxDistance = Math.max(2, Math.floor(normalizedInput.length / 3));
+  return bestDistance <= maxDistance ? bestMatch : undefined;
+}
+
+function levenshteinDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = previous[0];
+    previous[0] = row;
+
+    for (let column = 1; column <= right.length; column += 1) {
+      const temp = previous[column];
+      const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + substitutionCost
+      );
+      diagonal = temp;
+    }
+  }
+
+  return previous[right.length];
 }
