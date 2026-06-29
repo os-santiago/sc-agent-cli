@@ -3,6 +3,10 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+function showCancelled(): void {
+  console.log(chalk.gray('\nCancelled\n'));
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -21,11 +25,23 @@ export async function addProfile(name?: string): Promise<void> {
   const config = await loadConfig();
 
   if (!name) {
+    let cancelled = false;
     const response = await prompts({
       type: 'text',
       name: 'name',
       message: 'Profile name:',
+    }, {
+      onCancel: () => {
+        cancelled = true;
+        return false;
+      },
     });
+
+    if (cancelled) {
+      showCancelled();
+      return;
+    }
+
     name = response.name;
   }
 
@@ -34,6 +50,7 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
+  let cancelled = false;
   const response = await prompts([
     {
       type: 'text',
@@ -52,7 +69,17 @@ export async function addProfile(name?: string): Promise<void> {
       name: 'apiKey',
       message: 'API Key (leave empty for local models):',
     },
-  ]);
+  ], {
+    onCancel: () => {
+      cancelled = true;
+      return false;
+    },
+  });
+
+  if (cancelled) {
+    showCancelled();
+    return;
+  }
 
   const profile: Partial<ModelConfig> = {
     baseUrl: response.baseUrl,
