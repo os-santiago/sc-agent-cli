@@ -86,6 +86,10 @@ export async function useProfile(name?: string): Promise<void> {
       message: 'Select a profile:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+    if (!response.profile) {
+      console.log(chalk.gray('Cancelled'));
+      return;
+    }
     name = response.profile;
   }
 
@@ -120,6 +124,10 @@ export async function removeProfile(name?: string): Promise<void> {
       message: 'Select a profile to remove:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+    if (!response.profile) {
+      console.log(chalk.gray('Cancelled'));
+      return;
+    }
     name = response.profile;
   }
 
