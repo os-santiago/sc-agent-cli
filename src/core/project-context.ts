@@ -11,6 +11,8 @@ export async function loadProjectContext(workspaceRoot: string): Promise<string 
       return content;
     } catch (err: unknown) {
       // Try next file
+       
+      const _err = err;
     }
   }
   return null;
