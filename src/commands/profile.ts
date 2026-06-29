@@ -3,6 +3,13 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+export function getExistingProfileMessage(name: string): string {
+  return [
+    `Profile "${name}" already exists.`,
+    `Use "sc profile use ${name}" to switch to it, or "sc profile remove ${name}" to replace it.`,
+  ].join('\n');
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -31,6 +38,11 @@ export async function addProfile(name?: string): Promise<void> {
 
   if (!name) {
     console.log(chalk.red('Profile name is required'));
+    return;
+  }
+
+  if (config.profiles?.[name]) {
+    console.log(chalk.yellow(getExistingProfileMessage(name)));
     return;
   }
 
