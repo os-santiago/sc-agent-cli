@@ -52,7 +52,13 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
-export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
+type LoadConfigOptions = {
+  applyActiveProfile?: boolean;
+  applyEnvironmentOverrides?: boolean;
+  validateModel?: boolean;
+};
+
+async function loadConfigLayers(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
@@ -78,14 +84,29 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     }
   }
 
+  return config;
+}
+
+export async function loadConfig(
+  projectRoot?: string,
+  options: LoadConfigOptions = {}
+): Promise<ProjectConfig> {
+  const {
+    applyActiveProfile = true,
+    applyEnvironmentOverrides = true,
+    validateModel = true,
+  } = options;
+
+  const config = await loadConfigLayers(projectRoot);
+
   // Apply active profile if set
-  if (config.activeProfile && config.profiles?.[config.activeProfile]) {
+  if (applyActiveProfile && config.activeProfile && config.profiles?.[config.activeProfile]) {
     const profile = config.profiles[config.activeProfile];
     config.model = { ...config.model, ...profile };
   }
 
   // Replace placeholder API keys with undefined (for local models)
-  if (config.model.apiKey?.startsWith('<YOUR_')) {
+  if (applyEnvironmentOverrides && config.model.apiKey?.startsWith('<YOUR_')) {
     config.model.apiKey = undefined;
   }
 
@@ -96,22 +117,30 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     || process.env.ANTHROPIC_API_KEY
     || process.env.NVIDIA_API_KEY;
 
-  if (envApiKey) {
+  if (applyEnvironmentOverrides && envApiKey) {
     config.model.apiKey = envApiKey;
   }
 
   // Validate required fields
-  if (!config.model.baseUrl) {
+  if (validateModel && !config.model.baseUrl) {
     throw new Error('Missing model.baseUrl in config');
   }
-  if (!config.model.model) {
+  if (validateModel && !config.model.model) {
     throw new Error('Missing model.model in config');
   }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
+  if (validateModel && config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
     throw new Error('OpenAI API requires apiKey in config');
   }
 
   return config;
+}
+
+export async function loadRawConfig(projectRoot?: string): Promise<ProjectConfig> {
+  return loadConfig(projectRoot, {
+    applyActiveProfile: false,
+    applyEnvironmentOverrides: false,
+    validateModel: false,
+  });
 }
 
 export function getGlobalConfigPath(): string {
