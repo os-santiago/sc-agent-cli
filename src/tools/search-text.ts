@@ -63,7 +63,7 @@ export const searchTextTool: Tool = {
         if (matches.length > 0) {
           results.push(`${file}:\n${matches.join('\n')}`);
         }
-      } catch (err: unknown) {
+      } catch {
         // Skip files that can't be read (binary, etc.)
       }
     }
