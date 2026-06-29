@@ -71,8 +71,8 @@ test('requestPermission explains how file-write approvals can persist', async ()
       }
     );
 
-    assert.match(output.join('\n'), /permissions\.autoApprove/);
     assert.match(output.join('\n'), /Choose "Always"/);
+    assert.match(output.join('\n'), /future sessions/);
   } finally {
     console.log = originalLog;
     clearSessionPermissions();

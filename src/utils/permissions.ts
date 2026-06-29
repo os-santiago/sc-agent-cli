@@ -36,7 +36,7 @@ export function getPermissionTip(toolName: string): string | undefined {
       return 'Need fewer prompts? Start with "sc chat -y" to auto-approve tools for this run.';
     case 'write_file':
     case 'edit_file':
-      return 'Choose "Always" to add this tool to permissions.autoApprove in your config.';
+      return 'Choose "Always" to save this tool in your config for future sessions.';
     default:
       return undefined;
   }
