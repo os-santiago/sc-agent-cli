@@ -50,7 +50,7 @@ export interface ProjectConfig {
     profile?: PermissionProfile; // Permission behavior profile
   };
   profiles?: Record<string, Partial<ModelConfig>>; // Named profiles
-  activeProfile?: string;
+  activeProfile?: string | null;
 }
 
 export interface StreamDelta {

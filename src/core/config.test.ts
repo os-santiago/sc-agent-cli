@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-test('initConfig requires --force before overwriting an existing global config', async () => {
+test('config init and profile removal semantics behave correctly', async () => {
   const tempHome = await mkdtemp(path.join(os.tmpdir(), 'sc-config-test-'));
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
@@ -56,6 +56,29 @@ test('initConfig requires --force before overwriting an existing global config',
     const resetConfig = JSON.parse(await readFile(configPath, 'utf-8'));
     assert.equal(resetConfig.activeProfile, 'ollama');
     assert.equal(resetConfig.model.baseUrl, 'http://localhost:11434/v1');
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          profiles: {
+            custom: {
+              baseUrl: 'https://example.test/v1',
+              model: 'custom-model',
+            },
+          },
+          activeProfile: null,
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    const loadedConfig = await configModule.loadConfig();
+
+    assert.deepEqual(Object.keys(loadedConfig.profiles || {}), ['custom']);
+    assert.equal(loadedConfig.activeProfile, undefined);
+    assert.equal(loadedConfig.model.model, 'llama3.2');
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;
