@@ -34,6 +34,13 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
+  if (config.profiles?.[name]) {
+    console.log(chalk.red(`Profile "${name}" already exists`));
+    console.log(chalk.gray(`  Use "sc profile use ${name}" to switch to it.`));
+    console.log(chalk.gray(`  Use "sc profile remove ${name}" first if you want to replace it.`));
+    return;
+  }
+
   const response = await prompts([
     {
       type: 'text',
