@@ -1,7 +1,7 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
+import type { ProjectConfig } from './types.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -58,9 +58,15 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   // Load global config
   try {
     const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
+    const globalConfig = JSON.parse(data) as Partial<ProjectConfig>;
+    config = deepMerge(config, globalConfig) as unknown as ProjectConfig;
+    if (hasExplicitEmptyProfiles(globalConfig)) {
+      config.profiles = {};
+    }
   } catch (err: unknown) {
     // No global config, use defaults
+     
+    const _err = err;
   }
 
   // Load project-local config if in a project
@@ -68,9 +74,15 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
     try {
       const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
+      const projectConfig = JSON.parse(data) as Partial<ProjectConfig>;
+      config = deepMerge(config, projectConfig) as unknown as ProjectConfig;
+      if (hasExplicitEmptyProfiles(projectConfig)) {
+        config.profiles = {};
+      }
     } catch (err: unknown) {
       // No project config
+       
+      const _err = err;
     }
   }
 
@@ -124,7 +136,20 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  if (!force) {
+    try {
+      await access(CONFIG_PATH);
+      throw new Error(
+        `Config already exists at ${CONFIG_PATH}. Use "sc config-init --force" to overwrite it.`
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('Config already exists at ')) {
+        throw err;
+      }
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -144,4 +169,8 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+function hasExplicitEmptyProfiles(config: Partial<ProjectConfig>): boolean {
+  return 'profiles' in config && config.profiles !== null && Object.keys(config.profiles || {}).length === 0;
 }
