@@ -5,10 +5,10 @@ import type { ModelConfig } from '../core/types.js';
 
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
-  const profiles = config.profiles || {};
+  const profiles = getSortedProfiles(config.profiles || {});
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
-  for (const [name, profile] of Object.entries(profiles)) {
+  for (const [name, profile] of profiles) {
     const active = name === config.activeProfile ? chalk.green(' (active)') : '';
     console.log(chalk.cyan(`  ${name}${active}`));
     console.log(chalk.gray(`    Model: ${profile.model || config.model.model}`));
@@ -74,7 +74,7 @@ export async function useProfile(name?: string): Promise<void> {
   const config = await loadConfig();
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
+    const profiles = getSortedProfileNames(config.profiles || {});
     if (profiles.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
@@ -108,7 +108,7 @@ export async function removeProfile(name?: string): Promise<void> {
   const config = await loadConfig();
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
+    const profiles = getSortedProfileNames(config.profiles || {});
     if (profiles.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
@@ -141,4 +141,14 @@ export async function removeProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
+}
+
+function getSortedProfiles(
+  profiles: Record<string, Partial<ModelConfig>>
+): Array<[string, Partial<ModelConfig>]> {
+  return Object.entries(profiles).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function getSortedProfileNames(profiles: Record<string, Partial<ModelConfig>>): string[] {
+  return getSortedProfiles(profiles).map(([name]) => name);
 }
