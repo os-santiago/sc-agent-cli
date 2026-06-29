@@ -3,6 +3,51 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+function normalizeInput(value?: string): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function validateNewProfileName(
+  name: string | undefined,
+  profiles: Record<string, Partial<ModelConfig>>
+): string {
+  const normalizedName = normalizeInput(name);
+
+  if (!normalizedName) {
+    throw new Error('Profile name is required');
+  }
+
+  if (profiles[normalizedName]) {
+    throw new Error(
+      `Profile "${normalizedName}" already exists. Use a different name or remove it first.`
+    );
+  }
+
+  return normalizedName;
+}
+
+export function validateProfileDetails(
+  baseUrl?: string,
+  model?: string
+): { baseUrl: string; model: string } {
+  const normalizedBaseUrl = normalizeInput(baseUrl);
+  const normalizedModel = normalizeInput(model);
+
+  if (!normalizedBaseUrl) {
+    throw new Error('Base URL is required');
+  }
+
+  if (!normalizedModel) {
+    throw new Error('Model name is required');
+  }
+
+  return {
+    baseUrl: normalizedBaseUrl,
+    model: normalizedModel,
+  };
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -29,8 +74,11 @@ export async function addProfile(name?: string): Promise<void> {
     name = response.name;
   }
 
-  if (!name) {
-    console.log(chalk.red('Profile name is required'));
+  try {
+    name = validateNewProfileName(name, config.profiles || {});
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.log(chalk.red(errorMsg));
     return;
   }
 
@@ -54,13 +102,32 @@ export async function addProfile(name?: string): Promise<void> {
     },
   ]);
 
+  if (
+    response.baseUrl === undefined
+    && response.model === undefined
+    && response.apiKey === undefined
+  ) {
+    console.log(chalk.gray('Cancelled'));
+    return;
+  }
+
+  let profileDetails: { baseUrl: string; model: string };
+  try {
+    profileDetails = validateProfileDetails(response.baseUrl, response.model);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.log(chalk.red(errorMsg));
+    return;
+  }
+
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl: profileDetails.baseUrl,
+    model: profileDetails.model,
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  const apiKey = normalizeInput(response.apiKey);
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};
