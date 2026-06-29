@@ -38,7 +38,7 @@ export const searchTextTool: Tool = {
       throw new Error('Missing required argument: pattern');
     }
 
-    const regex = useRegex ? new RegExp(pattern, 'i') : null;
+    const regex = createSearchRegex(pattern, useRegex);
     const files = await fg(globPattern, {
       cwd: ctx.workspaceRoot,
       absolute: true,
@@ -71,3 +71,18 @@ export const searchTextTool: Tool = {
     return results.length > 0 ? results.join('\n\n') : 'No matches found';
   },
 };
+
+function createSearchRegex(pattern: string, useRegex: boolean): RegExp | null {
+  if (!useRegex) {
+    return null;
+  }
+
+  try {
+    return new RegExp(pattern, 'i');
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Invalid regex pattern "${pattern}": ${errorMsg}\nUse regex=false to search for this text literally.`
+    );
+  }
+}
