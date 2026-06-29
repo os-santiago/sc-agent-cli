@@ -38,7 +38,33 @@ export const listDirTool: Tool = {
     }
 
     const safePath = resolveSafePath(dirPath, ctx.workspaceRoot, ctx.config);
-    const entries = await readdir(safePath, { withFileTypes: true });
+    let entries;
+
+    try {
+      entries = await readdir(safePath, { withFileTypes: true });
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'code' in error) {
+        const code = error.code;
+
+        if (code === 'ENOENT') {
+          throw new Error(
+            `Directory not found: "${dirPath}"\n\n` +
+            '💡 Tip: Check that the path exists relative to the workspace root.\n' +
+            '   Use "." for the current directory or list the parent directory first.'
+          );
+        }
+
+        if (code === 'ENOTDIR') {
+          throw new Error(
+            `Cannot list "${dirPath}" because it is a file, not a directory.\n\n` +
+            '💡 Tip: Use read_file to inspect file contents,\n' +
+            '   or list_dir on the parent directory instead.'
+          );
+        }
+      }
+
+      throw error;
+    }
 
     const formatted = entries
       .map((e) => {
