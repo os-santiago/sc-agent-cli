@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
+import type { ProjectConfig } from './types.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -61,6 +61,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config = deepMerge(config, JSON.parse(data));
   } catch (err: unknown) {
     // No global config, use defaults
+     
+    const _err = err;
   }
 
   // Load project-local config if in a project
@@ -71,6 +73,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
       config = deepMerge(config, JSON.parse(data));
     } catch (err: unknown) {
       // No project config
+       
+      const _err = err;
     }
   }
 
