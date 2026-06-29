@@ -6,11 +6,26 @@ import { loadConfig, initConfig, getGlobalConfigPath } from './core/config.js';
 import { startChatSession } from './commands/chat-session.js';
 import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
+import { initializeWOS, shutdownWOS } from './wos-integration.js';
 
 const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../package.json') as { version: string };
 
 const program = new Command();
+
+// Initialize WOS reporting
+initializeWOS();
+
+// Handle cleanup on exit
+process.on('SIGINT', () => {
+  shutdownWOS();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  shutdownWOS();
+  process.exit(0);
+});
 
 program
   .name('sc')
@@ -76,9 +91,10 @@ program
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .action(async () => {
+  .option('-f, --force', 'Overwrite an existing global config file')
+  .action(async (options) => {
     try {
-      await initConfig();
+      await initConfig(options.force);
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
