@@ -13,6 +13,7 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { getProfileSetupHint } from './profile-guidance.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -616,7 +617,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         const profileNames = Object.keys(profiles);
 
         if (profileNames.length === 0) {
-          console.log(chalk.yellow('\nNo profiles available\n'));
+          console.log(chalk.yellow('\nNo profiles available.'));
+          console.log(chalk.gray(getProfileSetupHint()));
+          console.log();
           continue;
         }
 
