@@ -1,5 +1,5 @@
-import { readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, basename, sep } from 'node:path';
+import { readdirSync, existsSync } from 'node:fs';
+import { join, dirname, sep } from 'node:path';
 
 // Available slash commands
 const SLASH_COMMANDS = [
@@ -36,8 +36,8 @@ export function autocomplete(line: string, workspaceRoot: string): [string[], st
   // Autocomplete file paths (when line contains common path indicators)
   if (containsPathIndicators(trimmedLine)) {
     const pathMatches = autocompleteFilePath(trimmedLine, workspaceRoot);
-    if (pathMatches.length > 0) {
-      return [pathMatches, trimmedLine];
+    if (pathMatches) {
+      return [pathMatches.matches, pathMatches.token];
     }
   }
 
@@ -53,6 +53,11 @@ export function autocomplete(line: string, workspaceRoot: string): [string[], st
 
   // No matches
   return [[], trimmedLine];
+}
+
+interface PathCompletion {
+  matches: string[];
+  token: string;
 }
 
 function containsPathIndicators(line: string): boolean {
@@ -89,51 +94,81 @@ function containsToolIndicators(line: string): boolean {
   return indicators.some(indicator => lowerLine.includes(indicator));
 }
 
-function autocompleteFilePath(line: string, workspaceRoot: string): string[] {
-  // Extract potential path from the line
-  const pathMatch = line.match(/(?:^|\s)(\.{0,2}\/[^\s]*|~\/[^\s]*|[a-zA-Z]:[^\s]*)/);
-  if (!pathMatch) return [];
+function autocompleteFilePath(line: string, workspaceRoot: string): PathCompletion | null {
+  const token = extractPathToken(line);
+  if (!token) {
+    return null;
+  }
 
-  let partialPath = pathMatch[1];
+  const preferredSeparator = token.includes('\\') ? '\\' : '/';
+  const normalizedToken = token.replace(/[\\/]/g, sep);
   let basePath = workspaceRoot;
+  let relativePath = normalizedToken;
 
-  // Handle different path types
-  if (partialPath.startsWith('~/')) {
+  if (token.startsWith(`~${preferredSeparator}`)) {
     basePath = process.env.HOME || process.env.USERPROFILE || workspaceRoot;
-    partialPath = partialPath.substring(2);
-  } else if (partialPath.startsWith('./')) {
-    partialPath = partialPath.substring(2);
-  } else if (partialPath.startsWith('../')) {
+    relativePath = normalizedToken.substring(2);
+  } else if (/^[a-zA-Z]:[\\/]/.test(token)) {
+    basePath = normalizedToken.slice(0, 3);
+    relativePath = normalizedToken.slice(3);
+  } else if (normalizedToken.startsWith(`.${sep}`)) {
+    relativePath = normalizedToken.substring(2);
+  } else if (normalizedToken.startsWith(`..${sep}`)) {
     basePath = dirname(workspaceRoot);
-    partialPath = partialPath.substring(3);
+    relativePath = normalizedToken.substring(3);
   }
 
-  // Resolve full path
-  const fullPath = partialPath ? join(basePath, partialPath) : basePath;
-  const dirPath = partialPath.includes(sep) ? dirname(fullPath) : basePath;
-  const prefix = basename(fullPath);
+  const lastSeparatorIndex = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'));
+  const relativeDir = lastSeparatorIndex >= 0 ? relativePath.slice(0, lastSeparatorIndex + 1) : '';
+  const prefix = lastSeparatorIndex >= 0 ? relativePath.slice(lastSeparatorIndex + 1) : relativePath;
+  const typedDirPrefix = getTypedDirPrefix(token);
+  const dirPath = join(basePath, relativeDir);
 
-  // Get matching files/directories
   try {
-    if (!existsSync(dirPath)) return [];
+    if (!existsSync(dirPath)) {
+      return null;
+    }
 
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    const matches = entries
-      .filter(entry => {
-        if (prefix && !entry.name.startsWith(prefix)) return false;
-        return true;
-      })
+    const matches = readdirSync(dirPath, { withFileTypes: true })
+      .filter(entry => entry.name.startsWith(prefix))
       .map(entry => {
-        const fullEntryPath = join(dirPath, entry.name);
-        const isDir = entry.isDirectory();
-        return isDir ? `${entry.name}/` : entry.name;
+        const suffix = entry.isDirectory() ? preferredSeparator : '';
+        return `${typedDirPrefix}${entry.name}${suffix}`;
       })
-      .slice(0, 20); // Limit to 20 suggestions
+      .slice(0, 20);
 
-    return matches;
-  } catch (err) {
-    return [];
+    if (matches.length === 0) {
+      return null;
+    }
+
+    return { matches, token };
+  } catch {
+    return null;
   }
+}
+
+function extractPathToken(line: string): string | null {
+  const tokens = line.trim().split(/\s+/).filter(Boolean);
+  const token = tokens.at(-1);
+
+  if (!token || token.startsWith('/')) {
+    return null;
+  }
+
+  if (!token.includes('/') && !token.includes('\\') && !token.startsWith('~')) {
+    return null;
+  }
+
+  return token;
+}
+
+function getTypedDirPrefix(token: string): string {
+  const lastSeparatorIndex = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
+  if (lastSeparatorIndex === -1) {
+    return '';
+  }
+
+  return token.slice(0, lastSeparatorIndex + 1);
 }
 
 // Custom completer for readline
