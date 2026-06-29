@@ -49,8 +49,12 @@ export const runShellTool: Tool = {
       const child = spawn(command, [], {
         shell: true,
         cwd: ctx.workspaceRoot,
-        timeout,
       });
+      let timedOut = false;
+      const timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, timeout);
 
       let stdout = '';
       let stderr = '';
@@ -64,8 +68,12 @@ export const runShellTool: Tool = {
       });
 
       child.on('close', (code) => {
+        clearTimeout(timeoutHandle);
         const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
-        if (code !== 0) {
+        if (timedOut) {
+          const details = output ? `\n${output}` : '';
+          reject(new Error(`Command timed out after ${timeout}ms${details}`));
+        } else if (code !== 0) {
           reject(new Error(`Command exited with code ${code}\n${output}`));
         } else {
           resolve(output || '(no output)');
@@ -73,6 +81,7 @@ export const runShellTool: Tool = {
       });
 
       child.on('error', (err) => {
+        clearTimeout(timeoutHandle);
         reject(new Error(`Failed to execute command: ${err.message}`));
       });
     });
