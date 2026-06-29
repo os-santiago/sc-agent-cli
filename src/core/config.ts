@@ -55,23 +55,12 @@ const DEFAULT_CONFIG: ProjectConfig = {
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
-  // Load global config
-  try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
-  } catch (err: unknown) {
-    // No global config, use defaults
-  }
+  config = await mergeConfigFile(config, CONFIG_PATH, 'global');
 
   // Load project-local config if in a project
   if (projectRoot) {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
-    try {
-      const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
-    } catch (err: unknown) {
-      // No project config
-    }
+    config = await mergeConfigFile(config, projectConfigPath, 'project');
   }
 
   // Apply active profile if set
@@ -128,8 +117,32 @@ export async function initConfig(): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
-function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
-  const result = { ...base };
+async function mergeConfigFile(
+  config: ProjectConfig,
+  configPath: string,
+  configLabel: 'global' | 'project'
+): Promise<ProjectConfig> {
+  let data: string;
+
+  try {
+    data = await readFile(configPath, 'utf-8');
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return config;
+    }
+
+    throw new Error(`Failed to read ${configLabel} config at ${configPath}: ${getErrorMessage(err)}`);
+  }
+
+  try {
+    return deepMerge(config, JSON.parse(data) as Partial<ProjectConfig>);
+  } catch (err: unknown) {
+    throw new Error(`Failed to parse ${configLabel} config at ${configPath}: ${getErrorMessage(err)}`);
+  }
+}
+
+function deepMerge<T extends object>(base: T, override: Partial<T>): T {
+  const result = { ...base } as Record<string, unknown>;
   for (const key in override) {
     const val = override[key];
     if (val !== undefined) {
@@ -143,5 +156,13 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
       }
     }
   }
-  return result;
+  return result as T;
+}
+
+function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && 'code' in err && err.code === 'ENOENT';
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
