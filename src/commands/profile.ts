@@ -34,6 +34,13 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
+  if (config.profiles?.[name]) {
+    console.log(chalk.red(`Profile "${name}" already exists`));
+    console.log(chalk.gray(`Use "sc profile add ${name} --force" to overwrite it.`));
+    console.log(chalk.gray(`Or run "sc profile use ${name}" to switch to it.`));
+    return;
+  }
+
   const response = await prompts([
     {
       type: 'text',
@@ -68,6 +75,62 @@ export async function addProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" added successfully`));
+}
+
+export async function addOrReplaceProfile(name?: string): Promise<void> {
+  const config = await loadConfig();
+
+  if (!name) {
+    const response = await prompts({
+      type: 'text',
+      name: 'name',
+      message: 'Profile name:',
+    });
+    name = response.name;
+  }
+
+  if (!name) {
+    console.log(chalk.red('Profile name is required'));
+    return;
+  }
+
+  const replacingExisting = Boolean(config.profiles?.[name]);
+
+  const response = await prompts([
+    {
+      type: 'text',
+      name: 'baseUrl',
+      message: 'Base URL:',
+      initial: config.profiles?.[name]?.baseUrl || 'http://localhost:11434/v1',
+    },
+    {
+      type: 'text',
+      name: 'model',
+      message: 'Model name:',
+      initial: config.profiles?.[name]?.model || 'llama3.2',
+    },
+    {
+      type: 'text',
+      name: 'apiKey',
+      message: 'API Key (leave empty for local models):',
+      initial: config.profiles?.[name]?.apiKey,
+    },
+  ]);
+
+  const profile: Partial<ModelConfig> = {
+    baseUrl: response.baseUrl,
+    model: response.model,
+  };
+
+  if (response.apiKey) {
+    profile.apiKey = response.apiKey;
+  }
+
+  config.profiles = config.profiles || {};
+  config.profiles[name] = profile;
+
+  await saveConfig(config, true);
+  console.log(chalk.green(`✓ Profile "${name}" ${replacingExisting ? 'updated' : 'added'} successfully`));
 }
 
 export async function useProfile(name?: string): Promise<void> {
