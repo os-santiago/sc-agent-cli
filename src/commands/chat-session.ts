@@ -13,6 +13,41 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
 
+type SessionPermissionMode = 'ask_once' | 'always_ask' | 'unlimited';
+
+export function getInfoSummaryRows(
+  currentConfig: AgentOptions['config'],
+  currentPermissionMode: SessionPermissionMode,
+  historyLength: number,
+): Array<{label: string; value: string}> {
+  const permissionMode =
+    currentPermissionMode === 'unlimited' ? 'Unlimited (dangerous)' :
+    currentPermissionMode === 'always_ask' ? 'Always ask (safer)' :
+    'Ask once per command';
+
+  const permissionProfile = currentConfig.permissions?.profile === 'blacklist'
+    ? 'Blacklist (smart)'
+    : 'Traditional';
+
+  const rows = [
+    { label: 'Profile', value: currentConfig.activeProfile || 'none' },
+    { label: 'Model', value: currentConfig.model.model },
+    { label: 'Provider', value: currentConfig.model.baseUrl },
+    { label: 'Temperature', value: `${currentConfig.model.temperature ?? 0.7}` },
+    { label: 'Max Tokens', value: `${currentConfig.model.maxTokens ?? 4096}` },
+    { label: 'Permissions', value: permissionMode },
+    { label: 'Permission Profile', value: permissionProfile },
+  ];
+
+  const autoApproveList = currentConfig.permissions?.autoApprove || [];
+  if (autoApproveList.length > 0) {
+    rows.push({ label: 'Auto-approve', value: autoApproveList.join(', ') });
+  }
+
+  rows.push({ label: 'History', value: `${historyLength} messages` });
+  return rows;
+}
+
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve) => {
@@ -37,7 +72,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let history: Message[] = [];
   let currentConfig = options.config;
   let inputHistory: string[] = [];
-  let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
+  let currentPermissionMode: SessionPermissionMode = options.autoApprove ? 'unlimited' : 'ask_once';
 
   // Check storage limit on startup
   const configDir = join(homedir(), '.sc-agent');
@@ -577,31 +612,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     // Handle /info command
     if (userInput.toLowerCase() === '/info') {
       console.log(chalk.cyan('\n📊 Current Configuration:\n'));
-      console.log(chalk.white('  Profile:     ') + chalk.green(currentConfig.activeProfile || 'none'));
-      console.log(chalk.white('  Model:       ') + chalk.gray(currentConfig.model.model));
-      console.log(chalk.white('  Provider:    ') + chalk.gray(currentConfig.model.baseUrl));
-      console.log(chalk.white('  Temperature: ') + chalk.gray(`${currentConfig.model.temperature ?? 0.7}`));
-      console.log(chalk.white('  Max Tokens:  ') + chalk.gray(`${currentConfig.model.maxTokens ?? 4096}`));
-      console.log(chalk.white('  Permissions: ') + (
-        currentPermissionMode === 'unlimited' ? chalk.yellow('Unlimited (dangerous)') :
-        currentPermissionMode === 'always_ask' ? chalk.green('Always ask (safer)') :
-        chalk.cyan('Ask once per command')
-      ));
-
-      // Show permission profile
-      const permProfile = currentConfig.permissions?.profile || 'traditional';
-      console.log(chalk.white('  Profile:     ') + (
-        permProfile === 'blacklist' ? chalk.cyan('Blacklist (smart)') :
-        chalk.gray('Traditional')
-      ));
-
-      // Show auto-approved tools
-      const autoApproveList = currentConfig.permissions?.autoApprove || [];
-      if (autoApproveList.length > 0) {
-        console.log(chalk.white('  Auto-approve:') + chalk.gray(` ${autoApproveList.join(', ')}`));
+      for (const row of getInfoSummaryRows(currentConfig, currentPermissionMode, history.length)) {
+        console.log(chalk.white(`  ${row.label.padEnd(18)} `) + chalk.gray(row.value));
       }
-
-      console.log(chalk.white('  History:     ') + chalk.gray(`${history.length} messages`));
       console.log();
       continue;
     }
