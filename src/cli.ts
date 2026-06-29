@@ -12,6 +12,10 @@ const { version: packageVersion } = require('../package.json') as { version: str
 
 const program = new Command();
 
+function formatCliError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
@@ -87,4 +91,11 @@ program
     }
   });
 
-program.parse();
+async function main(): Promise<void> {
+  await program.parseAsync(process.argv);
+}
+
+main().catch((err: unknown) => {
+  console.error(chalk.red(`Error: ${formatCliError(err)}`));
+  process.exit(1);
+});
