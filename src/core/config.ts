@@ -53,24 +53,26 @@ const DEFAULT_CONFIG: ProjectConfig = {
 };
 
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
-  let config = { ...DEFAULT_CONFIG };
+  let config: ProjectConfig = { ...DEFAULT_CONFIG };
 
   // Load global config
-  try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
-  } catch (err: unknown) {
-    // No global config, use defaults
+  const globalConfig = await readConfigFile(CONFIG_PATH, 'global');
+  if (globalConfig) {
+    config = deepMerge(
+      config as unknown as Record<string, unknown>,
+      globalConfig as Record<string, unknown>
+    ) as unknown as ProjectConfig;
   }
 
   // Load project-local config if in a project
   if (projectRoot) {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
-    try {
-      const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
-    } catch (err: unknown) {
-      // No project config
+    const projectConfig = await readConfigFile(projectConfigPath, 'project');
+    if (projectConfig) {
+      config = deepMerge(
+        config as unknown as Record<string, unknown>,
+        projectConfig as Record<string, unknown>
+      ) as unknown as ProjectConfig;
     }
   }
 
@@ -126,6 +128,40 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
 
 export async function initConfig(): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
+}
+
+async function readConfigFile(
+  configPath: string,
+  scope: 'global' | 'project'
+): Promise<Partial<ProjectConfig> | null> {
+  let data: string;
+
+  try {
+    data = await readFile(configPath, 'utf-8');
+  } catch (err: unknown) {
+    if (isFileNotFoundError(err)) {
+      return null;
+    }
+
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to read ${scope} config at ${configPath}: ${errorMsg}`);
+  }
+
+  try {
+    return JSON.parse(data) as Partial<ProjectConfig>;
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Invalid ${scope} config at ${configPath}: ${errorMsg}`);
+  }
+}
+
+function isFileNotFoundError(err: unknown): boolean {
+  return Boolean(
+    err
+    && typeof err === 'object'
+    && 'code' in err
+    && err.code === 'ENOENT'
+  );
 }
 
 function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
