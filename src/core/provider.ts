@@ -43,15 +43,19 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(this.formatRequestError(err, url));
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(await this.formatApiError(response));
     }
 
     if (options.stream && response.body) {
@@ -153,5 +157,69 @@ export class OpenAICompatibleProvider {
       content: fullContent,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
+  }
+
+  private async formatApiError(response: Response): Promise<string> {
+    const details = await this.readErrorDetails(response);
+    const reason = `${response.status} ${response.statusText}`.trim();
+    const normalizedDetails = details ? details.replace(/[.\s]+$/, '') : undefined;
+    const message = normalizedDetails
+      ? `API request failed (${reason}): ${normalizedDetails}.`
+      : `API request failed (${reason}).`;
+    const guidance = this.getStatusGuidance(response.status);
+
+    return guidance ? `${message} ${guidance}` : message;
+  }
+
+  private async readErrorDetails(response: Response): Promise<string | undefined> {
+    const rawText = (await response.text()).trim();
+    if (!rawText) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(rawText) as {
+        error?: { message?: string };
+        message?: string;
+      };
+
+      return parsed.error?.message || parsed.message || rawText;
+    } catch {
+      return rawText;
+    }
+  }
+
+  private formatRequestError(err: unknown, url: string): string {
+    const base = err instanceof Error && err.message ? err.message : 'Unknown network error';
+
+    if (err instanceof TypeError) {
+      return `Could not reach model endpoint at ${url}: ${base}. Check the base URL, provider availability, and network connection.`;
+    }
+
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return `Request to ${url} timed out or was aborted. Retry the command and verify the provider is responsive.`;
+    }
+
+    return `Request to ${url} failed: ${base}`;
+  }
+
+  private getStatusGuidance(status: number): string | undefined {
+    switch (status) {
+      case 400:
+        return 'Check the request parameters and confirm the selected model supports the requested tool or message format.';
+      case 401:
+        return 'Verify the API key for the active profile or set SC_API_KEY before retrying.';
+      case 403:
+        return 'Check whether the active API key has permission to use this model or endpoint.';
+      case 404:
+        return 'Confirm the base URL and model name are correct for this provider.';
+      case 429:
+        return 'You may be rate limited. Wait briefly, reduce request frequency, or switch to another model/profile.';
+      default:
+        if (status >= 500) {
+          return 'The provider reported a server-side error. Retry shortly or switch providers if the issue persists.';
+        }
+        return undefined;
+    }
   }
 }
