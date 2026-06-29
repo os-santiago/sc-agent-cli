@@ -7,6 +7,14 @@ export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
 
+  if (Object.keys(profiles).length === 0) {
+    console.log(chalk.yellow('\nNo profiles configured yet.\n'));
+    console.log(chalk.gray('  Next steps:'));
+    console.log(chalk.gray('  • Run `sc profile add <name>` to create a profile'));
+    console.log(chalk.gray('  • Run `sc config-init` to generate default profiles\n'));
+    return;
+  }
+
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
   for (const [name, profile] of Object.entries(profiles)) {
     const active = name === config.activeProfile ? chalk.green(' (active)') : '';
