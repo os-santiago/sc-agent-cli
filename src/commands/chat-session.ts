@@ -10,6 +10,7 @@ import type { Message } from '../core/types.js';
 import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
+import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
 
@@ -526,9 +527,10 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           }
         } else if (info.usagePercent > 80) {
           console.log(chalk.yellow('💡 Tips:\n'));
-          console.log(chalk.gray('  • Increase limit: export SC_MAX_STORAGE_GB=2'));
-          console.log(chalk.gray('  • Clean manually: rm -rf ~/.sc-agent/old-files'));
-          console.log(chalk.gray('  • Auto-cleanup runs when limit is exceeded\n'));
+          for (const tip of getStorageGuidance()) {
+            console.log(chalk.gray(tip));
+          }
+          console.log();
         } else {
           console.log(chalk.green('✓ Storage usage is healthy\n'));
         }
