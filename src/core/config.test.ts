@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-<<<<<<< HEAD
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -57,10 +56,22 @@ test('initConfig requires --force before overwriting an existing global config',
     const resetConfig = JSON.parse(await readFile(configPath, 'utf-8'));
     assert.equal(resetConfig.activeProfile, 'ollama');
     assert.equal(resetConfig.model.baseUrl, 'http://localhost:11434/v1');
-=======
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    await rm(tempHome, { recursive: true, force: true });
+  }
+});
 
 test('loadConfig preserves an explicitly empty profile map', async () => {
   const tempHome = await mkdtemp(path.join(os.tmpdir(), 'sc-config-test-'));
@@ -101,7 +112,6 @@ test('loadConfig preserves an explicitly empty profile map', async () => {
 
     assert.deepEqual(config.profiles, {});
     assert.equal(config.activeProfile, null);
->>>>>>> fix/profile-list-empty-state-guidance
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;
@@ -115,8 +125,6 @@ test('loadConfig preserves an explicitly empty profile map', async () => {
       process.env.USERPROFILE = originalUserProfile;
     }
 
-<<<<<<< HEAD
-=======
     if (originalHomeDrive === undefined) {
       delete process.env.HOMEDRIVE;
     } else {
@@ -129,7 +137,6 @@ test('loadConfig preserves an explicitly empty profile map', async () => {
       process.env.HOMEPATH = originalHomePath;
     }
 
->>>>>>> fix/profile-list-empty-state-guidance
     await rm(tempHome, { recursive: true, force: true });
   }
 });
