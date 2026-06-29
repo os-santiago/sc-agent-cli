@@ -4,6 +4,13 @@ import type { Tool, ToolContext } from './tool.js';
 import { resolveSafePath } from '../utils/path-security.js';
 import { requestPermission } from '../utils/permissions.js';
 
+function formatPatchApplyFailure(filePath: string): string {
+  return [
+    `Failed to apply patch to "${filePath}" because the file content did not match the patch context.`,
+    'Re-read the file and generate a unified diff patch against the current content before retrying.',
+  ].join(' ');
+}
+
 export const editFileTool: Tool = {
   definition: {
     type: 'function',
@@ -51,7 +58,7 @@ export const editFileTool: Tool = {
     const patched = applyPatch(content, patch);
 
     if (patched === false) {
-      throw new Error('Failed to apply patch (does not match file content)');
+      throw new Error(formatPatchApplyFailure(filePath));
     }
 
     await writeFile(safePath, patched, 'utf-8');
