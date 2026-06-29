@@ -2,6 +2,14 @@ import { spawn } from 'node:child_process';
 import type { Tool, ToolContext } from './tool.js';
 import { requestPermission } from '../utils/permissions.js';
 
+export function formatCommandOutput(stdout: string, stderr: string): string {
+  if (!stderr) {
+    return stdout;
+  }
+
+  return stdout ? `${stdout}\n[stderr]\n${stderr}` : `[stderr]\n${stderr}`;
+}
+
 export const runShellTool: Tool = {
   definition: {
     type: 'function',
@@ -64,7 +72,7 @@ export const runShellTool: Tool = {
       });
 
       child.on('close', (code) => {
-        const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
+        const output = formatCommandOutput(stdout, stderr);
         if (code !== 0) {
           reject(new Error(`Command exited with code ${code}\n${output}`));
         } else {
