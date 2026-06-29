@@ -1,10 +1,14 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
+import type { ProjectConfig } from './types.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+
+interface LoadConfigOptions {
+  validateModel?: boolean;
+}
 
 const DEFAULT_CONFIG: ProjectConfig = {
   model: {
@@ -52,7 +56,11 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
-export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
+export async function loadConfig(
+  projectRoot?: string,
+  options: LoadConfigOptions = {}
+): Promise<ProjectConfig> {
+  const { validateModel = true } = options;
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
@@ -61,6 +69,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config = deepMerge(config, JSON.parse(data));
   } catch (err: unknown) {
     // No global config, use defaults
+     
+    const _err = err;
   }
 
   // Load project-local config if in a project
@@ -71,6 +81,8 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
       config = deepMerge(config, JSON.parse(data));
     } catch (err: unknown) {
       // No project config
+       
+      const _err = err;
     }
   }
 
@@ -96,15 +108,17 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model.apiKey = envApiKey;
   }
 
-  // Validate required fields
-  if (!config.model.baseUrl) {
-    throw new Error('Missing model.baseUrl in config');
-  }
-  if (!config.model.model) {
-    throw new Error('Missing model.model in config');
-  }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
-    throw new Error('OpenAI API requires apiKey in config');
+  if (validateModel) {
+    // Validate required fields for commands that actually need to start a model session.
+    if (!config.model.baseUrl) {
+      throw new Error('Missing model.baseUrl in config');
+    }
+    if (!config.model.model) {
+      throw new Error('Missing model.model in config');
+    }
+    if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
+      throw new Error('OpenAI API requires apiKey in config');
+    }
   }
 
   return config;
@@ -124,7 +138,20 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  if (!force) {
+    try {
+      await access(CONFIG_PATH);
+      throw new Error(
+        `Config already exists at ${CONFIG_PATH}. Use "sc config-init --force" to overwrite it.`
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('Config already exists at ')) {
+        throw err;
+      }
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
