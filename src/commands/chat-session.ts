@@ -13,6 +13,12 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
 
+function showMissingModelProfilesGuidance(): void {
+  console.log(chalk.yellow('\nNo profiles available.\n'));
+  console.log(chalk.gray('  Use "sc profile add <name>" to create a model profile.'));
+  console.log(chalk.gray('  Or run "sc config-init --force" to restore the default profiles.\n'));
+}
+
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve) => {
@@ -614,7 +620,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         const profileNames = Object.keys(profiles);
 
         if (profileNames.length === 0) {
-          console.log(chalk.yellow('\nNo profiles available\n'));
+          showMissingModelProfilesGuidance();
           continue;
         }
 
