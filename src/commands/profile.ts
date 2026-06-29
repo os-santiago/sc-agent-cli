@@ -3,6 +3,8 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type ProfileAction = 'use' | 'remove';
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -72,10 +74,10 @@ export async function addProfile(name?: string): Promise<void> {
 
 export async function useProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profileNames = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
-    if (profiles.length === 0) {
+    if (profileNames.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
     }
@@ -84,7 +86,7 @@ export async function useProfile(name?: string): Promise<void> {
       type: 'select',
       name: 'profile',
       message: 'Select a profile:',
-      choices: profiles.map((p) => ({ title: p, value: p })),
+      choices: profileNames.map((p) => ({ title: p, value: p })),
     });
     name = response.profile;
   }
@@ -95,7 +97,7 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(formatMissingProfileMessage(name, profileNames, 'use')));
     return;
   }
 
@@ -106,10 +108,10 @@ export async function useProfile(name?: string): Promise<void> {
 
 export async function removeProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profileNames = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
-    if (profiles.length === 0) {
+    if (profileNames.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
     }
@@ -118,7 +120,7 @@ export async function removeProfile(name?: string): Promise<void> {
       type: 'select',
       name: 'profile',
       message: 'Select a profile to remove:',
-      choices: profiles.map((p) => ({ title: p, value: p })),
+      choices: profileNames.map((p) => ({ title: p, value: p })),
     });
     name = response.profile;
   }
@@ -129,7 +131,7 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(formatMissingProfileMessage(name, profileNames, 'remove')));
     return;
   }
 
@@ -141,4 +143,81 @@ export async function removeProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
+}
+
+export function formatMissingProfileMessage(
+  name: string,
+  availableProfiles: string[],
+  action: ProfileAction
+): string {
+  const suggestion = findClosestProfileName(name, availableProfiles);
+  const availableList = availableProfiles.join(', ');
+  const nextStep = action === 'use' ? 'sc profile use <name>' : 'sc profile remove <name>';
+
+  if (suggestion) {
+    return `Profile "${name}" not found. Did you mean "${suggestion}"? Available profiles: ${availableList}. Run "${nextStep}" or "sc profile list" for details.`;
+  }
+
+  return `Profile "${name}" not found. Available profiles: ${availableList}. Run "${nextStep}" or "sc profile list" for details.`;
+}
+
+export function findClosestProfileName(name: string, availableProfiles: string[]): string | undefined {
+  const normalizedName = name.toLowerCase();
+  let bestMatch: string | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const candidate of availableProfiles) {
+    const normalizedCandidate = candidate.toLowerCase();
+
+    if (
+      normalizedCandidate.startsWith(normalizedName) ||
+      normalizedName.startsWith(normalizedCandidate)
+    ) {
+      return candidate;
+    }
+
+    const distance = levenshteinDistance(normalizedName, normalizedCandidate);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestMatch = candidate;
+    }
+  }
+
+  return bestDistance <= 3 ? bestMatch : undefined;
+}
+
+function levenshteinDistance(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+
+  if (left.length === 0) {
+    return right.length;
+  }
+
+  if (right.length === 0) {
+    return left.length;
+  }
+
+  const previousRow = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let i = 0; i < left.length; i += 1) {
+    let previousDiagonal = previousRow[0];
+    previousRow[0] = i + 1;
+
+    for (let j = 0; j < right.length; j += 1) {
+      const temp = previousRow[j + 1];
+      const substitutionCost = left[i] === right[j] ? 0 : 1;
+
+      previousRow[j + 1] = Math.min(
+        previousRow[j + 1] + 1,
+        previousRow[j] + 1,
+        previousDiagonal + substitutionCost
+      );
+
+      previousDiagonal = temp;
+    }
+  }
+
+  return previousRow[right.length];
 }
