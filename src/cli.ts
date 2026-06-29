@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import { createRequire } from 'node:module';
 import { loadConfig, initConfig, getGlobalConfigPath } from './core/config.js';
 import { startChatSession } from './commands/chat-session.js';
-import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
+import { listProfiles, addProfile, addOrReplaceProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
 
 const require = createRequire(import.meta.url);
@@ -52,7 +52,15 @@ profileCommand
 profileCommand
   .command('add [name]')
   .description('Add a new profile')
-  .action(addProfile);
+  .option('-f, --force', 'Overwrite an existing profile with the same name')
+  .action(async (name: string | undefined, options: { force?: boolean }) => {
+    if (options.force) {
+      await addOrReplaceProfile(name);
+      return;
+    }
+
+    await addProfile(name);
+  });
 
 profileCommand
   .command('use [name]')
