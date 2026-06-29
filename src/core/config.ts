@@ -6,6 +6,10 @@ import type { ProjectConfig } from './types.js';
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
+interface LoadConfigOptions {
+  validateModel?: boolean;
+}
+
 const DEFAULT_CONFIG: ProjectConfig = {
   model: {
     provider: 'openai-compatible',
@@ -52,7 +56,11 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
-export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
+export async function loadConfig(
+  projectRoot?: string,
+  options: LoadConfigOptions = {}
+): Promise<ProjectConfig> {
+  const { validateModel = true } = options;
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
@@ -100,15 +108,17 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model.apiKey = envApiKey;
   }
 
-  // Validate required fields
-  if (!config.model.baseUrl) {
-    throw new Error('Missing model.baseUrl in config');
-  }
-  if (!config.model.model) {
-    throw new Error('Missing model.model in config');
-  }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
-    throw new Error('OpenAI API requires apiKey in config');
+  if (validateModel) {
+    // Validate required fields for commands that actually need to start a model session.
+    if (!config.model.baseUrl) {
+      throw new Error('Missing model.baseUrl in config');
+    }
+    if (!config.model.model) {
+      throw new Error('Missing model.model in config');
+    }
+    if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
+      throw new Error('OpenAI API requires apiKey in config');
+    }
   }
 
   return config;
