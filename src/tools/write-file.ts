@@ -4,6 +4,17 @@ import type { Tool, ToolContext } from './tool.js';
 import { resolveSafePath } from '../utils/path-security.js';
 import { requestPermission } from '../utils/permissions.js';
 
+function formatWriteFileError(filePath: string, error: unknown): Error {
+  if (error && typeof error === 'object' && 'code' in error && error.code === 'EISDIR') {
+    return new Error(
+      `Cannot write to "${filePath}" because it is a directory.\n` +
+      `💡 Tip: Provide a file path instead, for example "${path.posix.join(filePath.replace(/\\\\/g, '/'), 'notes.txt')}"`
+    );
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export const writeFileTool: Tool = {
   definition: {
     type: 'function',
@@ -47,8 +58,12 @@ export const writeFileTool: Tool = {
     }
 
     const safePath = resolveSafePath(filePath, ctx.workspaceRoot, ctx.config);
-    await mkdir(path.dirname(safePath), { recursive: true });
-    await writeFile(safePath, content, 'utf-8');
+    try {
+      await mkdir(path.dirname(safePath), { recursive: true });
+      await writeFile(safePath, content, 'utf-8');
+    } catch (error) {
+      throw formatWriteFileError(filePath, error);
+    }
 
     return `File written successfully: ${filePath}`;
   },
