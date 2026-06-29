@@ -3,6 +3,11 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+function failProfileCommand(message: string): void {
+  console.error(chalk.red(message));
+  process.exitCode = 1;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -30,7 +35,7 @@ export async function addProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    failProfileCommand('Profile name is required');
     return;
   }
 
@@ -76,7 +81,7 @@ export async function useProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      failProfileCommand('No profiles available');
       return;
     }
 
@@ -90,12 +95,12 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    failProfileCommand('Profile name is required');
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    failProfileCommand(`Profile "${name}" not found`);
     return;
   }
 
@@ -110,7 +115,7 @@ export async function removeProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      failProfileCommand('No profiles available');
       return;
     }
 
@@ -124,12 +129,12 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    failProfileCommand('Profile name is required');
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    failProfileCommand(`Profile "${name}" not found`);
     return;
   }
 
