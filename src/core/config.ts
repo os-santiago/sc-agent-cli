@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig, ModelConfig } from './types.js';
@@ -124,7 +124,21 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  if (!force) {
+    try {
+      await access(CONFIG_PATH);
+      throw new Error(
+        `Global config already exists at ${CONFIG_PATH}. ` +
+        'Re-run with "sc config-init --force" to overwrite it.'
+      );
+    } catch (err: unknown) {
+      if (!(err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT')) {
+        throw err;
+      }
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
