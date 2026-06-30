@@ -11,7 +11,7 @@ import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
-import { createCompleter } from '../utils/autocomplete.js';
+import { createCompleter, getSlashCommandSuggestions, isKnownSlashCommand } from '../utils/autocomplete.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -145,6 +145,17 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.cyan('  👋 Goodbye!'));
       console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
       break;
+    }
+
+    if (userInput.startsWith('/') && !isKnownSlashCommand(userInput)) {
+      const suggestions = getSlashCommandSuggestions(userInput);
+
+      console.log(chalk.red(`\n✗ Unknown command: ${userInput}`));
+      if (suggestions.length > 0) {
+        console.log(chalk.gray(`  Try: ${suggestions.join(', ')}`));
+      }
+      console.log(chalk.gray('  Run /help to see all available commands.\n'));
+      continue;
     }
 
     // Handle /help command
