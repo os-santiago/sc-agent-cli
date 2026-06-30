@@ -15,7 +15,8 @@ const program = new Command();
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
-  .version(packageVersion);
+  .version(packageVersion)
+  .showHelpAfterError();
 
 // Chat command (default)
 program
@@ -76,10 +77,9 @@ program
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .option('-f, --force', 'Overwrite an existing global config file')
-  .action(async (options) => {
+  .action(async () => {
     try {
-      await initConfig(options.force);
+      await initConfig();
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
