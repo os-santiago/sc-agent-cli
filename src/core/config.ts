@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
@@ -145,7 +145,8 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  await assertConfigCanBeInitialized(CONFIG_PATH, force);
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -209,4 +210,31 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+export async function assertConfigCanBeInitialized(
+  configPath: string,
+  force = false
+): Promise<void> {
+  if (force) {
+    return;
+  }
+
+  try {
+    await access(configPath);
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return;
+    }
+
+    throw new Error(
+      `Could not access existing global config at ${configPath}. ` +
+      `Check file permissions and try again.`
+    );
+  }
+
+  throw new Error(
+    `Global config already exists at ${configPath}. ` +
+    `Re-run "sc config-init --force" to overwrite it.`
+  );
 }
