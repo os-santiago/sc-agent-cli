@@ -3,6 +3,11 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+function normalizeRequiredValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -19,14 +24,31 @@ export async function listProfiles(): Promise<void> {
 
 export async function addProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  let cancelled = false;
 
   if (!name) {
-    const response = await prompts({
-      type: 'text',
-      name: 'name',
-      message: 'Profile name:',
-    });
-    name = response.name;
+    const response = await prompts(
+      {
+        type: 'text',
+        name: 'name',
+        message: 'Profile name:',
+        validate: (value) => normalizeRequiredValue(value) ? true : 'Profile name is required',
+      },
+      {
+        onCancel: () => {
+          cancelled = true;
+          return false;
+        },
+      }
+    );
+    name = normalizeRequiredValue(response.name);
+  }
+
+  name = normalizeRequiredValue(name);
+
+  if (cancelled) {
+    console.log(chalk.yellow('Profile creation cancelled'));
+    return;
   }
 
   if (!name) {
@@ -34,33 +56,54 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
-  const response = await prompts([
+  const response = await prompts(
+    [
+      {
+        type: 'text',
+        name: 'baseUrl',
+        message: 'Base URL:',
+        initial: 'http://localhost:11434/v1',
+        validate: (value) => normalizeRequiredValue(value) ? true : 'Base URL is required',
+      },
+      {
+        type: 'text',
+        name: 'model',
+        message: 'Model name:',
+        initial: 'llama3.2',
+        validate: (value) => normalizeRequiredValue(value) ? true : 'Model name is required',
+      },
+      {
+        type: 'text',
+        name: 'apiKey',
+        message: 'API Key (leave empty for local models):',
+      },
+    ],
     {
-      type: 'text',
-      name: 'baseUrl',
-      message: 'Base URL:',
-      initial: 'http://localhost:11434/v1',
-    },
-    {
-      type: 'text',
-      name: 'model',
-      message: 'Model name:',
-      initial: 'llama3.2',
-    },
-    {
-      type: 'text',
-      name: 'apiKey',
-      message: 'API Key (leave empty for local models):',
-    },
-  ]);
+      onCancel: () => {
+        cancelled = true;
+        return false;
+      },
+    }
+  );
+
+  if (cancelled) {
+    console.log(chalk.yellow('Profile creation cancelled'));
+    return;
+  }
 
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl: normalizeRequiredValue(response.baseUrl),
+    model: normalizeRequiredValue(response.model),
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  if (!profile.baseUrl || !profile.model) {
+    console.log(chalk.red('Base URL and model name are required'));
+    return;
+  }
+
+  const apiKey = normalizeRequiredValue(response.apiKey);
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};
