@@ -145,7 +145,7 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(_force = false): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
