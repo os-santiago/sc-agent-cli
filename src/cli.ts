@@ -11,11 +11,26 @@ const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../package.json') as { version: string };
 
 const program = new Command();
+const helpExamples = [
+  'Examples:',
+  '  sc chat',
+  '  sc "summarize README.md"',
+  '  sc profile list',
+  '  sc config-init',
+].join('\n');
+const chatHelpExamples = [
+  'Examples:',
+  '  sc chat',
+  '  sc "summarize README.md"',
+  '  sc -yq "count .ts files in src/"',
+].join('\n');
 
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
-  .version(packageVersion);
+  .version(packageVersion)
+  .showHelpAfterError()
+  .addHelpText('after', `\n${helpExamples}\n`);
 
 // Chat command (default)
 program
@@ -24,6 +39,8 @@ program
   .argument('[prompt]', 'Optional prompt for non-interactive mode')
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
   .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
+  .showHelpAfterError()
+  .addHelpText('after', `\n${chatHelpExamples}\n`)
   .action(async (prompt: string | undefined, options) => {
     try {
       const config = await loadConfig(process.cwd());
