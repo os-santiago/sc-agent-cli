@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
+import type { ProjectConfig } from './types.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -52,6 +52,24 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
+const API_KEY_REQUIREMENTS = [
+  {
+    hostPattern: 'api.openai.com',
+    providerName: 'OpenAI',
+    envVar: 'OPENAI_API_KEY',
+  },
+  {
+    hostPattern: 'api.anthropic.com',
+    providerName: 'Anthropic',
+    envVar: 'ANTHROPIC_API_KEY',
+  },
+  {
+    hostPattern: 'integrate.api.nvidia.com',
+    providerName: 'NVIDIA',
+    envVar: 'NVIDIA_API_KEY',
+  },
+] as const;
+
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
@@ -97,17 +115,30 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   }
 
   // Validate required fields
+  validateConfig(config);
+
+  return config;
+}
+
+export function validateConfig(config: ProjectConfig): void {
   if (!config.model.baseUrl) {
     throw new Error('Missing model.baseUrl in config');
   }
+
   if (!config.model.model) {
     throw new Error('Missing model.model in config');
   }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
-    throw new Error('OpenAI API requires apiKey in config');
-  }
 
-  return config;
+  const missingApiKeyRule = API_KEY_REQUIREMENTS.find(
+    (rule) => config.model.baseUrl.includes(rule.hostPattern) && !config.model.apiKey
+  );
+
+  if (missingApiKeyRule) {
+    throw new Error(
+      `${missingApiKeyRule.providerName} API requires an API key. ` +
+      `Set model.apiKey in config, ${missingApiKeyRule.envVar}, or SC_API_KEY.`
+    );
+  }
 }
 
 export function getGlobalConfigPath(): string {
