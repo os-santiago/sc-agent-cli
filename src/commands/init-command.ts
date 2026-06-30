@@ -23,21 +23,27 @@ This file provides context to the SC-Agent when working in this project.
 [Explain how to build and test the project]
 `;
 
-export async function initProject(cwd: string): Promise<void> {
+export async function initProject(cwd: string, force = false): Promise<void> {
   const agentsPath = path.join(cwd, 'AGENTS.md');
 
-  try {
-    await access(agentsPath);
-    throw new Error(
-      `AGENTS.md already exists at ${agentsPath}. Move or remove it before running "sc init" again.`
-    );
-  } catch (err: unknown) {
-    if (!(err instanceof Error) || !err.message.includes('ENOENT')) {
-      throw err;
-    }
+  const agentsExists = await fileExists(agentsPath);
+
+  if (agentsExists && !force) {
+    console.log(chalk.red(`✗ AGENTS.md already exists at ${agentsPath}`));
+    console.log(chalk.gray('  Re-run `sc init --force` to overwrite it'));
+    return;
   }
 
   await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
-  console.log(chalk.green(`✓ Created ${agentsPath}`));
+  console.log(chalk.green(`✓ ${agentsExists ? 'Overwrote' : 'Created'} ${agentsPath}`));
   console.log(chalk.gray('  Edit this file to provide context for the agent'));
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

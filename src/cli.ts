@@ -68,9 +68,10 @@ profileCommand
 program
   .command('init')
   .description('Initialize a new project with AGENTS.md')
-  .action(async () => {
+  .option('-f, --force', 'Overwrite an existing AGENTS.md file')
+  .action(async (options) => {
     try {
-      await initProject(process.cwd());
+      await initProject(process.cwd(), options.force);
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Error: ${errorMsg}`));
