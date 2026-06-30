@@ -43,15 +43,19 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(this.formatNetworkError(url, err));
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(await this.formatHttpError(response));
     }
 
     if (options.stream && response.body) {
@@ -62,10 +66,19 @@ export class OpenAICompatibleProvider {
   }
 
   private async handleNonStreamResponse(response: Response): Promise<ChatCompletionResponse> {
-    const data = await response.json();
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (err: unknown) {
+      const details = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Provider returned invalid JSON. Check that model.baseUrl points to an OpenAI-compatible /chat/completions endpoint. Details: ${details}`
+      );
+    }
+
     const choice = data.choices?.[0];
     if (!choice) {
-      throw new Error('No choices in response');
+      throw new Error('Provider response did not include any choices. Check that the selected model and endpoint are valid.');
     }
 
     return {
@@ -153,5 +166,46 @@ export class OpenAICompatibleProvider {
       content: fullContent,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
+  }
+
+  private formatNetworkError(url: string, err: unknown): string {
+    const details = err instanceof Error ? err.message : String(err);
+    const localhostHosts = ['localhost', '127.0.0.1', '0.0.0.0'];
+
+    let host = '';
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      host = '';
+    }
+
+    if (localhostHosts.includes(host)) {
+      return `Could not reach the local provider at ${url}. Check that the server is running and model.baseUrl is correct. Details: ${details}`;
+    }
+
+    return `Could not reach the provider at ${url}. Check your network, API base URL, and credentials. Details: ${details}`;
+  }
+
+  private async formatHttpError(response: Response): Promise<string> {
+    const bodyText = await response.text();
+    const errorMessage = this.extractErrorMessage(bodyText);
+    return `API Error ${response.status}: ${errorMessage}`;
+  }
+
+  private extractErrorMessage(bodyText: string): string {
+    const trimmed = bodyText.trim();
+    if (!trimmed) {
+      return 'Empty error response from provider';
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        error?: { message?: string };
+        message?: string;
+      };
+      return parsed.error?.message || parsed.message || trimmed;
+    } catch {
+      return trimmed;
+    }
   }
 }
