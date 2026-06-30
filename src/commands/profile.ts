@@ -30,8 +30,7 @@ export async function addProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   const response = await prompts([
@@ -76,8 +75,7 @@ export async function useProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
-      return;
+      throw new Error('No profiles available');
     }
 
     const response = await prompts({
@@ -90,13 +88,11 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
-    return;
+    throw new Error(`Profile "${name}" not found`);
   }
 
   config.activeProfile = name;
@@ -110,8 +106,7 @@ export async function removeProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
-      return;
+      throw new Error('No profiles available');
     }
 
     const response = await prompts({
@@ -124,13 +119,11 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
-    return;
+    throw new Error(`Profile "${name}" not found`);
   }
 
   delete config.profiles[name];
