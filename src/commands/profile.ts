@@ -3,6 +3,22 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type PromptFn = typeof prompts;
+
+export type ProfileCommandDeps = {
+  loadConfig: typeof loadConfig;
+  saveConfig: typeof saveConfig;
+  prompt: PromptFn;
+  log: typeof console.log;
+};
+
+const defaultDeps: ProfileCommandDeps = {
+  loadConfig,
+  saveConfig,
+  prompt: prompts,
+  log: console.log,
+};
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -18,10 +34,17 @@ export async function listProfiles(): Promise<void> {
 }
 
 export async function addProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  return addProfileWithDeps(name, defaultDeps);
+}
+
+export async function addProfileWithDeps(
+  name: string | undefined,
+  deps: ProfileCommandDeps
+): Promise<void> {
+  const config = await deps.loadConfig();
 
   if (!name) {
-    const response = await prompts({
+    const response = await deps.prompt({
       type: 'text',
       name: 'name',
       message: 'Profile name:',
@@ -30,11 +53,11 @@ export async function addProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    deps.log(chalk.yellow('Profile creation cancelled'));
     return;
   }
 
-  const response = await prompts([
+  const response = await deps.prompt([
     {
       type: 'text',
       name: 'baseUrl',
@@ -54,6 +77,11 @@ export async function addProfile(name?: string): Promise<void> {
     },
   ]);
 
+  if (!response.baseUrl || !response.model) {
+    deps.log(chalk.yellow(`Profile "${name}" was not saved because setup was cancelled`));
+    return;
+  }
+
   const profile: Partial<ModelConfig> = {
     baseUrl: response.baseUrl,
     model: response.model,
@@ -66,21 +94,28 @@ export async function addProfile(name?: string): Promise<void> {
   config.profiles = config.profiles || {};
   config.profiles[name] = profile;
 
-  await saveConfig(config, true);
-  console.log(chalk.green(`✓ Profile "${name}" added successfully`));
+  await deps.saveConfig(config, true);
+  deps.log(chalk.green(`✓ Profile "${name}" added successfully`));
 }
 
 export async function useProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  return useProfileWithDeps(name, defaultDeps);
+}
+
+export async function useProfileWithDeps(
+  name: string | undefined,
+  deps: ProfileCommandDeps
+): Promise<void> {
+  const config = await deps.loadConfig();
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      deps.log(chalk.red('No profiles available'));
       return;
     }
 
-    const response = await prompts({
+    const response = await deps.prompt({
       type: 'select',
       name: 'profile',
       message: 'Select a profile:',
@@ -90,31 +125,38 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    deps.log(chalk.yellow('Profile switch cancelled'));
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    deps.log(chalk.red(`Profile "${name}" not found`));
     return;
   }
 
   config.activeProfile = name;
-  await saveConfig(config, true);
-  console.log(chalk.green(`✓ Switched to profile "${name}"`));
+  await deps.saveConfig(config, true);
+  deps.log(chalk.green(`✓ Switched to profile "${name}"`));
 }
 
 export async function removeProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  return removeProfileWithDeps(name, defaultDeps);
+}
+
+export async function removeProfileWithDeps(
+  name: string | undefined,
+  deps: ProfileCommandDeps
+): Promise<void> {
+  const config = await deps.loadConfig();
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      deps.log(chalk.red('No profiles available'));
       return;
     }
 
-    const response = await prompts({
+    const response = await deps.prompt({
       type: 'select',
       name: 'profile',
       message: 'Select a profile to remove:',
@@ -124,12 +166,12 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    deps.log(chalk.yellow('Profile removal cancelled'));
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    deps.log(chalk.red(`Profile "${name}" not found`));
     return;
   }
 
@@ -139,6 +181,6 @@ export async function removeProfile(name?: string): Promise<void> {
     config.activeProfile = undefined;
   }
 
-  await saveConfig(config, true);
-  console.log(chalk.green(`✓ Profile "${name}" removed`));
+  await deps.saveConfig(config, true);
+  deps.log(chalk.green(`✓ Profile "${name}" removed`));
 }
