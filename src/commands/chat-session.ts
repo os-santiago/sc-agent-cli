@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, saveConfig } from '../core/config.js';
+import type { ProjectConfig } from '../core/types.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
@@ -30,6 +31,39 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       resolve(answer.trim());
     });
   });
+}
+
+function getConfiguredApiKeyFromEnv(env = process.env): string | undefined {
+  return env.SC_API_KEY
+    || env.OPENAI_API_KEY
+    || env.ANTHROPIC_API_KEY
+    || env.NVIDIA_API_KEY;
+}
+
+export async function switchChatModelProfile(
+  config: ProjectConfig,
+  profileName: string,
+  save: (config: ProjectConfig, global?: boolean) => Promise<void> = saveConfig,
+  env = process.env
+): Promise<ProjectConfig> {
+  const selectedProfile = config.profiles?.[profileName];
+  if (!selectedProfile) {
+    throw new Error(`Profile "${profileName}" not found`);
+  }
+
+  const updatedConfig: ProjectConfig = {
+    ...config,
+    model: { ...config.model, ...selectedProfile },
+    activeProfile: profileName,
+  };
+
+  const envApiKey = getConfiguredApiKeyFromEnv(env);
+  if (envApiKey) {
+    updatedConfig.model.apiKey = envApiKey;
+  }
+
+  await save(updatedConfig, true);
+  return updatedConfig;
 }
 
 export async function startChatSession(options: AgentOptions): Promise<void> {
@@ -636,23 +670,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         }
 
         // Apply the selected profile
-        const selectedProfile = profiles[selection.profile];
-        if (!selectedProfile) {
-          console.log(chalk.red(`\nProfile "${selection.profile}" not found\n`));
-          continue;
-        }
-
-        currentConfig.model = { ...currentConfig.model, ...selectedProfile };
-        currentConfig.activeProfile = selection.profile;
-
-        // Override with env var if available
-        const envApiKey = process.env.SC_API_KEY
-          || process.env.OPENAI_API_KEY
-          || process.env.ANTHROPIC_API_KEY
-          || process.env.NVIDIA_API_KEY;
-        if (envApiKey) {
-          currentConfig.model.apiKey = envApiKey;
-        }
+        currentConfig = await switchChatModelProfile(currentConfig, selection.profile);
 
         // Create new agent with updated config
         agent = new Agent({
