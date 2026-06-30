@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { loadConfig, saveConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,33 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('saveConfig does not overwrite project config unless explicitly allowed', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-save-config-'));
+  const originalCwd = process.cwd();
+
+  process.chdir(projectRoot);
+
+  try {
+    const existingConfigPath = path.join(projectRoot, '.sc-agent.json');
+    await writeFile(existingConfigPath, JSON.stringify({ model: { model: 'keep-me' } }), 'utf-8');
+
+    await assert.rejects(
+      () => saveConfig(createConfig('http://localhost:11434/v1'), false, false),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Config already exists/);
+        assert.match(err.message, new RegExp(escapeRegex(existingConfigPath)));
+        return true;
+      }
+    );
+
+    const currentContents = await readFile(existingConfigPath, 'utf-8');
+    assert.match(currentContents, /keep-me/);
+  } finally {
+    process.chdir(originalCwd);
+  }
 });
 
 function escapeRegex(value: string): string {
