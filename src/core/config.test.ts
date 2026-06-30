@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { initConfig, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -66,6 +66,68 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
   );
 });
 
+test('initConfig refuses to overwrite an existing global config without --force', async () => {
+  await withTempHome(async (homeDir) => {
+    const configDir = path.join(homeDir, '.sc-agent');
+    const configPath = path.join(configDir, 'config.json');
+
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configPath, '{"model":{"baseUrl":"https://example.com","model":"custom"}}', 'utf-8');
+
+    await assert.rejects(
+      () => initConfig(),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Global config already exists/);
+        assert.match(err.message, new RegExp(escapeRegex(configPath)));
+        assert.match(err.message, /sc config-init --force/);
+        return true;
+      }
+    );
+  });
+});
+
+test('initConfig overwrites an existing global config when --force is used', async () => {
+  await withTempHome(async (homeDir) => {
+    const configDir = path.join(homeDir, '.sc-agent');
+    const configPath = path.join(configDir, 'config.json');
+
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configPath, '{"model":{"baseUrl":"https://example.com","model":"custom"}}', 'utf-8');
+
+    await initConfig(true);
+
+    const savedConfig = JSON.parse(await readFile(configPath, 'utf-8')) as ProjectConfig;
+    assert.equal(savedConfig.model.baseUrl, 'http://localhost:11434/v1');
+    assert.equal(savedConfig.activeProfile, 'ollama');
+  });
+});
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function withTempHome(run: (homeDir: string) => Promise<void>): Promise<void> {
+  const homeDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-home-'));
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+
+  process.env.HOME = homeDir;
+  process.env.USERPROFILE = homeDir;
+
+  try {
+    await run(homeDir);
+  } finally {
+    restoreEnvVar('HOME', previousHome);
+    restoreEnvVar('USERPROFILE', previousUserProfile);
+  }
+}
+
+function restoreEnvVar(name: 'HOME' | 'USERPROFILE', value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
 }
