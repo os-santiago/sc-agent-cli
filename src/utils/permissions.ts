@@ -21,6 +21,70 @@ export function clearSessionPermissions(): void {
   sessionAutoApprove.clear();
 }
 
+const MAX_INLINE_VALUE_LENGTH = 100;
+const MAX_PREVIEW_LENGTH = 60;
+
+function truncateInline(value: string, maxLength = MAX_INLINE_VALUE_LENGTH): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function summarizeTextPayload(label: string, value: string): string {
+  const normalizedPreview = value.replace(/\s+/g, ' ').trim();
+  const preview = normalizedPreview
+    ? `, preview="${truncateInline(normalizedPreview, MAX_PREVIEW_LENGTH)}"`
+    : '';
+
+  return `${label}: ${value.length} chars, ${value.split('\n').length} lines${preview}`;
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function formatPermissionDetails(toolName: string, args: Record<string, unknown>): string[] {
+  if (toolName === 'write_file') {
+    const pathValue = typeof args.path === 'string' ? args.path : undefined;
+    const contentValue = typeof args.content === 'string' ? args.content : undefined;
+
+    return [
+      ...(pathValue ? [`Path: ${truncateInline(pathValue)}`] : []),
+      ...(contentValue !== undefined ? [summarizeTextPayload('Content', contentValue)] : []),
+    ];
+  }
+
+  if (toolName === 'edit_file') {
+    const pathValue = typeof args.path === 'string' ? args.path : undefined;
+    const patchValue = typeof args.patch === 'string' ? args.patch : undefined;
+
+    return [
+      ...(pathValue ? [`Path: ${truncateInline(pathValue)}`] : []),
+      ...(patchValue !== undefined ? [summarizeTextPayload('Patch', patchValue)] : []),
+    ];
+  }
+
+  if (toolName === 'run_shell') {
+    const commandValue = typeof args.command === 'string' ? args.command : undefined;
+
+    return commandValue ? [`Command: ${truncateInline(commandValue)}`] : [];
+  }
+
+  return Object.entries(args).map(([key, value]) => {
+    if (typeof value === 'string') {
+      return `${key}: ${truncateInline(value)}`;
+    }
+
+    return `${key}: ${truncateInline(safeJsonStringify(value))}`;
+  });
+}
+
 export async function requestPermission(ctx: PermissionContext): Promise<boolean> {
   // Auto-approve if explicitly set in context
   if (ctx.autoApprove) return true;
@@ -81,7 +145,10 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   // Ask user with helpful context
   console.log(chalk.gray('\n  ┌─ Permission ────────────────────────────────────────────┐'));
   console.log(chalk.gray(`  │ ${chalk.yellow('🔐')} Tool: ${ctx.toolName}`));
-  console.log(chalk.gray(`  │    Args: ${JSON.stringify(ctx.args)}`));
+  const permissionDetails = formatPermissionDetails(ctx.toolName, ctx.args);
+  permissionDetails.forEach(line => {
+    console.log(chalk.gray(`  │    ${line}`));
+  });
   console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
 
   const response = await prompts({
