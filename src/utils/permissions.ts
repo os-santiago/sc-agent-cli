@@ -1,9 +1,7 @@
 import prompts from 'prompts';
 import chalk from 'chalk';
 import type { ProjectConfig } from '../core/types.js';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import path from 'node:path';
+import { updateGlobalConfig } from '../core/config.js';
 import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
 
 export interface PermissionContext {
@@ -107,34 +105,20 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   if (choice === 'always') {
     // Save to config permanently
     try {
-      const configDir = path.join(homedir(), '.sc-agent');
-      const configPath = path.join(configDir, 'config.json');
-
-      // Ensure directory exists
-      if (!existsSync(configDir)) {
-        mkdirSync(configDir, { recursive: true });
-      }
-
-      // Read or create config
-      let configContent: Record<string, unknown> = {};
-      if (existsSync(configPath)) {
-        const fileContent = readFileSync(configPath, 'utf-8');
-        configContent = JSON.parse(fileContent);
-      }
-
-      interface PermissionsConfig {
-        autoApprove?: string[];
-        profile?: 'traditional' | 'blacklist';
-        denyPaths?: string[];
-      }
-      const permissions = (configContent.permissions as PermissionsConfig) || {};
-      if (!permissions.autoApprove) {
-        permissions.autoApprove = [];
-      }
-      if (!permissions.autoApprove.includes(ctx.toolName)) {
-        permissions.autoApprove.push(ctx.toolName);
-        configContent.permissions = permissions;
-        writeFileSync(configPath, JSON.stringify(configContent, null, 2));
+      let added = false;
+      await updateGlobalConfig((config) => {
+        if (!config.permissions) {
+          config.permissions = {};
+        }
+        if (!config.permissions.autoApprove) {
+          config.permissions.autoApprove = [];
+        }
+        if (!config.permissions.autoApprove.includes(ctx.toolName)) {
+          config.permissions.autoApprove.push(ctx.toolName);
+          added = true;
+        }
+      });
+      if (added) {
         console.log(chalk.gray(`\n   ✓ Added "${ctx.toolName}" to auto-approve list\n`));
       }
     } catch (err) {

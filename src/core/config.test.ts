@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { getGlobalConfigPath, loadConfig, updateGlobalConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -68,4 +68,81 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+test('updateGlobalConfig surfaces invalid global config JSON with recovery hint', async () => {
+  const configPath = getGlobalConfigPath();
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const originalContent = await readOptionalFile(configPath);
+
+  try {
+    await writeFile(configPath, '{"permissions":', 'utf-8');
+
+    await assert.rejects(
+      () => updateGlobalConfig((config) => {
+        if (!config.permissions) {
+          config.permissions = {};
+        }
+        config.permissions.profile = 'blacklist';
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Invalid JSON in global config/);
+        assert.match(err.message, new RegExp(escapeRegex(configPath)));
+        assert.match(err.message, /sc config-init/);
+        return true;
+      }
+    );
+  } finally {
+    await restoreFile(configPath, originalContent);
+  }
+});
+
+test('updateGlobalConfig persists targeted permission changes', async () => {
+  const configPath = getGlobalConfigPath();
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const originalContent = await readOptionalFile(configPath);
+
+  try {
+    await writeFile(configPath, JSON.stringify({
+      permissions: {
+        autoApprove: ['read_file'],
+      },
+    }, null, 2), 'utf-8');
+
+    await updateGlobalConfig((config) => {
+      if (!config.permissions) {
+        config.permissions = {};
+      }
+      config.permissions.profile = 'blacklist';
+    });
+
+    const updated = JSON.parse(await readFile(configPath, 'utf-8')) as ProjectConfig;
+    assert.deepEqual(updated.permissions, {
+      autoApprove: ['read_file'],
+      profile: 'blacklist',
+    });
+  } finally {
+    await restoreFile(configPath, originalContent);
+  }
+});
+
+async function readOptionalFile(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, 'utf-8');
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+async function restoreFile(filePath: string, content: string | undefined): Promise<void> {
+  if (content === undefined) {
+    await rm(filePath, { force: true });
+    return;
+  }
+
+  await writeFile(filePath, content, 'utf-8');
 }

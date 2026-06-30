@@ -149,6 +149,18 @@ export async function initConfig(): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
+export async function updateGlobalConfig(
+  updater: (config: Partial<ProjectConfig>) => void
+): Promise<string> {
+  await mkdir(CONFIG_DIR, { recursive: true });
+
+  const config = await loadMutableConfigFile(CONFIG_PATH, 'global');
+  updater(config);
+
+  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  return CONFIG_PATH;
+}
+
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {
   const result = { ...base };
   for (const key in override) {
@@ -174,13 +186,22 @@ async function mergeConfigFile(
   configPath: string,
   scope: ConfigScope
 ): Promise<ProjectConfig> {
+  const parsedConfig = await loadMutableConfigFile(configPath, scope);
+
+  return deepMerge(config, parsedConfig);
+}
+
+async function loadMutableConfigFile(
+  configPath: string,
+  scope: ConfigScope
+): Promise<Partial<ProjectConfig>> {
   let data: string;
 
   try {
     data = await readFile(configPath, 'utf-8');
   } catch (err: unknown) {
     if (isMissingFileError(err)) {
-      return config;
+      return {};
     }
 
     throw new Error(
@@ -189,9 +210,8 @@ async function mergeConfigFile(
     );
   }
 
-  let parsedConfig: Partial<ProjectConfig>;
   try {
-    parsedConfig = JSON.parse(data) as Partial<ProjectConfig>;
+    return JSON.parse(data) as Partial<ProjectConfig>;
   } catch (err: unknown) {
     const details = err instanceof Error ? err.message : 'Invalid JSON';
     throw new Error(
@@ -199,8 +219,6 @@ async function mergeConfigFile(
       `Fix the file or re-run "sc config-init" to recreate the default config.`
     );
   }
-
-  return deepMerge(config, parsedConfig);
 }
 
 function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {

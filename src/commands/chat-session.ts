@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
-import { loadConfig } from '../core/config.js';
+import { getGlobalConfigPath, loadConfig, updateGlobalConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
 import { getStorageGuidance } from '../utils/storage-guidance.js';
@@ -285,29 +285,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         // Save to config
         try {
-          const fs = await import('node:fs');
-          const path = await import('node:path');
-          const { homedir } = await import('node:os');
-
-          const configPath = path.join(homedir(), '.sc-agent', 'config.json');
-          const configDir = path.dirname(configPath);
-
-          if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-          }
-
-          let config: Record<string, unknown> = {};
-          if (fs.existsSync(configPath)) {
-            const configContent = fs.readFileSync(configPath, 'utf-8');
-            config = JSON.parse(configContent);
-          }
-
-          if (!config.permissions) {
-            config.permissions = {};
-          }
-          (config.permissions as {profile?: string}).profile = profileChoice.profile;
-
-          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          await updateGlobalConfig((config) => {
+            if (!config.permissions) {
+              config.permissions = {};
+            }
+            config.permissions.profile = profileChoice.profile;
+          });
 
           // Update current config
           if (!currentConfig.permissions) {
@@ -438,36 +421,15 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         if (confirm.value) {
           // Save to config
           try {
-            const fs = await import('node:fs');
-            const path = await import('node:path');
-            const { homedir } = await import('node:os');
-
-            const configPath = path.join(homedir(), '.sc-agent', 'config.json');
-
-            // Ensure directory exists
-            const configDir = path.dirname(configPath);
-            if (!fs.existsSync(configDir)) {
-              fs.mkdirSync(configDir, { recursive: true });
-            }
-
-            // Read existing config or create new
-            let config: Record<string, unknown> = {};
-            if (fs.existsSync(configPath)) {
-              const configContent = fs.readFileSync(configPath, 'utf-8');
-              config = JSON.parse(configContent);
-            }
-
-            // Update permissions
-            if (!config.permissions) {
-              config.permissions = {};
-            }
-            (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
-
-            // Write config
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            await updateGlobalConfig((config) => {
+              if (!config.permissions) {
+                config.permissions = {};
+              }
+              config.permissions.autoApprove = preApprovedTools;
+            });
 
             console.log(chalk.green('\n✓ Configuration saved to:'));
-            console.log(chalk.gray(`  ${configPath}\n`));
+            console.log(chalk.gray(`  ${getGlobalConfigPath()}\n`));
 
             // Reload config
             const reloadedConfig = await loadConfig(options.workspaceRoot);
