@@ -1,10 +1,7 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ProjectConfig, ModelConfig } from './types.js';
-
-const CONFIG_DIR = path.join(homedir(), '.sc-agent');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+import type { ProjectConfig } from './types.js';
 
 const DEFAULT_CONFIG: ProjectConfig = {
   model: {
@@ -52,26 +49,34 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
+const API_KEY_REQUIREMENTS = [
+  {
+    hostPattern: 'api.openai.com',
+    providerName: 'OpenAI',
+    envVar: 'OPENAI_API_KEY',
+  },
+  {
+    hostPattern: 'api.anthropic.com',
+    providerName: 'Anthropic',
+    envVar: 'ANTHROPIC_API_KEY',
+  },
+  {
+    hostPattern: 'integrate.api.nvidia.com',
+    providerName: 'NVIDIA',
+    envVar: 'NVIDIA_API_KEY',
+  },
+] as const;
+
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
-  try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
-  } catch (err: unknown) {
-    // No global config, use defaults
-  }
+  config = await mergeConfigFile(config, getGlobalConfigPath(), 'global');
 
   // Load project-local config if in a project
   if (projectRoot) {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
-    try {
-      const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
-    } catch (err: unknown) {
-      // No project config
-    }
+    config = await mergeConfigFile(config, projectConfigPath, 'project');
   }
 
   // Apply active profile if set
@@ -97,38 +102,60 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   }
 
   // Validate required fields
-  if (!config.model.baseUrl) {
-    throw new Error('Missing model.baseUrl in config');
-  }
-  if (!config.model.model) {
-    throw new Error('Missing model.model in config');
-  }
-  if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
-    throw new Error('OpenAI API requires apiKey in config');
-  }
+  validateConfig(config);
 
   return config;
 }
 
+export function validateConfig(config: ProjectConfig): void {
+  if (!config.model.baseUrl) {
+    throw new Error('Missing model.baseUrl in config');
+  }
+
+  if (!config.model.model) {
+    throw new Error('Missing model.model in config');
+  }
+
+  const missingApiKeyRule = API_KEY_REQUIREMENTS.find(
+    (rule) => config.model.baseUrl.includes(rule.hostPattern) && !config.model.apiKey
+  );
+
+  if (missingApiKeyRule) {
+    throw new Error(
+      `${missingApiKeyRule.providerName} API requires an API key. ` +
+      `Set model.apiKey in config, ${missingApiKeyRule.envVar}, or SC_API_KEY.`
+    );
+  }
+}
+
 export function getGlobalConfigPath(): string {
-  return CONFIG_PATH;
+  return path.join(getConfigDir(), 'config.json');
 }
 
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
-  const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
+  const targetPath = global ? getGlobalConfigPath() : path.join(process.cwd(), '.sc-agent.json');
 
   if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await mkdir(getConfigDir(), { recursive: true });
   }
 
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  const configPath = getGlobalConfigPath();
+
+  if (!force && await pathExists(configPath)) {
+    throw new Error(
+      `Global config already exists at ${configPath}. ` +
+      `Re-run "sc config-init --force" to overwrite it.`
+    );
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
-function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
+function deepMerge<T extends object>(base: T, override: Partial<T>): T {
   const result = { ...base };
   for (const key in override) {
     const val = override[key];
@@ -144,4 +171,65 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+type ConfigScope = 'global' | 'project';
+
+async function mergeConfigFile(
+  config: ProjectConfig,
+  configPath: string,
+  scope: ConfigScope
+): Promise<ProjectConfig> {
+  let data: string;
+
+  try {
+    data = await readFile(configPath, 'utf-8');
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return config;
+    }
+
+    throw new Error(
+      `Could not read ${scope} config at ${configPath}. ` +
+      `Check file permissions and try again.`
+    );
+  }
+
+  let parsedConfig: Partial<ProjectConfig>;
+  try {
+    parsedConfig = JSON.parse(data) as Partial<ProjectConfig>;
+  } catch (err: unknown) {
+    const details = err instanceof Error ? err.message : 'Invalid JSON';
+    throw new Error(
+      `Invalid JSON in ${scope} config at ${configPath}: ${details}. ` +
+      `Fix the file or re-run "sc config-init" to recreate the default config.`
+    );
+  }
+
+  return deepMerge(config, parsedConfig);
+}
+
+function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+
+  return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw err;
+  }
+}
+
+function getConfigDir(): string {
+  return path.join(homedir(), '.sc-agent');
 }
