@@ -43,15 +43,19 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(formatNetworkError(err, url, this.config.baseUrl));
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(await formatApiError(response, url));
     }
 
     if (options.stream && response.body) {
@@ -154,4 +158,167 @@ export class OpenAICompatibleProvider {
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
+}
+
+async function formatApiError(response: Response, url: string): Promise<string> {
+  const detail = extractErrorDetail(await response.text());
+  const location = `Request to ${url} failed with ${response.status} ${response.statusText}.`;
+
+  switch (response.status) {
+    case 400:
+      return joinMessageParts([
+        location,
+        'The provider rejected the request payload.',
+        detail,
+      ]);
+    case 401:
+      return joinMessageParts([
+        location,
+        'Authentication failed. Check model.apiKey or the provider-specific API key environment variable.',
+        detail,
+      ]);
+    case 403:
+      return joinMessageParts([
+        location,
+        'The provider denied access. Check account permissions and model availability.',
+        detail,
+      ]);
+    case 404:
+      return joinMessageParts([
+        location,
+        'Endpoint not found. Check model.baseUrl and verify the provider supports the OpenAI-compatible /chat/completions route.',
+        detail,
+      ]);
+    case 429:
+      return joinMessageParts([
+        location,
+        'Rate limit reached. Wait and retry, or reduce request frequency.',
+        detail,
+      ]);
+    default:
+      if (response.status >= 500) {
+        return joinMessageParts([
+          location,
+          'The provider reported a server-side failure. Retry shortly or check provider status.',
+          detail,
+        ]);
+      }
+
+      return joinMessageParts([
+        location,
+        'The provider returned an unexpected error response.',
+        detail,
+      ]);
+  }
+}
+
+function formatNetworkError(err: unknown, url: string, baseUrl: string): string {
+  const code = getErrorCode(err);
+  const detail = getErrorMessage(err);
+  const location = `Could not reach ${url}.`;
+  const localHint = isLocalProvider(baseUrl)
+    ? 'Verify the local provider is running and model.baseUrl is correct.'
+    : 'Check model.baseUrl, network connectivity, and provider availability.';
+
+  switch (code) {
+    case 'ECONNREFUSED':
+      return joinMessageParts([
+        location,
+        'Connection was refused by the provider.',
+        localHint,
+        detail,
+      ]);
+    case 'ENOTFOUND':
+      return joinMessageParts([
+        location,
+        'The provider host could not be resolved.',
+        'Check model.baseUrl for typos or DNS issues.',
+        detail,
+      ]);
+    case 'ETIMEDOUT':
+      return joinMessageParts([
+        location,
+        'The connection timed out.',
+        localHint,
+        detail,
+      ]);
+    default:
+      return joinMessageParts([
+        location,
+        'Network request failed before the provider returned a response.',
+        localHint,
+        detail,
+      ]);
+  }
+}
+
+function extractErrorDetail(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    const message = parsed.error?.message || parsed.message;
+    if (message) {
+      return sanitizeDetail(message);
+    }
+  } catch {
+    // Ignore JSON parse errors and fall back to raw text.
+  }
+
+  return sanitizeDetail(trimmed);
+}
+
+function sanitizeDetail(detail: string): string {
+  const singleLine = detail.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= 220) {
+    return `Provider response: ${singleLine}`;
+  }
+
+  return `Provider response: ${singleLine.slice(0, 217)}...`;
+}
+
+function getErrorCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') {
+    return undefined;
+  }
+
+  const code = 'code' in err ? (err as { code?: unknown }).code : undefined;
+  if (typeof code === 'string') {
+    return code;
+  }
+
+  const cause = 'cause' in err ? (err as { cause?: unknown }).cause : undefined;
+  if (cause && typeof cause === 'object' && 'code' in cause) {
+    const causeCode = (cause as { code?: unknown }).code;
+    return typeof causeCode === 'string' ? causeCode : undefined;
+  }
+
+  return undefined;
+}
+
+function getErrorMessage(err: unknown): string | undefined {
+  if (!(err instanceof Error) || !err.message.trim()) {
+    return undefined;
+  }
+
+  return `Details: ${sanitizeRawMessage(err.message)}`;
+}
+
+function sanitizeRawMessage(message: string): string {
+  const singleLine = message.replace(/\s+/g, ' ').trim();
+  return singleLine.length <= 220 ? singleLine : `${singleLine.slice(0, 217)}...`;
+}
+
+function isLocalProvider(baseUrl: string): boolean {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(baseUrl);
+}
+
+function joinMessageParts(parts: Array<string | undefined>): string {
+  return parts.filter(Boolean).join(' ');
 }
