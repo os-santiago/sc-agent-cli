@@ -1,10 +1,15 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
 
-const CONFIG_DIR = path.join(homedir(), '.sc-agent');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+function getConfigDir(): string {
+  return path.join(homedir(), '.sc-agent');
+}
+
+function getConfigPath(): string {
+  return path.join(getConfigDir(), 'config.json');
+}
 
 const DEFAULT_CONFIG: ProjectConfig = {
   model: {
@@ -74,7 +79,7 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
-  config = await mergeConfigFile(config, CONFIG_PATH, 'global');
+  config = await mergeConfigFile(config, getConfigPath(), 'global');
 
   // Load project-local config if in a project
   if (projectRoot) {
@@ -132,20 +137,29 @@ export function validateConfig(config: ProjectConfig): void {
 }
 
 export function getGlobalConfigPath(): string {
-  return CONFIG_PATH;
+  return getConfigPath();
 }
 
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
-  const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
+  const targetPath = global ? getConfigPath() : path.join(process.cwd(), '.sc-agent.json');
 
   if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await mkdir(getConfigDir(), { recursive: true });
   }
 
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  const configPath = getConfigPath();
+
+  if (!force && await fileExists(configPath)) {
+    throw new Error(
+      `Global config already exists at ${configPath}. ` +
+      'Re-run "sc config-init --force" to overwrite it.'
+    );
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -209,4 +223,20 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw new Error(
+      `Could not access config path at ${filePath}. ` +
+      'Check file permissions and try again.'
+    );
+  }
 }
