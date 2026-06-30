@@ -4,7 +4,7 @@ import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
 export async function listProfiles(): Promise<void> {
-  const config = await loadConfig();
+  const config = await loadConfig({ validateModel: false });
   const profiles = config.profiles || {};
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
@@ -18,7 +18,7 @@ export async function listProfiles(): Promise<void> {
 }
 
 export async function addProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await loadConfig({ validateModel: false });
 
   if (!name) {
     const response = await prompts({
@@ -71,7 +71,7 @@ export async function addProfile(name?: string): Promise<void> {
 }
 
 export async function useProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await loadConfig({ validateModel: false });
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
@@ -105,7 +105,7 @@ export async function useProfile(name?: string): Promise<void> {
 }
 
 export async function removeProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await loadConfig({ validateModel: false });
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
