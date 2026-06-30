@@ -3,6 +3,34 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+export function normalizeProfileInput(value: string | undefined): string {
+  return value?.trim() ?? '';
+}
+
+export function validateRequiredProfileField(value: string, label: string): true | string {
+  return normalizeProfileInput(value) ? true : `${label} is required`;
+}
+
+export function validateProfileBaseUrl(value: string): true | string {
+  const normalized = normalizeProfileInput(value);
+
+  if (!normalized) {
+    return 'Base URL is required';
+  }
+
+  try {
+    const parsed = new URL(normalized);
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return 'Base URL must start with http:// or https://';
+    }
+
+    return true;
+  } catch {
+    return 'Base URL must be a valid http:// or https:// URL';
+  }
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -19,17 +47,19 @@ export async function listProfiles(): Promise<void> {
 
 export async function addProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  let profileName = normalizeProfileInput(name);
 
-  if (!name) {
+  if (!profileName) {
     const response = await prompts({
       type: 'text',
       name: 'name',
       message: 'Profile name:',
+      validate: (value: string) => validateRequiredProfileField(value, 'Profile name'),
     });
-    name = response.name;
+    profileName = normalizeProfileInput(response.name);
   }
 
-  if (!name) {
+  if (!profileName) {
     console.log(chalk.red('Profile name is required'));
     return;
   }
@@ -40,12 +70,14 @@ export async function addProfile(name?: string): Promise<void> {
       name: 'baseUrl',
       message: 'Base URL:',
       initial: 'http://localhost:11434/v1',
+      validate: validateProfileBaseUrl,
     },
     {
       type: 'text',
       name: 'model',
       message: 'Model name:',
       initial: 'llama3.2',
+      validate: (value: string) => validateRequiredProfileField(value, 'Model name'),
     },
     {
       type: 'text',
@@ -54,20 +86,36 @@ export async function addProfile(name?: string): Promise<void> {
     },
   ]);
 
+  const baseUrl = normalizeProfileInput(response.baseUrl);
+  const model = normalizeProfileInput(response.model);
+  const apiKey = normalizeProfileInput(response.apiKey);
+
+  const baseUrlValidation = validateProfileBaseUrl(baseUrl);
+  if (baseUrlValidation !== true) {
+    console.log(chalk.red(baseUrlValidation));
+    return;
+  }
+
+  const modelValidation = validateRequiredProfileField(model, 'Model name');
+  if (modelValidation !== true) {
+    console.log(chalk.red(modelValidation));
+    return;
+  }
+
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl,
+    model,
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};
-  config.profiles[name] = profile;
+  config.profiles[profileName] = profile;
 
   await saveConfig(config, true);
-  console.log(chalk.green(`✓ Profile "${name}" added successfully`));
+  console.log(chalk.green(`✓ Profile "${profileName}" added successfully`));
 }
 
 export async function useProfile(name?: string): Promise<void> {
