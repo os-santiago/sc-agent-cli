@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig, validateConfig } from './config.js';
@@ -64,6 +64,75 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('initConfig requires --force before overwriting an existing global config', async () => {
+  const tempHome = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-home-'));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+
+  try {
+    const configModule = await import(`./config.js?test=${Date.now()}`);
+    const configPath = configModule.getGlobalConfigPath();
+
+    await configModule.initConfig();
+
+    const customConfig = {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        model: 'custom-model',
+        temperature: 0.1,
+        maxTokens: 256,
+        stream: false,
+      },
+      permissions: {
+        autoApprove: ['read_file'],
+        denyPaths: ['.env'],
+      },
+      profiles: {
+        custom: {
+          baseUrl: 'https://example.test/v1',
+          model: 'custom-model',
+        },
+      },
+      activeProfile: 'custom',
+    };
+
+    await writeFile(configPath, JSON.stringify(customConfig, null, 2), 'utf-8');
+
+    await assert.rejects(
+      () => configModule.initConfig(),
+      /Config already exists .*sc config-init --force/
+    );
+
+    const preservedConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+    assert.equal(preservedConfig.activeProfile, 'custom');
+    assert.equal(preservedConfig.model.baseUrl, 'https://example.test/v1');
+
+    await configModule.initConfig(true);
+
+    const resetConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+    assert.equal(resetConfig.activeProfile, 'ollama');
+    assert.equal(resetConfig.model.baseUrl, 'http://localhost:11434/v1');
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    await rm(tempHome, { recursive: true, force: true });
+  }
 });
 
 function escapeRegex(value: string): string {
