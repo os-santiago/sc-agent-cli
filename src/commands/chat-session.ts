@@ -102,9 +102,13 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     }
 
     // Process the prompt
-    console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
+    if (!isQuiet) {
+      console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
+    }
     await agent.run(userInput, history);
-    console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
+    if (!isQuiet) {
+      console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
+    }
 
     // Exit after processing
     return;
