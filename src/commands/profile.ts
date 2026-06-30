@@ -30,8 +30,7 @@ export async function addProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   const response = await prompts([
@@ -72,12 +71,11 @@ export async function addProfile(name?: string): Promise<void> {
 
 export async function useProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profiles = getProfileNames(config);
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
-      return;
+      throw new Error('No profiles available. Run "sc config-init" or "sc profile add <name>" first.');
     }
 
     const response = await prompts({
@@ -90,13 +88,13 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
-    return;
+    throw new Error(
+      `Profile "${name}" not found. Available profiles: ${profiles.join(', ')}.`
+    );
   }
 
   config.activeProfile = name;
@@ -106,12 +104,11 @@ export async function useProfile(name?: string): Promise<void> {
 
 export async function removeProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profiles = getProfileNames(config);
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
-      return;
+      throw new Error('No profiles available. Run "sc config-init" or "sc profile add <name>" first.');
     }
 
     const response = await prompts({
@@ -124,13 +121,13 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
-    return;
+    throw new Error('Profile name is required');
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
-    return;
+    throw new Error(
+      `Profile "${name}" not found. Available profiles: ${profiles.join(', ')}.`
+    );
   }
 
   delete config.profiles[name];
@@ -141,4 +138,8 @@ export async function removeProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
+}
+
+function getProfileNames(config: Awaited<ReturnType<typeof loadConfig>>): string[] {
+  return Object.keys(config.profiles || {});
 }
