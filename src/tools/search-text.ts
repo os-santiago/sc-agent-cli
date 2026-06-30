@@ -45,6 +45,10 @@ export const searchTextTool: Tool = {
       ignore: ['**/node_modules/**', '**/.git/**'],
     });
 
+    if (files.length === 0) {
+      return `No files matched glob "${globPattern}". Check the pattern and try again.`;
+    }
+
     const results: string[] = [];
 
     for (const file of files) {
