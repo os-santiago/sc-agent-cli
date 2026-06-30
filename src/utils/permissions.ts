@@ -16,9 +16,36 @@ export interface PermissionContext {
 // Track session-level permissions (reset when process ends)
 const sessionAutoApprove = new Set<string>();
 
+const ARG_VALUE_PREVIEW_LIMIT = 80;
+const ARG_LINE_LIMIT = 3;
+
 // Clear session permissions (used when switching to "always ask" mode)
 export function clearSessionPermissions(): void {
   sessionAutoApprove.clear();
+}
+
+export function formatPermissionDetails(
+  toolName: string,
+  args: Record<string, unknown>
+): string[] {
+  switch (toolName) {
+    case 'write_file':
+      return [
+        `Path: ${formatArgValue(args.path)}`,
+        `Content: ${summarizeText(args.content)}`,
+      ];
+    case 'edit_file':
+      return [
+        `Path: ${formatArgValue(args.path)}`,
+        `Patch: ${summarizeText(args.patch)}`,
+      ];
+    case 'run_shell':
+      return [`Command: ${summarizeText(args.command)}`];
+    default:
+      return Object.entries(args)
+        .slice(0, ARG_LINE_LIMIT)
+        .map(([key, value]) => `${key}: ${formatArgValue(value)}`);
+  }
 }
 
 export async function requestPermission(ctx: PermissionContext): Promise<boolean> {
@@ -81,7 +108,9 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   // Ask user with helpful context
   console.log(chalk.gray('\n  ┌─ Permission ────────────────────────────────────────────┐'));
   console.log(chalk.gray(`  │ ${chalk.yellow('🔐')} Tool: ${ctx.toolName}`));
-  console.log(chalk.gray(`  │    Args: ${JSON.stringify(ctx.args)}`));
+  for (const detail of formatPermissionDetails(ctx.toolName, ctx.args)) {
+    console.log(chalk.gray(`  │    ${detail}`));
+  }
   console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
 
   const response = await prompts({
@@ -154,4 +183,34 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
 
   // choice === 'yes'
   return true;
+}
+
+function formatArgValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return summarizeText(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.length} item(s)]`;
+  }
+
+  if (value && typeof value === 'object') {
+    return '{...}';
+  }
+
+  return String(value);
+}
+
+function summarizeText(value: unknown): string {
+  if (typeof value !== 'string') {
+    return formatArgValue(value);
+  }
+
+  const normalized = value.replace(/\s+/g, ' ').trim();
+
+  if (normalized.length <= ARG_VALUE_PREVIEW_LIMIT) {
+    return normalized || '(empty)';
+  }
+
+  return `${normalized.slice(0, ARG_VALUE_PREVIEW_LIMIT - 4)}... (${value.length} chars)`;
 }
