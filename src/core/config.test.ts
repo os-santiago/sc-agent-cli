@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { initConfig, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,39 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('initConfig refuses to overwrite an existing config without force', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-init-'));
+  const configPath = path.join(projectRoot, 'config.json');
+
+  await writeFile(configPath, '{"existing":true}', 'utf-8');
+
+  await assert.rejects(
+    () => initConfig({ configPath }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Global config already exists/);
+      assert.match(err.message, new RegExp(escapeRegex(configPath)));
+      assert.match(err.message, /sc config-init --force/);
+      return true;
+    }
+  );
+});
+
+test('initConfig overwrites an existing config when force is enabled', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-init-force-'));
+  const configPath = path.join(projectRoot, 'config.json');
+
+  await writeFile(configPath, '{"existing":true}', 'utf-8');
+  await initConfig({ configPath, force: true });
+
+  const content = await readFile(configPath, 'utf-8');
+  const parsed = JSON.parse(content) as ProjectConfig;
+
+  assert.equal(parsed.activeProfile, 'ollama');
+  assert.equal(parsed.model.model, 'llama3.2');
+  assert.deepEqual(parsed.permissions?.autoApprove, ['read_file', 'list_dir', 'search_text']);
 });
 
 function escapeRegex(value: string): string {
