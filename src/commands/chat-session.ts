@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, setActiveProfile } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
@@ -151,7 +151,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     if (userInput.toLowerCase() === '/help') {
       console.log(chalk.cyan('\n📖 Available Commands:\n'));
       console.log(chalk.white('  /help                          ') + chalk.gray('- Show this help message'));
-      console.log(chalk.white('  /model                         ') + chalk.gray('- Switch to a different model'));
+      console.log(chalk.white('  /model                         ') + chalk.gray('- Switch model profile and save it'));
       console.log(chalk.white('  /permissions                   ') + chalk.gray('- Configure permission mode'));
       console.log(chalk.white('  /profile                       ') + chalk.gray('- Switch permission profile (traditional/blacklist)'));
       console.log(chalk.white('  /pre-approved-commands         ') + chalk.gray('- Setup pre-approved commands via interview'));
@@ -644,6 +644,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         currentConfig.model = { ...currentConfig.model, ...selectedProfile };
         currentConfig.activeProfile = selection.profile;
+        const savedScope = await setActiveProfile(selection.profile, options.workspaceRoot);
 
         // Override with env var if available
         const envApiKey = process.env.SC_API_KEY
@@ -662,7 +663,14 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         console.log(chalk.green(`\n✓ Switched to: ${selection.profile}`));
         console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
-        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}\n`));
+        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}`));
+        console.log(
+          chalk.gray(
+            savedScope === 'project'
+              ? '  Saved in project config for future sessions\n'
+              : '  Saved as the global default for future sessions\n'
+          )
+        );
 
         // Clear history when switching models
         history = [];
