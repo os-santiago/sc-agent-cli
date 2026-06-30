@@ -2,7 +2,7 @@ import { readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname, basename, sep } from 'node:path';
 
 // Available slash commands
-const SLASH_COMMANDS = [
+export const SLASH_COMMANDS = [
   '/help',
   '/model',
   '/permissions',
@@ -53,6 +53,29 @@ export function autocomplete(line: string, workspaceRoot: string): [string[], st
 
   // No matches
   return [[], trimmedLine];
+}
+
+export function isKnownSlashCommand(command: string): boolean {
+  return SLASH_COMMANDS.includes(normalizeSlashCommand(command));
+}
+
+export function getSlashCommandSuggestions(command: string): string[] {
+  const normalizedCommand = normalizeSlashCommand(command);
+  const prefixMatches = SLASH_COMMANDS.filter((slashCommand) => slashCommand.startsWith(normalizedCommand));
+
+  if (prefixMatches.length > 0) {
+    return prefixMatches.slice(0, 3);
+  }
+
+  return [...SLASH_COMMANDS]
+    .map((slashCommand) => ({
+      slashCommand,
+      distance: levenshteinDistance(normalizedCommand, slashCommand),
+    }))
+    .filter(({ distance }) => distance <= 4)
+    .sort((a, b) => a.distance - b.distance || a.slashCommand.localeCompare(b.slashCommand))
+    .slice(0, 3)
+    .map(({ slashCommand }) => slashCommand);
 }
 
 function containsPathIndicators(line: string): boolean {
@@ -141,4 +164,35 @@ export function createCompleter(workspaceRoot: string) {
   return function completer(line: string): [string[], string] {
     return autocomplete(line, workspaceRoot);
   };
+}
+
+function normalizeSlashCommand(command: string): string {
+  return command.trim().toLowerCase();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const distances = Array.from({ length: rows }, () => new Array<number>(cols).fill(0));
+
+  for (let i = 0; i < rows; i += 1) {
+    distances[i][0] = i;
+  }
+
+  for (let j = 0; j < cols; j += 1) {
+    distances[0][j] = j;
+  }
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      distances[i][j] = Math.min(
+        distances[i - 1][j] + 1,
+        distances[i][j - 1] + 1,
+        distances[i - 1][j - 1] + substitutionCost
+      );
+    }
+  }
+
+  return distances[rows - 1][cols - 1];
 }
