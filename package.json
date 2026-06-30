@@ -33,10 +33,15 @@
     "prompts": "^2.4.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/diff": "^5.2.0",
     "@types/node": "^22.0.0",
     "@types/prompts": "^2.4.9",
-    "typescript": "^5.4.0"
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
+    "eslint": "^10.6.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.62.0"
   },
   "engines": {
     "node": ">=18.0.0"
