@@ -41,6 +41,13 @@ export const listDirTool: Tool = {
     const entries = await readdir(safePath, { withFileTypes: true });
 
     const formatted = entries
+      .sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) {
+          return a.isDirectory() ? -1 : 1;
+        }
+
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      })
       .map((e) => {
         const type = e.isDirectory() ? '[DIR]' : '[FILE]';
         return `${type} ${e.name}`;
