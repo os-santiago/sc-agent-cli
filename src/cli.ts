@@ -79,7 +79,7 @@ program
   .option('-f, --force', 'Overwrite an existing global config file')
   .action(async (options) => {
     try {
-      await initConfig(options.force);
+      await initConfig({ force: options.force });
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
