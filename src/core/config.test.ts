@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { initConfig, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,40 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('initConfig refuses to overwrite an existing config without --force', async () => {
+  const configDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-init-'));
+  const configPath = path.join(configDir, 'config.json');
+
+  await writeFile(configPath, '{"model":{"model":"custom"}}', 'utf-8');
+
+  await assert.rejects(
+    () => initConfig(false, configPath),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Global config already exists/);
+      assert.match(err.message, /sc config-init --force/);
+      assert.match(err.message, new RegExp(escapeRegex(configPath)));
+      return true;
+    }
+  );
+
+  const preservedConfig = await readFile(configPath, 'utf-8');
+  assert.equal(preservedConfig, '{"model":{"model":"custom"}}');
+});
+
+test('initConfig overwrites an existing config when --force is used', async () => {
+  const configDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-force-'));
+  const configPath = path.join(configDir, 'config.json');
+
+  await writeFile(configPath, '{"model":{"model":"custom"}}', 'utf-8');
+  await initConfig(true, configPath);
+
+  const writtenConfig = JSON.parse(await readFile(configPath, 'utf-8')) as ProjectConfig;
+  assert.equal(writtenConfig.activeProfile, 'ollama');
+  assert.equal(writtenConfig.model.model, 'llama3.2');
+  assert.ok(writtenConfig.profiles?.openai);
 });
 
 function escapeRegex(value: string): string {

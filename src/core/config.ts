@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
@@ -145,8 +145,15 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
-  await saveConfig(DEFAULT_CONFIG, true);
+export async function initConfig(force = false, configPath = CONFIG_PATH): Promise<void> {
+  if (!force && await pathExists(configPath)) {
+    throw new Error(
+      `Global config already exists at ${configPath}. ` +
+      'Re-run "sc config-init --force" to overwrite it.'
+    );
+  }
+
+  await saveConfigToPath(DEFAULT_CONFIG, configPath);
 }
 
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {
@@ -209,4 +216,22 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function saveConfigToPath(config: ProjectConfig, targetPath: string): Promise<void> {
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw err;
+  }
 }
