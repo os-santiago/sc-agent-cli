@@ -43,15 +43,19 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(formatNetworkError(url, err));
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(await formatApiError(response, url));
     }
 
     if (options.stream && response.body) {
@@ -154,4 +158,52 @@ export class OpenAICompatibleProvider {
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
+}
+
+async function formatApiError(response: Response, url: string): Promise<string> {
+  const errorBody = await response.text();
+  const details = extractErrorDetails(errorBody);
+
+  switch (response.status) {
+    case 401:
+      return `Authentication failed (${response.status}) for ${url}. Check your API key in config or environment variables.${details ? ` Provider message: ${details}` : ''}`;
+    case 404:
+      return `Provider endpoint not found (${response.status}) at ${url}. Verify the base URL and make sure it includes the correct API path such as /v1.${details ? ` Provider message: ${details}` : ''}`;
+    case 429:
+      return `Provider rate limit reached (${response.status}) for ${url}. Retry later or lower request volume.${details ? ` Provider message: ${details}` : ''}`;
+    default:
+      return `API error ${response.status} from ${url}.${details ? ` Provider message: ${details}` : ''}`;
+  }
+}
+
+function extractErrorDetails(errorBody: string): string {
+  const trimmed = errorBody.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    if (typeof parsed.error === 'string' && parsed.error.trim()) {
+      return parsed.error.trim();
+    }
+    if (parsed.error && typeof parsed.error === 'object' && parsed.error.message?.trim()) {
+      return parsed.error.message.trim();
+    }
+    if (parsed.message?.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // Fall back to the raw body for non-JSON provider errors.
+  }
+
+  return trimmed;
+}
+
+function formatNetworkError(url: string, err: unknown): string {
+  const details = err instanceof Error ? err.message : String(err);
+  return `Could not reach provider at ${url}. Check that the base URL is correct, the provider is running, and your network connection is available. Original error: ${details}`;
 }
