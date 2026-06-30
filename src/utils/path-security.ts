@@ -28,8 +28,6 @@ export function resolveSafePath(
   if (denyPatterns.length > 0) {
     const ig = ignore().add(denyPatterns);
     const relativePath = path.relative(workspaceRoot, resolved);
-    // CRITICAL: Skip check if relativePath is empty (when resolved === workspaceRoot)
-    // The ignore library rejects empty strings. See CRITICAL-FIXES.md
     if (relativePath && ig.ignores(relativePath)) {
       throw new Error(
         `Access denied: "${inputPath}" matches a deny pattern.\n` +
