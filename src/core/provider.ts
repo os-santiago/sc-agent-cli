@@ -43,15 +43,20 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(this.formatNetworkError(url, err));
+    }
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API Error ${response.status}: ${errorText}`);
+      throw new Error(await this.formatApiError(url, response));
     }
 
     if (options.stream && response.body) {
@@ -153,5 +158,121 @@ export class OpenAICompatibleProvider {
       content: fullContent,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
+  }
+
+  private async formatApiError(url: string, response: Response): Promise<string> {
+    const errorText = await response.text();
+    const detail = extractErrorDetail(errorText);
+    const endpoint = safeFormatUrl(url);
+
+    const messageParts = [`API request failed (${response.status} ${response.statusText})`];
+
+    if (detail) {
+      messageParts.push(detail);
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      messageParts.push('Check that your API key is set correctly for this provider.');
+    } else if (response.status === 404) {
+      messageParts.push(`Check that the provider base URL is correct: ${endpoint}`);
+    } else if (response.status >= 500) {
+      messageParts.push('The provider reported a server-side error. Try again in a moment.');
+    }
+
+    return messageParts.join('. ');
+  }
+
+  private formatNetworkError(url: string, err: unknown): string {
+    const endpoint = safeFormatUrl(url);
+    const reason = err instanceof Error && err.message ? err.message : 'Unknown network error';
+
+    return (
+      `Could not reach the model provider at ${endpoint}. ` +
+      `Check that the server is running, the base URL is correct, and your network allows the connection. ` +
+      `Original error: ${reason}`
+    );
+  }
+}
+
+function extractErrorDetail(errorText: string): string {
+  const trimmed = errorText.trim();
+  if (!trimmed) {
+    return 'The provider returned no additional error details';
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const extracted = findErrorMessage(parsed);
+    if (extracted) {
+      return extracted;
+    }
+  } catch {
+    // Fall back to plain text below.
+  }
+
+  return truncateErrorText(trimmed);
+}
+
+function findErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findErrorMessage(item);
+      if (nested) {
+        return nested;
+      }
+    }
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  const directMessage = record.message;
+  if (typeof directMessage === 'string' && directMessage.trim()) {
+    return directMessage.trim();
+  }
+
+  const errorField = record.error;
+  if (typeof errorField === 'string' && errorField.trim()) {
+    return errorField.trim();
+  }
+
+  if (errorField && typeof errorField === 'object') {
+    const nested = findErrorMessage(errorField);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  const errorsField = record.errors;
+  if (Array.isArray(errorsField)) {
+    for (const item of errorsField) {
+      const nested = findErrorMessage(item);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function truncateErrorText(value: string, maxLength = 240): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function safeFormatUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return value;
   }
 }
