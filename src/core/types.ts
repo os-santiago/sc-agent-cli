@@ -1,7 +1,5 @@
 // Core types for the agent system
 
-// CRITICAL: 'tool' role is REQUIRED for OpenAI API spec compliance.
-// DO NOT REMOVE - breaks response generation. See CRITICAL-FIXES.md
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface Message {
