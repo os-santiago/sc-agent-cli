@@ -3,6 +3,12 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type ProfileAnswers = {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+};
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -55,12 +61,18 @@ export async function addProfile(name?: string): Promise<void> {
   ]);
 
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl: response.baseUrl?.trim(),
+    model: response.model?.trim(),
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  const validationError = validateProfileAnswers(response);
+  if (validationError) {
+    console.log(chalk.yellow(validationError));
+    return;
+  }
+
+  if (response.apiKey?.trim()) {
+    profile.apiKey = response.apiKey.trim();
   }
 
   config.profiles = config.profiles || {};
@@ -68,6 +80,22 @@ export async function addProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" added successfully`));
+}
+
+export function validateProfileAnswers(answers: ProfileAnswers): string | null {
+  if (!answers.baseUrl && !answers.model && !answers.apiKey) {
+    return 'Profile creation cancelled';
+  }
+
+  if (!answers.baseUrl?.trim()) {
+    return 'Base URL is required';
+  }
+
+  if (!answers.model?.trim()) {
+    return 'Model name is required';
+  }
+
+  return null;
 }
 
 export async function useProfile(name?: string): Promise<void> {
