@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { initConfig, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,32 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('initConfig refuses to overwrite an existing global config without force', async () => {
+  const configDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-init-'));
+  const configPath = path.join(configDir, 'config.json');
+
+  await writeFile(configPath, '{"custom":true}', 'utf-8');
+
+  await assert.rejects(
+    () => initConfig(false, configPath),
+    /Global config already exists at .*config\.json.*sc config-init --force/
+  );
+
+  assert.equal(await readFile(configPath, 'utf-8'), '{"custom":true}');
+});
+
+test('initConfig overwrites an existing global config when force is enabled', async () => {
+  const configDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-init-force-'));
+  const configPath = path.join(configDir, 'config.json');
+
+  await writeFile(configPath, '{"custom":true}', 'utf-8');
+  await initConfig(true, configPath);
+
+  const savedConfig = JSON.parse(await readFile(configPath, 'utf-8')) as ProjectConfig;
+  assert.equal(savedConfig.activeProfile, 'ollama');
+  assert.equal(savedConfig.model.baseUrl, 'http://localhost:11434/v1');
 });
 
 function escapeRegex(value: string): string {
