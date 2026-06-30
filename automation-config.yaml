@@ -1,0 +1,72 @@
+# SC Agent CLI - Automation Configuration
+# This file configures how automated improvements work
+
+# CRITICAL: Work in the SAME repository, do NOT create new directories
+work_mode: in_place
+
+# Repository configuration
+repository:
+  # Official repository path - NEVER create copies
+  path: D:\git\sc-agent-cli
+
+  # Branch strategy
+  branching:
+    # Create feature branches in the SAME repo
+    create_branches: true
+
+    # NEVER create new directories
+    create_directories: false
+
+    # Branch naming pattern
+    prefix: "fix/"
+
+    # Base branch for new features
+    base: main
+
+  # After completing work
+  cleanup:
+    # Return to main after creating branch
+    return_to_main: true
+
+    # Clean up merged branches
+    delete_merged: false  # Keep for now, user can decide
+
+# Work process
+workflow:
+  1_create_branch: "git checkout -b fix/<feature-name>"
+  2_make_changes: "Edit files in current directory"
+  3_commit: "git add . && git commit -m 'fix: description'"
+  4_stay_in_repo: "DO NOT cd to different directory"
+  5_next_task: "git checkout main for next feature"
+
+# FORBIDDEN operations
+forbidden:
+  - "mkdir ../sc-agent-cli-*"
+  - "cp -r . ../sc-agent-cli-*"
+  - "git clone . ../sc-agent-cli-*"
+  - "cd /d/git && mkdir sc-agent-cli-*"
+
+# REQUIRED operations
+required:
+  - "Always work in D:\\git\\sc-agent-cli"
+  - "Use 'git checkout -b' for new features"
+  - "Use 'git checkout main' to switch context"
+  - "NEVER leave the repository directory"
+
+# Notes for AI assistants
+assistant_instructions: |
+  When working on sc-agent-cli improvements:
+
+  1. ALWAYS stay in D:\git\sc-agent-cli
+  2. Create a NEW BRANCH for each improvement: git checkout -b fix/<name>
+  3. Make your changes in the CURRENT directory
+  4. Commit to the branch
+  5. Switch back to main: git checkout main
+  6. Repeat for next improvement
+
+  NEVER:
+  - Create directories like ../sc-agent-cli-<feature-name>
+  - Copy the entire repo to a new location
+  - Work outside D:\git\sc-agent-cli
+
+  The user wants ALL work in the SAME repository, just different branches.

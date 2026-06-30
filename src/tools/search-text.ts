@@ -45,6 +45,10 @@ export const searchTextTool: Tool = {
       ignore: ['**/node_modules/**', '**/.git/**'],
     });
 
+    if (files.length === 0) {
+      return `No files matched glob "${globPattern}". Check the pattern and try again.`;
+    }
+
     const results: string[] = [];
 
     for (const file of files) {
@@ -63,7 +67,7 @@ export const searchTextTool: Tool = {
         if (matches.length > 0) {
           results.push(`${file}:\n${matches.join('\n')}`);
         }
-      } catch (err: unknown) {
+      } catch {
         // Skip files that can't be read (binary, etc.)
       }
     }
