@@ -48,7 +48,7 @@ test('validateConfig does not require apiKey for local OpenAI-compatible provide
   assert.doesNotThrow(() => validateConfig(createConfig('http://localhost:11434/v1')));
 });
 
-test('loadConfig surfaces invalid project config JSON with file path and recovery hint', async () => {
+test('loadConfig surfaces invalid project config JSON with project-specific recovery hint', async () => {
   const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
   const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
 
@@ -60,7 +60,8 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       assert.ok(err instanceof Error);
       assert.match(err.message, /Invalid JSON in project config/);
       assert.match(err.message, new RegExp(escapeRegex(projectConfigPath)));
-      assert.match(err.message, /sc config-init/);
+      assert.match(err.message, new RegExp(`Fix or remove ${escapeRegex(projectConfigPath)} and try again\\.`));
+      assert.doesNotMatch(err.message, /sc config-init/);
       return true;
     }
   );

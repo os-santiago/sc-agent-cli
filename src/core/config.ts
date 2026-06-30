@@ -196,11 +196,19 @@ async function mergeConfigFile(
     const details = err instanceof Error ? err.message : 'Invalid JSON';
     throw new Error(
       `Invalid JSON in ${scope} config at ${configPath}: ${details}. ` +
-      `Fix the file or re-run "sc config-init" to recreate the default config.`
+      getInvalidConfigRecoveryHint(scope, configPath)
     );
   }
 
   return deepMerge(config, parsedConfig);
+}
+
+function getInvalidConfigRecoveryHint(scope: ConfigScope, configPath: string): string {
+  if (scope === 'global') {
+    return 'Fix the file or re-run "sc config-init --force" to recreate the default global config.';
+  }
+
+  return `Fix or remove ${configPath} and try again.`;
 }
 
 function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
