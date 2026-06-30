@@ -12,6 +12,16 @@ const { version: packageVersion } = require('../package.json') as { version: str
 
 const program = new Command();
 
+async function runCommand(action: () => Promise<void>): Promise<void> {
+  try {
+    await action();
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Error: ${errorMsg}`));
+    process.exit(1);
+  }
+}
+
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
@@ -47,22 +57,22 @@ const profileCommand = program.command('profile').description('Manage model prof
 profileCommand
   .command('list')
   .description('List all available profiles')
-  .action(listProfiles);
+  .action(() => runCommand(listProfiles));
 
 profileCommand
   .command('add [name]')
   .description('Add a new profile')
-  .action(addProfile);
+  .action((name: string | undefined) => runCommand(() => addProfile(name)));
 
 profileCommand
   .command('use [name]')
   .description('Switch to a profile')
-  .action(useProfile);
+  .action((name: string | undefined) => runCommand(() => useProfile(name)));
 
 profileCommand
   .command('remove [name]')
   .description('Remove a profile')
-  .action(removeProfile);
+  .action((name: string | undefined) => runCommand(() => removeProfile(name)));
 
 // Init command
 program
