@@ -160,7 +160,7 @@ Initialize a project with a default `AGENTS.md` file for providing context to th
 
 ### `sc config-init`
 
-Create the global config file with default profiles.
+Create the global config file with default profiles. If a config already exists, the command stops to avoid overwriting it accidentally; use `sc config-init --force` to replace it explicitly.
 
 ## Project Context
 

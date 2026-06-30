@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
@@ -145,7 +145,14 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  if (!force && await fileExists(CONFIG_PATH)) {
+    throw new Error(
+      `Config already exists at ${CONFIG_PATH}. ` +
+      `Re-run "sc config-init --force" to overwrite it.`
+    );
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -209,4 +216,17 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw new Error(`Could not access config at ${filePath}. Check file permissions and try again.`);
+  }
 }
