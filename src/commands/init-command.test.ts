@@ -1,39 +1,74 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from './init-command.js';
 
 test('initProject creates AGENTS.md when missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sc-init-test-'));
+  const cwd = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
+  const agentsPath = path.join(cwd, 'AGENTS.md');
+  const logs = captureConsole();
 
   try {
-    await initProject(tempDir);
-
-    const contents = await readFile(path.join(tempDir, 'AGENTS.md'), 'utf-8');
-    assert.match(contents, /# Agent Instructions/);
+    await initProject(cwd);
   } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    logs.restore();
   }
+
+  const contents = await readFile(agentsPath, 'utf-8');
+  assert.match(contents, /# Agent Instructions/);
+  assert.ok(logs.lines.some((line) => line.includes('Created')));
 });
 
-test('initProject refuses to overwrite an existing AGENTS.md file', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sc-init-test-'));
-  const agentsPath = path.join(tempDir, 'AGENTS.md');
-  const existingContents = '# Existing instructions\n';
+test('initProject preserves existing AGENTS.md unless force is set', async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
+  const agentsPath = path.join(cwd, 'AGENTS.md');
+  const originalContents = '# Existing instructions\n';
+  await writeFile(agentsPath, originalContents, 'utf-8');
+  const logs = captureConsole();
 
   try {
-    await writeFile(agentsPath, existingContents, 'utf-8');
-
-    await assert.rejects(
-      () => initProject(tempDir),
-      /AGENTS\.md already exists .* Move or remove it before running "sc init" again\./
-    );
-
-    const contents = await readFile(agentsPath, 'utf-8');
-    assert.equal(contents, existingContents);
+    await initProject(cwd);
   } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    logs.restore();
   }
+
+  const contents = await readFile(agentsPath, 'utf-8');
+  assert.equal(contents, originalContents);
+  assert.ok(logs.lines.some((line) => line.includes('already exists')));
+  assert.ok(logs.lines.some((line) => line.includes('sc init --force')));
 });
+
+test('initProject overwrites existing AGENTS.md when force is set', async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), 'sc-agent-init-'));
+  const agentsPath = path.join(cwd, 'AGENTS.md');
+  await writeFile(agentsPath, '# Existing instructions\n', 'utf-8');
+  const logs = captureConsole();
+
+  try {
+    await initProject(cwd, true);
+  } finally {
+    logs.restore();
+  }
+
+  const contents = await readFile(agentsPath, 'utf-8');
+  assert.match(contents, /# Agent Instructions/);
+  assert.ok(logs.lines.some((line) => line.includes('Overwrote')));
+});
+
+function captureConsole(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const originalLog = console.log;
+
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(' '));
+  };
+
+  return {
+    lines,
+    restore: () => {
+      console.log = originalLog;
+    },
+  };
+}
