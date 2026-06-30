@@ -12,6 +12,10 @@ const { version: packageVersion } = require('../package.json') as { version: str
 
 const program = new Command();
 
+function formatCliError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
@@ -76,9 +80,10 @@ program
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .action(async () => {
+  .option('-f, --force', 'Overwrite an existing global config file')
+  .action(async (options) => {
     try {
-      await initConfig();
+      await initConfig(options.force);
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -87,4 +92,11 @@ program
     }
   });
 
-program.parse();
+async function main(): Promise<void> {
+  await program.parseAsync(process.argv);
+}
+
+main().catch((err: unknown) => {
+  console.error(chalk.red(`Error: ${formatCliError(err)}`));
+  process.exit(1);
+});
