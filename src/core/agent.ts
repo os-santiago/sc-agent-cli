@@ -538,6 +538,18 @@ export class Agent {
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   }
 
+  private log(message: string): void {
+    if (!this.options.quiet) {
+      console.log(message);
+    }
+  }
+
+  private write(content: string): void {
+    if (!this.options.quiet) {
+      process.stdout.write(content);
+    }
+  }
+
   async run(userMessage: string, history: Message[] = []): Promise<Message[]> {
     let messages: Message[] = [...history];
 
@@ -594,11 +606,11 @@ export class Agent {
 
       // Handle tool calls if any
       if (response.tool_calls && response.tool_calls.length > 0) {
-        console.log(chalk.gray('\n  ┌─ Tools ─────────────────────────────────────────────────┐'));
+        this.log(chalk.gray('\n  ┌─ Tools ─────────────────────────────────────────────────┐'));
 
         // Group message for multiple tools
         if (response.tool_calls.length > 1) {
-          console.log(chalk.gray(`  │ 🔧 Executing ${response.tool_calls.length} tools...`));
+          this.log(chalk.gray(`  │ 🔧 Executing ${response.tool_calls.length} tools...`));
         }
 
         for (const toolCall of response.tool_calls) {
@@ -606,7 +618,7 @@ export class Agent {
           const tool = getToolByName(toolName);
 
           if (!tool) {
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
+            this.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
             // CRITICAL: Tool error responses use role:'tool', not 'assistant'
             // DO NOT CHANGE - see CRITICAL-FIXES.md
@@ -624,16 +636,16 @@ export class Agent {
 
             // Compact output for multiple tools
             if (response.tool_calls.length === 1) {
-              console.log(chalk.gray(`  │ 🔧 Using tool: ${toolName}`));
-              console.log(chalk.gray(`  │    Args: ${JSON.stringify(args)}`));
+              this.log(chalk.gray(`  │ 🔧 Using tool: ${toolName}`));
+              this.log(chalk.gray(`  │    Args: ${JSON.stringify(args)}`));
             } else {
-              console.log(chalk.gray(`  │    → ${toolName}: ${JSON.stringify(args)}`));
+              this.log(chalk.gray(`  │    → ${toolName}: ${JSON.stringify(args)}`));
             }
 
             const result = await tool.execute(args, this.toolContext);
 
             if (response.tool_calls.length === 1) {
-              console.log(chalk.gray(`  │ ${chalk.green('✓')} Tool completed`));
+              this.log(chalk.gray(`  │ ${chalk.green('✓')} Tool completed`));
             }
 
             toolsUsed.push({name: toolName, success: true, args});
@@ -648,7 +660,7 @@ export class Agent {
             });
           } catch (err: unknown) {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
+            this.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
             toolsUsed.push({name: toolName, success: false, error: errorMsg, args: JSON.parse(toolCall.function.arguments)});
             // CRITICAL: Tool error responses use role:'tool', not 'assistant'
             // DO NOT CHANGE - see CRITICAL-FIXES.md
@@ -666,14 +678,14 @@ export class Agent {
           const successful = toolsUsed.filter(t => t.success).length;
           const failed = toolsUsed.filter(t => !t.success).length;
           if (failed > 0) {
-            console.log(chalk.gray(`  │`));
-            console.log(chalk.gray(`  │ ${chalk.yellow('📊')} Tools: ${successful} succeeded, ${failed} failed`));
+            this.log(chalk.gray(`  │`));
+            this.log(chalk.gray(`  │ ${chalk.yellow('📊')} Tools: ${successful} succeeded, ${failed} failed`));
           } else {
-            console.log(chalk.gray(`  │`));
-            console.log(chalk.gray(`  │ ${chalk.green('✓')} All ${successful} tools completed successfully`));
+            this.log(chalk.gray(`  │`));
+            this.log(chalk.gray(`  │ ${chalk.green('✓')} All ${successful} tools completed successfully`));
           }
         }
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
 
         // CRITICAL: Check if the model only responded with tool calls and no text
         // Some models (NVIDIA Nemotron, older Llama) don't auto-generate synthesis
@@ -784,87 +796,87 @@ export class Agent {
     const taskCompleted = hasSubstantialWork && hasOnlyExpectableErrors && !hitIterationLimit;
 
     if (hitIterationLimit) {
-      console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
-      console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Maximum iteration limit reached`));
-      console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+      this.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
+      this.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Maximum iteration limit reached`));
+      this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
     }
 
     // Warning for repeated errors (loop detection)
     if (hasRepeatedErrors) {
-      console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
-      console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Detected repeated errors (possible infinite loop)`));
-      console.log(chalk.gray('  │'));
+      this.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
+      this.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Detected repeated errors (possible infinite loop)`));
+      this.log(chalk.gray('  │'));
       repeatedErrors.forEach(([errorKey, count]) => {
         const truncated = errorKey.substring(0, 50);
-        console.log(chalk.gray(`  │    ${chalk.red('•')} ${count}x: ${truncated}...`));
+        this.log(chalk.gray(`  │    ${chalk.red('•')} ${count}x: ${truncated}...`));
       });
-      console.log(chalk.gray('  │'));
-      console.log(chalk.gray('  │    The agent attempted the same failing operation multiple times.'));
-      console.log(chalk.gray('  │    This usually indicates a need for a different approach.'));
-      console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+      this.log(chalk.gray('  │'));
+      this.log(chalk.gray('  │    The agent attempted the same failing operation multiple times.'));
+      this.log(chalk.gray('  │    This usually indicates a need for a different approach.'));
+      this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
     }
 
     // Final summary if tools were used
     if (toolsUsed.length > 0) {
       if (hadErrors) {
-        console.log(chalk.gray('\n  ┌─ Summary ───────────────────────────────────────────────┐'));
-        console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')}  ${failedTools.length} error(s) encountered`));
+        this.log(chalk.gray('\n  ┌─ Summary ───────────────────────────────────────────────┐'));
+        this.log(chalk.gray(`  │ ${chalk.yellow('⚠️')}  ${failedTools.length} error(s) encountered`));
         failedTools.forEach(t => {
           // Clean error message: take first line only and truncate if too long
           const errorMsg = (t.error || 'Unknown error')
             .split('\n')[0]
             .substring(0, 80);
-          console.log(chalk.gray(`  │    ${chalk.red('•')} ${t.name}: ${errorMsg}`));
+          this.log(chalk.gray(`  │    ${chalk.red('•')} ${t.name}: ${errorMsg}`));
         });
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
       }
 
       // Generate final status message
       if (hitIterationLimit || hadErrors) {
-        console.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
+        this.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
 
         if (hitIterationLimit && hadErrors) {
-          console.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - iteration limit reached with errors`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    The task could not be completed due to:'));
-          console.log(chalk.gray(`  │    • Hit maximum iterations (${MAX_ITERATIONS})`));
-          console.log(chalk.gray(`  │    • Encountered ${failedTools.length} error(s)`));
+          this.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - iteration limit reached with errors`));
+          this.log(chalk.gray('  │'));
+          this.log(chalk.gray('  │    The task could not be completed due to:'));
+          this.log(chalk.gray(`  │    • Hit maximum iterations (${MAX_ITERATIONS})`));
+          this.log(chalk.gray(`  │    • Encountered ${failedTools.length} error(s)`));
         } else if (hitIterationLimit) {
-          console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - iteration limit reached`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    The task may not be fully complete.'));
-          console.log(chalk.gray(`  │    Reached maximum ${MAX_ITERATIONS} iterations.`));
-          console.log(chalk.gray('  │    Consider increasing SC_MAX_ITERATIONS if needed.'));
+          this.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - iteration limit reached`));
+          this.log(chalk.gray('  │'));
+          this.log(chalk.gray('  │    The task may not be fully complete.'));
+          this.log(chalk.gray(`  │    Reached maximum ${MAX_ITERATIONS} iterations.`));
+          this.log(chalk.gray('  │    Consider increasing SC_MAX_ITERATIONS if needed.'));
         } else if (taskCompleted) {
           // Task completed successfully despite expectable errors
           const statusIcon = hasCompatibilityIssues ? chalk.yellow('⚠️') : chalk.green('✓');
           const statusText = hasCompatibilityIssues ? 'Task completed with warnings' : 'Task completed with notes';
-          console.log(chalk.gray(`  │ ${statusIcon} ${statusText}`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray(`  │    Successfully completed with ${successfulTools.length} operations.`));
+          this.log(chalk.gray(`  │ ${statusIcon} ${statusText}`));
+          this.log(chalk.gray('  │'));
+          this.log(chalk.gray(`  │    Successfully completed with ${successfulTools.length} operations.`));
 
           if (hasCompatibilityIssues) {
-            console.log(chalk.gray(`  │    ${compatibilityErrors.length} compatibility error(s) need fixing.`));
+            this.log(chalk.gray(`  │    ${compatibilityErrors.length} compatibility error(s) need fixing.`));
           }
           if (expectableErrors.length > 0) {
-            console.log(chalk.gray(`  │    ${expectableErrors.length} expected error(s) occurred (not blockers).`));
+            this.log(chalk.gray(`  │    ${expectableErrors.length} expected error(s) occurred (not blockers).`));
           }
-          console.log(chalk.gray('  │'));
+          this.log(chalk.gray('  │'));
 
           // Show compatibility issues first (HIGHER PRIORITY)
           if (hasCompatibilityIssues) {
-            console.log(chalk.gray('  │    Windows compatibility issues detected:'));
+            this.log(chalk.gray('  │    Windows compatibility issues detected:'));
             compatibilityErrors.forEach(t => {
               const args = t.args as Record<string, unknown> | undefined;
               const cmd = typeof args?.command === 'string' ? args.command : 'unknown';
               if (typeof cmd === 'string' && cmd.includes('|') && cmd.startsWith('wsl ')) {
-                console.log(chalk.gray('  │    • WSL pipe syntax: use `wsl bash -c "cmd | pipe"`'));
+                this.log(chalk.gray('  │    • WSL pipe syntax: use `wsl bash -c "cmd | pipe"`'));
               } else if (typeof t.error === 'string' && t.error.includes('not recognized')) {
                 const missing = t.error.match(/'([^']+)' is not recognized/)?.[1] || 'command';
-                console.log(chalk.gray(`  │    • Missing command: ${missing} (not available on Windows)`));
+                this.log(chalk.gray(`  │    • Missing command: ${missing} (not available on Windows)`));
               }
             });
-            console.log(chalk.gray('  │'));
+            this.log(chalk.gray('  │'));
           }
 
           // Show specific context for GitHub branch protection errors
@@ -876,35 +888,35 @@ export class Agent {
           });
 
           if (branchProtectionErrors.length > 0) {
-            console.log(chalk.gray('  │    Branch protection prevented merge:'));
-            console.log(chalk.gray('  │    • Code Scanning checks are required but pending'));
-            console.log(chalk.gray('  │    • Use --auto flag to queue merge when checks pass'));
-            console.log(chalk.gray('  │    • Or wait for required status checks to complete'));
+            this.log(chalk.gray('  │    Branch protection prevented merge:'));
+            this.log(chalk.gray('  │    • Code Scanning checks are required but pending'));
+            this.log(chalk.gray('  │    • Use --auto flag to queue merge when checks pass'));
+            this.log(chalk.gray('  │    • Or wait for required status checks to complete'));
           } else if (expectableErrors.length > 0 && !hasCompatibilityIssues) {
-            console.log(chalk.gray('  │    Examples of expected errors:'));
-            console.log(chalk.gray('  │    • Resource not found (PR/issue already merged/closed)'));
-            console.log(chalk.gray('  │    • GitHub restrictions (can\'t approve own PR)'));
-            console.log(chalk.gray('  │    • Command returned non-zero exit code'));
+            this.log(chalk.gray('  │    Examples of expected errors:'));
+            this.log(chalk.gray('  │    • Resource not found (PR/issue already merged/closed)'));
+            this.log(chalk.gray('  │    • GitHub restrictions (can\'t approve own PR)'));
+            this.log(chalk.gray('  │    • Command returned non-zero exit code'));
           }
         } else if (blockingErrors.length > 0) {
-          console.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - blocking errors encountered`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    Could not complete the task due to:'));
-          console.log(chalk.gray(`  │    • ${blockingErrors.length} blocking error(s)`));
-          console.log(chalk.gray('  │    • See error summary above for details.'));
+          this.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - blocking errors encountered`));
+          this.log(chalk.gray('  │'));
+          this.log(chalk.gray('  │    Could not complete the task due to:'));
+          this.log(chalk.gray(`  │    • ${blockingErrors.length} blocking error(s)`));
+          this.log(chalk.gray('  │    • See error summary above for details.'));
         } else {
-          console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - errors encountered`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    Could not fully complete the task.'));
-          console.log(chalk.gray('  │    See error summary above for details.'));
+          this.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - errors encountered`));
+          this.log(chalk.gray('  │'));
+          this.log(chalk.gray('  │    Could not fully complete the task.'));
+          this.log(chalk.gray('  │    See error summary above for details.'));
         }
 
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
       } else {
         // Success case
-        console.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
-        console.log(chalk.gray(`  │ ${chalk.green('✓')} Task completed successfully`));
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        this.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
+        this.log(chalk.gray(`  │ ${chalk.green('✓')} Task completed successfully`));
+        this.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
       }
     }
 
@@ -915,10 +927,10 @@ export class Agent {
     if (delta.content) {
       // Add newline before first chunk
       if (this.isFirstChunk) {
-        process.stdout.write('\n');
+        this.write('\n');
         this.isFirstChunk = false;
       }
-      process.stdout.write(chalk.green(delta.content));
+      this.write(chalk.green(delta.content));
     }
   }
 }
