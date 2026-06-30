@@ -3,6 +3,30 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type ProfileOperation = 'add' | 'use' | 'remove';
+
+export function normalizeProfileName(name?: string): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+export function formatAvailableProfiles(profileNames: string[]): string {
+  if (profileNames.length === 0) {
+    return 'No profiles are currently configured.';
+  }
+
+  return `Available profiles: ${profileNames.join(', ')}`;
+}
+
+export function getMissingProfileMessage(
+  operation: Exclude<ProfileOperation, 'add'>,
+  name: string,
+  profileNames: string[]
+): string {
+  const action = operation === 'use' ? 'switch to' : 'remove';
+  return `Profile "${name}" not found. ${formatAvailableProfiles(profileNames)} Use "sc profile list" to inspect profile settings before you ${action} one.`;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -29,8 +53,16 @@ export async function addProfile(name?: string): Promise<void> {
     name = response.name;
   }
 
-  if (!name) {
-    console.log(chalk.red('Profile name is required'));
+  const normalizedName = normalizeProfileName(name);
+  if (!normalizedName) {
+    console.log(chalk.gray('Profile creation cancelled'));
+    return;
+  }
+
+  name = normalizedName;
+
+  if (config.profiles?.[name]) {
+    console.log(chalk.red(`Profile "${name}" already exists. Choose a different name or remove it first.`));
     return;
   }
 
@@ -54,13 +86,22 @@ export async function addProfile(name?: string): Promise<void> {
     },
   ]);
 
+  const baseUrl = response.baseUrl?.trim();
+  const model = response.model?.trim();
+  const apiKey = response.apiKey?.trim();
+
+  if (!baseUrl || !model) {
+    console.log(chalk.red('Base URL and model name are required. Profile was not saved.'));
+    return;
+  }
+
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl,
+    model,
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};
@@ -72,10 +113,10 @@ export async function addProfile(name?: string): Promise<void> {
 
 export async function useProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profileNames = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
-    if (profiles.length === 0) {
+    if (profileNames.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
     }
@@ -84,18 +125,21 @@ export async function useProfile(name?: string): Promise<void> {
       type: 'select',
       name: 'profile',
       message: 'Select a profile:',
-      choices: profiles.map((p) => ({ title: p, value: p })),
+      choices: profileNames.map((p) => ({ title: p, value: p })),
     });
     name = response.profile;
   }
 
-  if (!name) {
-    console.log(chalk.red('Profile name is required'));
+  const normalizedName = normalizeProfileName(name);
+  if (!normalizedName) {
+    console.log(chalk.gray('Profile switch cancelled'));
     return;
   }
 
+  name = normalizedName;
+
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(getMissingProfileMessage('use', name, profileNames)));
     return;
   }
 
@@ -106,10 +150,10 @@ export async function useProfile(name?: string): Promise<void> {
 
 export async function removeProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profileNames = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
-    if (profiles.length === 0) {
+    if (profileNames.length === 0) {
       console.log(chalk.red('No profiles available'));
       return;
     }
@@ -118,18 +162,21 @@ export async function removeProfile(name?: string): Promise<void> {
       type: 'select',
       name: 'profile',
       message: 'Select a profile to remove:',
-      choices: profiles.map((p) => ({ title: p, value: p })),
+      choices: profileNames.map((p) => ({ title: p, value: p })),
     });
     name = response.profile;
   }
 
-  if (!name) {
-    console.log(chalk.red('Profile name is required'));
+  const normalizedName = normalizeProfileName(name);
+  if (!normalizedName) {
+    console.log(chalk.gray('Profile removal cancelled'));
     return;
   }
 
+  name = normalizedName;
+
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(getMissingProfileMessage('remove', name, profileNames)));
     return;
   }
 
