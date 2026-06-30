@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import chalk from 'chalk';
 
@@ -23,12 +23,25 @@ This file provides context to the SC-Agent when working in this project.
 [Explain how to build and test the project]
 `;
 
-export async function initProject(cwd: string): Promise<void> {
+export async function initProject(cwd: string, force = false): Promise<void> {
   const agentsPath = path.join(cwd, 'AGENTS.md');
 
   try {
+    if (!force) {
+      try {
+        await access(agentsPath);
+        console.log(chalk.yellow(`⚠ AGENTS.md already exists at ${agentsPath}`));
+        console.log(chalk.gray('  Re-run with "sc init --force" to overwrite it'));
+        return;
+      } catch (err: unknown) {
+        if (!(err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT')) {
+          throw err;
+        }
+      }
+    }
+
     await writeFile(agentsPath, DEFAULT_AGENTS_MD, 'utf-8');
-    console.log(chalk.green(`✓ Created ${agentsPath}`));
+    console.log(chalk.green(`✓ ${force ? 'Overwrote' : 'Created'} ${agentsPath}`));
     console.log(chalk.gray('  Edit this file to provide context for the agent'));
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
