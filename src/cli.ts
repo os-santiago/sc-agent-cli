@@ -15,7 +15,9 @@ const program = new Command();
 program
   .name('sc')
   .description('Provider-agnostic CLI agent with tool use')
-  .version(packageVersion);
+  .version(packageVersion)
+  .showSuggestionAfterError()
+  .showHelpAfterError();
 
 // Chat command (default)
 program
