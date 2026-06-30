@@ -161,6 +161,7 @@ Initialize a project with a default `AGENTS.md` file for providing context to th
 ### `sc config-init`
 
 Create the global config file with default profiles.
+If `~/.sc-agent/config.json` already exists, the command now stops instead of overwriting it; use `sc config-init --force` when replacement is intentional.
 
 ## Project Context
 
