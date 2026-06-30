@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { loadConfig, validateConfig, assertConfigCanBeInitialized } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,33 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('assertConfigCanBeInitialized blocks overwrite without --force', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
+  const configPath = path.join(projectRoot, 'config.json');
+
+  await writeFile(configPath, '{}', 'utf-8');
+
+  await assert.rejects(
+    () => assertConfigCanBeInitialized(configPath),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Global config already exists/);
+      assert.match(err.message, /sc config-init --force/);
+      assert.match(err.message, new RegExp(escapeRegex(configPath)));
+      return true;
+    }
+  );
+});
+
+test('assertConfigCanBeInitialized allows overwrite with --force', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
+  const configPath = path.join(projectRoot, 'config.json');
+
+  await writeFile(configPath, '{}', 'utf-8');
+
+  await assert.doesNotReject(() => assertConfigCanBeInitialized(configPath, true));
 });
 
 function escapeRegex(value: string): string {
