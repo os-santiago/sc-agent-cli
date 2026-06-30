@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { ensureConfigCanBeWritten, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,37 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('ensureConfigCanBeWritten allows missing config files', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-write-'));
+  const configPath = path.join(tempDir, 'config.json');
+
+  await assert.doesNotReject(() => ensureConfigCanBeWritten(configPath));
+});
+
+test('ensureConfigCanBeWritten blocks overwriting without force', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-write-'));
+  const configPath = path.join(tempDir, 'config.json');
+  await writeFile(configPath, '{}', 'utf-8');
+
+  await assert.rejects(
+    () => ensureConfigCanBeWritten(configPath),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Config already exists at /);
+      assert.match(err.message, /sc config-init --force/);
+      return true;
+    }
+  );
+});
+
+test('ensureConfigCanBeWritten allows overwriting with force', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-write-'));
+  const configPath = path.join(tempDir, 'config.json');
+  await writeFile(configPath, '{}', 'utf-8');
+
+  await assert.doesNotReject(() => ensureConfigCanBeWritten(configPath, true));
 });
 
 function escapeRegex(value: string): string {

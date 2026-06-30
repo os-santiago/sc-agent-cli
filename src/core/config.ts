@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
@@ -145,8 +145,31 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  await ensureConfigCanBeWritten(CONFIG_PATH, force);
   await saveConfig(DEFAULT_CONFIG, true);
+}
+
+export async function ensureConfigCanBeWritten(configPath: string, force = false): Promise<void> {
+  try {
+    await access(configPath);
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return;
+    }
+
+    throw new Error(
+      `Could not access config at ${configPath}. ` +
+      `Check file permissions and try again.`
+    );
+  }
+
+  if (!force) {
+    throw new Error(
+      `Config already exists at ${configPath}. ` +
+      `Re-run "sc config-init --force" to overwrite it.`
+    );
+  }
 }
 
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {
