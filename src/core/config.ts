@@ -3,8 +3,13 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig, ModelConfig } from './types.js';
 
-const CONFIG_DIR = path.join(homedir(), '.sc-agent');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+function getConfigDir(): string {
+  return path.join(homedir(), '.sc-agent');
+}
+
+function getConfigPath(): string {
+  return path.join(getConfigDir(), 'config.json');
+}
 
 const DEFAULT_CONFIG: ProjectConfig = {
   model: {
@@ -52,20 +57,34 @@ const DEFAULT_CONFIG: ProjectConfig = {
   activeProfile: 'ollama',
 };
 
-export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
+export interface LoadConfigOptions {
+  projectRoot?: string;
+  applyActiveProfile?: boolean;
+  validateModel?: boolean;
+}
+
+export async function loadConfig(
+  projectRootOrOptions?: string | LoadConfigOptions
+): Promise<ProjectConfig> {
+  const options =
+    typeof projectRootOrOptions === 'string'
+      ? { projectRoot: projectRootOrOptions }
+      : (projectRootOrOptions ?? {});
+
   let config = { ...DEFAULT_CONFIG };
+  const globalConfigPath = getConfigPath();
 
   // Load global config
   try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
+    const data = await readFile(globalConfigPath, 'utf-8');
     config = deepMerge(config, JSON.parse(data));
   } catch (err: unknown) {
     // No global config, use defaults
   }
 
   // Load project-local config if in a project
-  if (projectRoot) {
-    const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
+  if (options.projectRoot) {
+    const projectConfigPath = path.join(options.projectRoot, '.sc-agent.json');
     try {
       const data = await readFile(projectConfigPath, 'utf-8');
       config = deepMerge(config, JSON.parse(data));
@@ -75,7 +94,7 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   }
 
   // Apply active profile if set
-  if (config.activeProfile && config.profiles?.[config.activeProfile]) {
+  if (options.applyActiveProfile !== false && config.activeProfile && config.profiles?.[config.activeProfile]) {
     const profile = config.profiles[config.activeProfile];
     config.model = { ...config.model, ...profile };
   }
@@ -97,6 +116,14 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   }
 
   // Validate required fields
+  if (options.validateModel !== false) {
+    validateConfig(config);
+  }
+
+  return config;
+}
+
+export function validateConfig(config: ProjectConfig): void {
   if (!config.model.baseUrl) {
     throw new Error('Missing model.baseUrl in config');
   }
@@ -106,19 +133,17 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   if (config.model.baseUrl.includes('api.openai.com') && !config.model.apiKey) {
     throw new Error('OpenAI API requires apiKey in config');
   }
-
-  return config;
 }
 
 export function getGlobalConfigPath(): string {
-  return CONFIG_PATH;
+  return getConfigPath();
 }
 
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
-  const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
+  const targetPath = global ? getConfigPath() : path.join(process.cwd(), '.sc-agent.json');
 
   if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await mkdir(getConfigDir(), { recursive: true });
   }
 
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
