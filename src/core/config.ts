@@ -93,12 +93,9 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model.apiKey = undefined;
   }
 
-  // Override API key from environment variable if available
-  // Priority: SC_API_KEY > provider-specific env vars
-  const envApiKey = process.env.SC_API_KEY
-    || process.env.OPENAI_API_KEY
-    || process.env.ANTHROPIC_API_KEY
-    || process.env.NVIDIA_API_KEY;
+  // Override API key from environment variable if available.
+  // Priority: explicit SC_API_KEY > provider-specific env var for the active base URL.
+  const envApiKey = process.env.SC_API_KEY || getProviderApiKeyFromEnv(config.model.baseUrl);
 
   if (envApiKey) {
     config.model.apiKey = envApiKey;
@@ -145,8 +142,18 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(_force = false): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
+}
+
+function getProviderApiKeyFromEnv(baseUrl: string): string | undefined {
+  const matchedRule = API_KEY_REQUIREMENTS.find((rule) => baseUrl.includes(rule.hostPattern));
+
+  if (!matchedRule) {
+    return undefined;
+  }
+
+  return process.env[matchedRule.envVar];
 }
 
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {

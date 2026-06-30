@@ -66,6 +66,111 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
   );
 });
 
+test('loadConfig prefers the provider-specific env var for the active provider', { concurrency: false }, async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const previousScKey = process.env.SC_API_KEY;
+
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  process.env.ANTHROPIC_API_KEY = 'anthropic-test-key';
+  delete process.env.SC_API_KEY;
+
+  try {
+    const config = await loadConfig();
+    assert.equal(config.model.apiKey, undefined);
+
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-env-'));
+    await writeFile(
+      path.join(projectRoot, '.sc-agent.json'),
+      JSON.stringify({
+        activeProfile: '',
+        model: {
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o-mini',
+        },
+      }),
+      'utf-8'
+    );
+
+    const projectConfig = await loadConfig(projectRoot);
+    assert.equal(projectConfig.model.apiKey, 'openai-test-key');
+  } finally {
+    restoreEnvVar('OPENAI_API_KEY', previousOpenAiKey);
+    restoreEnvVar('ANTHROPIC_API_KEY', previousAnthropicKey);
+    restoreEnvVar('SC_API_KEY', previousScKey);
+  }
+});
+
+test('loadConfig ignores unrelated provider env vars for custom OpenAI-compatible endpoints', { concurrency: false }, async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const previousScKey = process.env.SC_API_KEY;
+
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  process.env.ANTHROPIC_API_KEY = 'anthropic-test-key';
+  delete process.env.SC_API_KEY;
+
+  try {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-custom-env-'));
+    await writeFile(
+      path.join(projectRoot, '.sc-agent.json'),
+      JSON.stringify({
+        activeProfile: '',
+        model: {
+          baseUrl: 'https://llm.example.com/v1',
+          model: 'custom-model',
+        },
+      }),
+      'utf-8'
+    );
+
+    const config = await loadConfig(projectRoot);
+    assert.equal(config.model.apiKey, undefined);
+  } finally {
+    restoreEnvVar('OPENAI_API_KEY', previousOpenAiKey);
+    restoreEnvVar('ANTHROPIC_API_KEY', previousAnthropicKey);
+    restoreEnvVar('SC_API_KEY', previousScKey);
+  }
+});
+
+test('loadConfig lets SC_API_KEY override provider-specific env vars', { concurrency: false }, async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousScKey = process.env.SC_API_KEY;
+
+  process.env.OPENAI_API_KEY = 'openai-test-key';
+  process.env.SC_API_KEY = 'sc-test-key';
+
+  try {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-sc-key-'));
+    await writeFile(
+      path.join(projectRoot, '.sc-agent.json'),
+      JSON.stringify({
+        activeProfile: '',
+        model: {
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o-mini',
+        },
+      }),
+      'utf-8'
+    );
+
+    const config = await loadConfig(projectRoot);
+    assert.equal(config.model.apiKey, 'sc-test-key');
+  } finally {
+    restoreEnvVar('OPENAI_API_KEY', previousOpenAiKey);
+    restoreEnvVar('SC_API_KEY', previousScKey);
+  }
+});
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function restoreEnvVar(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
 }
