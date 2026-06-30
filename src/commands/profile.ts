@@ -3,9 +3,28 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+const PROFILE_SETUP_HINT = 'Run "sc config-init" to create the default profiles or "sc profile add <name>" to add one.';
+
+export function formatNoProfilesMessage(action: 'list' | 'select'): string {
+  if (action === 'list') {
+    return `No profiles configured. ${PROFILE_SETUP_HINT}`;
+  }
+
+  return `No profiles available. ${PROFILE_SETUP_HINT}`;
+}
+
+export function formatProfileNotFoundMessage(name: string): string {
+  return `Profile "${name}" not found. Run "sc profile list" to see available profiles.`;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
+
+  if (Object.keys(profiles).length === 0) {
+    console.log(chalk.yellow(`\n${formatNoProfilesMessage('list')}\n`));
+    return;
+  }
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
   for (const [name, profile] of Object.entries(profiles)) {
@@ -76,7 +95,7 @@ export async function useProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.yellow(formatNoProfilesMessage('select')));
       return;
     }
 
@@ -95,7 +114,7 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(formatProfileNotFoundMessage(name)));
     return;
   }
 
@@ -110,7 +129,7 @@ export async function removeProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.yellow(formatNoProfilesMessage('select')));
       return;
     }
 
@@ -129,7 +148,7 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(formatProfileNotFoundMessage(name)));
     return;
   }
 
