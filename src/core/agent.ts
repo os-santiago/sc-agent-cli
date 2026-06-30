@@ -598,7 +598,7 @@ export class Agent {
             console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
             messages.push({
-              role: 'assistant',
+              role: 'tool',
               content: `Error: Unknown tool ${toolName}`,
               tool_call_id: toolCall.id,
               name: toolName,

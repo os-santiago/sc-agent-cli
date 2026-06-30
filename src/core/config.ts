@@ -74,22 +74,12 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
   let config = { ...DEFAULT_CONFIG };
 
   // Load global config
-  try {
-    const data = await readFile(CONFIG_PATH, 'utf-8');
-    config = deepMerge(config, JSON.parse(data));
-  } catch (err: unknown) {
-    // No global config, use defaults
-  }
+  config = await mergeConfigFile(config, CONFIG_PATH, 'global');
 
   // Load project-local config if in a project
   if (projectRoot) {
     const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
-    try {
-      const data = await readFile(projectConfigPath, 'utf-8');
-      config = deepMerge(config, JSON.parse(data));
-    } catch (err: unknown) {
-      // No project config
-    }
+    config = await mergeConfigFile(config, projectConfigPath, 'project');
   }
 
   // Apply active profile if set
@@ -159,7 +149,7 @@ export async function initConfig(): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
-function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
+function deepMerge<T extends object>(base: T, override: Partial<T>): T {
   const result = { ...base };
   for (const key in override) {
     const val = override[key];
@@ -175,4 +165,48 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+type ConfigScope = 'global' | 'project';
+
+async function mergeConfigFile(
+  config: ProjectConfig,
+  configPath: string,
+  scope: ConfigScope
+): Promise<ProjectConfig> {
+  let data: string;
+
+  try {
+    data = await readFile(configPath, 'utf-8');
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return config;
+    }
+
+    throw new Error(
+      `Could not read ${scope} config at ${configPath}. ` +
+      `Check file permissions and try again.`
+    );
+  }
+
+  let parsedConfig: Partial<ProjectConfig>;
+  try {
+    parsedConfig = JSON.parse(data) as Partial<ProjectConfig>;
+  } catch (err: unknown) {
+    const details = err instanceof Error ? err.message : 'Invalid JSON';
+    throw new Error(
+      `Invalid JSON in ${scope} config at ${configPath}: ${details}. ` +
+      `Fix the file or re-run "sc config-init" to recreate the default config.`
+    );
+  }
+
+  return deepMerge(config, parsedConfig);
+}
+
+function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+
+  return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
 }
