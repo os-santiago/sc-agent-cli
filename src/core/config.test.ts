@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateConfig } from './config.js';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -44,3 +47,25 @@ test('validateConfig allows known remote providers when apiKey is present', () =
 test('validateConfig does not require apiKey for local OpenAI-compatible providers', () => {
   assert.doesNotThrow(() => validateConfig(createConfig('http://localhost:11434/v1')));
 });
+
+test('loadConfig surfaces invalid project config JSON with file path and recovery hint', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
+  const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
+
+  await writeFile(projectConfigPath, '{"model":', 'utf-8');
+
+  await assert.rejects(
+    () => loadConfig(projectRoot),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /Invalid JSON in project config/);
+      assert.match(err.message, new RegExp(escapeRegex(projectConfigPath)));
+      assert.match(err.message, /sc config-init/);
+      return true;
+    }
+  );
+});
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
