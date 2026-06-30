@@ -94,55 +94,17 @@ export class OpenAICompatibleProvider {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.trim() || line.trim() === 'data: [DONE]') continue;
-
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6);
-            try {
-              const chunk = JSON.parse(jsonStr);
-              const delta = chunk.choices?.[0]?.delta;
-              if (!delta) continue;
-
-              // Accumulate content
-              if (delta.content) {
-                fullContent += delta.content;
-              }
-
-              // Accumulate tool calls
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls as ToolCallDelta[]) {
-                  const existing = accumulatedToolCalls.get(tc.index);
-                  if (!existing) {
-                    accumulatedToolCalls.set(tc.index, {
-                      id: tc.id || '',
-                      type: 'function',
-                      function: { name: tc.function?.name || '', arguments: tc.function?.arguments || '' },
-                    });
-                  } else {
-                    if (tc.function?.name) {
-                      existing.function.name += tc.function.name;
-                    }
-                    if (tc.function?.arguments) {
-                      existing.function.arguments += tc.function.arguments;
-                    }
-                  }
-                }
-              }
-
-              // Emit delta to callback
-              if (onChunk) {
-                onChunk({
-                  role: delta.role,
-                  content: delta.content,
-                  tool_calls: delta.tool_calls,
-                });
-              }
-            } catch (err: unknown) {
-              // Skip malformed JSON chunks
-              console.error('Malformed chunk:', jsonStr, err);
-            }
-          }
+          this.processStreamLine(line, accumulatedToolCalls, onChunk, (contentPart) => {
+            fullContent += contentPart;
+          });
         }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        this.processStreamLine(buffer, accumulatedToolCalls, onChunk, (contentPart) => {
+          fullContent += contentPart;
+        });
       }
     } finally {
       reader.releaseLock();
@@ -153,5 +115,62 @@ export class OpenAICompatibleProvider {
       content: fullContent,
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
+  }
+
+  private processStreamLine(
+    line: string,
+    accumulatedToolCalls: Map<number, ToolCall>,
+    onChunk: ((delta: StreamDelta) => void) | undefined,
+    appendContent: (contentPart: string) => void
+  ): void {
+    if (!line.trim() || line.trim() === 'data: [DONE]' || !line.startsWith('data: ')) {
+      return;
+    }
+
+    const jsonStr = line.slice(6);
+    try {
+      const chunk = JSON.parse(jsonStr);
+      const delta = chunk.choices?.[0]?.delta;
+      if (!delta) return;
+
+      if (delta.content) {
+        appendContent(delta.content);
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls as ToolCallDelta[]) {
+          const existing = accumulatedToolCalls.get(tc.index);
+          if (!existing) {
+            accumulatedToolCalls.set(tc.index, {
+              id: tc.id || '',
+              type: tc.type || 'function',
+              function: { name: tc.function?.name || '', arguments: tc.function?.arguments || '' },
+            });
+            continue;
+          }
+
+          if (!existing.id && tc.id) {
+            existing.id = tc.id;
+          }
+          if (tc.function?.name) {
+            existing.function.name += tc.function.name;
+          }
+          if (tc.function?.arguments) {
+            existing.function.arguments += tc.function.arguments;
+          }
+        }
+      }
+
+      if (onChunk) {
+        onChunk({
+          role: delta.role,
+          content: delta.content,
+          tool_calls: delta.tool_calls,
+        });
+      }
+    } catch (err: unknown) {
+      // Skip malformed JSON chunks
+      console.error('Malformed chunk:', jsonStr, err);
+    }
   }
 }
