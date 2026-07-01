@@ -188,7 +188,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Select permission mode:',
           choices: [
             {
-              title: 'Ask once per command (recommended)',
+              title: 'Ask once per tool (recommended)',
               value: 'ask_once',
               description: 'Prompt once per unique tool, then auto-approve for session'
             },
@@ -241,8 +241,8 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             config: currentConfig,
             autoApprove: false,
           });
-          console.log(chalk.cyan('\n✓ Permission mode: Ask once per command (recommended)'));
-          console.log(chalk.gray('   First use prompts, then auto-approves for session\n'));
+          console.log(chalk.cyan('\n✓ Permission mode: Ask once per tool (recommended)'));
+          console.log(chalk.gray('   First use of each tool prompts, then auto-approves for session\n'));
         }
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -587,12 +587,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.white('  Permissions: ') + (
         currentPermissionMode === 'unlimited' ? chalk.yellow('Unlimited (dangerous)') :
         currentPermissionMode === 'always_ask' ? chalk.green('Always ask (safer)') :
-        chalk.cyan('Ask once per command')
+        chalk.cyan('Ask once per tool')
       ));
 
       // Show permission profile
       const permProfile = currentConfig.permissions?.profile || 'traditional';
-      console.log(chalk.white('  Profile:     ') + (
+      console.log(chalk.white('  Permission profile: ') + (
         permProfile === 'blacklist' ? chalk.cyan('Blacklist (smart)') :
         chalk.gray('Traditional')
       ));
