@@ -3,6 +3,26 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+export function normalizeProfileName(name?: string): string | undefined {
+  const normalized = name?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function getAddProfileValidationError(
+  name: string | undefined,
+  existingProfiles: Record<string, Partial<ModelConfig>>
+): string | undefined {
+  if (!name) {
+    return 'Profile name is required';
+  }
+
+  if (existingProfiles[name]) {
+    return `Profile "${name}" already exists. Use a different name or edit ~/.sc-agent/config.json directly.`;
+  }
+
+  return undefined;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -29,10 +49,14 @@ export async function addProfile(name?: string): Promise<void> {
     name = response.name;
   }
 
-  if (!name) {
-    console.log(chalk.red('Profile name is required'));
+  name = normalizeProfileName(name);
+
+  const validationError = getAddProfileValidationError(name, config.profiles || {});
+  if (validationError) {
+    console.log(chalk.red(validationError));
     return;
   }
+  const profileName = name as string;
 
   const response = await prompts([
     {
@@ -64,10 +88,10 @@ export async function addProfile(name?: string): Promise<void> {
   }
 
   config.profiles = config.profiles || {};
-  config.profiles[name] = profile;
+  config.profiles[profileName] = profile;
 
   await saveConfig(config, true);
-  console.log(chalk.green(`✓ Profile "${name}" added successfully`));
+  console.log(chalk.green(`✓ Profile "${profileName}" added successfully`));
 }
 
 export async function useProfile(name?: string): Promise<void> {
