@@ -3,11 +3,38 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+const PROFILE_ADD_HINT = 'Run "sc profile add <name>" to create one.';
+const PROFILE_LIST_HINT = 'Run "sc profile list" to see available profiles.';
+
+export function normalizeProfileName(name?: string): string | undefined {
+  const normalized = name?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function buildMissingProfileMessage(name: string, availableProfiles: string[]): string {
+  const guidance = availableProfiles.length > 0
+    ? PROFILE_LIST_HINT
+    : PROFILE_ADD_HINT;
+
+  return `Profile "${name}" not found. ${guidance}`;
+}
+
+export function buildDuplicateProfileMessage(name: string): string {
+  return `Profile "${name}" already exists. Use "sc profile use ${name}" to switch to it or ` +
+    `"sc profile remove ${name}" before recreating it.`;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
+  if (Object.keys(profiles).length === 0) {
+    console.log(chalk.yellow(`  No saved profiles yet. ${PROFILE_ADD_HINT}`));
+    console.log();
+    return;
+  }
+
   for (const [name, profile] of Object.entries(profiles)) {
     const active = name === config.activeProfile ? chalk.green(' (active)') : '';
     console.log(chalk.cyan(`  ${name}${active}`));
@@ -26,11 +53,18 @@ export async function addProfile(name?: string): Promise<void> {
       name: 'name',
       message: 'Profile name:',
     });
-    name = response.name;
+    name = normalizeProfileName(response.name);
   }
 
+  name = normalizeProfileName(name);
+
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    console.log(chalk.red(`Profile name is required. ${PROFILE_ADD_HINT}`));
+    return;
+  }
+
+  if (config.profiles?.[name]) {
+    console.log(chalk.red(buildDuplicateProfileMessage(name)));
     return;
   }
 
@@ -72,11 +106,11 @@ export async function addProfile(name?: string): Promise<void> {
 
 export async function useProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profiles = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.red(`No profiles available. ${PROFILE_ADD_HINT}`));
       return;
     }
 
@@ -86,16 +120,18 @@ export async function useProfile(name?: string): Promise<void> {
       message: 'Select a profile:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
-    name = response.profile;
+    name = normalizeProfileName(response.profile);
   }
 
+  name = normalizeProfileName(name);
+
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    console.log(chalk.red(`Profile name is required. ${PROFILE_LIST_HINT}`));
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(buildMissingProfileMessage(name, profiles)));
     return;
   }
 
@@ -106,11 +142,11 @@ export async function useProfile(name?: string): Promise<void> {
 
 export async function removeProfile(name?: string): Promise<void> {
   const config = await loadConfig();
+  const profiles = Object.keys(config.profiles || {});
 
   if (!name) {
-    const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      console.log(chalk.red(`No profiles available. ${PROFILE_ADD_HINT}`));
       return;
     }
 
@@ -120,16 +156,18 @@ export async function removeProfile(name?: string): Promise<void> {
       message: 'Select a profile to remove:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
-    name = response.profile;
+    name = normalizeProfileName(response.profile);
   }
 
+  name = normalizeProfileName(name);
+
   if (!name) {
-    console.log(chalk.red('Profile name is required'));
+    console.log(chalk.red(`Profile name is required. ${PROFILE_LIST_HINT}`));
     return;
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    console.log(chalk.red(buildMissingProfileMessage(name, profiles)));
     return;
   }
 
