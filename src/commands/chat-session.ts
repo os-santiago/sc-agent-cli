@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, setGlobalActiveProfile } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
 import { getStorageGuidance } from '../utils/storage-guidance.js';
@@ -646,6 +646,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         currentConfig.model = { ...currentConfig.model, ...selectedProfile };
         currentConfig.activeProfile = selection.profile;
+        await setGlobalActiveProfile(selection.profile);
 
         // Override with env var if available
         const envApiKey = process.env.SC_API_KEY
@@ -664,7 +665,8 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         console.log(chalk.green(`\n✓ Switched to: ${selection.profile}`));
         console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
-        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}\n`));
+        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}`));
+        console.log(chalk.gray('  Saved as the active profile for future sessions\n'));
 
         // Clear history when switching models
         history = [];

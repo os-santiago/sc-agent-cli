@@ -121,7 +121,7 @@ sc -yq "count .ts files in src/"
 During a chat session, you can use these commands:
 
 - `/help` - Show available commands and tools
-- `/model` - Switch to a different model profile
+- `/model` - Switch to a different model profile and save it for future sessions
 - `/permissions` - Configure permission mode (ask once/always ask/unlimited)
 - `/pre-approved-commands` - Interactive setup wizard for auto-approved tools
 - `/reload` - Reload configuration from disk (apply profile changes)

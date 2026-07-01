@@ -145,7 +145,26 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function setGlobalActiveProfile(activeProfile: string): Promise<void> {
+  await mkdir(CONFIG_DIR, { recursive: true });
+
+  const config = await readConfigFile(CONFIG_PATH, 'global', { allowMissing: true });
+  config.activeProfile = activeProfile;
+
+  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+export async function initConfig(force = false): Promise<void> {
+  if (!force) {
+    const existingConfig = await readConfigFile(CONFIG_PATH, 'global', { allowMissing: true });
+    if (Object.keys(existingConfig).length > 0) {
+      throw new Error(
+        `Global config already exists at ${CONFIG_PATH}. ` +
+        'Re-run "sc config-init --force" to overwrite it.'
+      );
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -174,13 +193,22 @@ async function mergeConfigFile(
   configPath: string,
   scope: ConfigScope
 ): Promise<ProjectConfig> {
+  const parsedConfig = await readConfigFile(configPath, scope, { allowMissing: true });
+  return deepMerge(config, parsedConfig);
+}
+
+async function readConfigFile(
+  configPath: string,
+  scope: ConfigScope,
+  options: { allowMissing: boolean }
+): Promise<Partial<ProjectConfig>> {
   let data: string;
 
   try {
     data = await readFile(configPath, 'utf-8');
   } catch (err: unknown) {
-    if (isMissingFileError(err)) {
-      return config;
+    if (options.allowMissing && isMissingFileError(err)) {
+      return {};
     }
 
     throw new Error(
@@ -189,9 +217,8 @@ async function mergeConfigFile(
     );
   }
 
-  let parsedConfig: Partial<ProjectConfig>;
   try {
-    parsedConfig = JSON.parse(data) as Partial<ProjectConfig>;
+    return JSON.parse(data) as Partial<ProjectConfig>;
   } catch (err: unknown) {
     const details = err instanceof Error ? err.message : 'Invalid JSON';
     throw new Error(
@@ -199,8 +226,6 @@ async function mergeConfigFile(
       `Fix the file or re-run "sc config-init" to recreate the default config.`
     );
   }
-
-  return deepMerge(config, parsedConfig);
 }
 
 function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {

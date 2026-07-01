@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import prompts from 'prompts';
-import { loadConfig, saveConfig } from '../core/config.js';
+import { loadConfig, saveConfig, setGlobalActiveProfile } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
 export async function listProfiles(): Promise<void> {
@@ -99,9 +99,9 @@ export async function useProfile(name?: string): Promise<void> {
     return;
   }
 
-  config.activeProfile = name;
-  await saveConfig(config, true);
+  await setGlobalActiveProfile(name);
   console.log(chalk.green(`✓ Switched to profile "${name}"`));
+  console.log(chalk.gray('  Saved as the active profile for future sessions'));
 }
 
 export async function removeProfile(name?: string): Promise<void> {
