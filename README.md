@@ -162,6 +162,9 @@ Initialize a project with a default `AGENTS.md` file for providing context to th
 
 Create the global config file with default profiles.
 
+If the config file already exists, `sc config-init` stops without overwriting it.
+Use `sc config-init --force` only when you intentionally want to replace the global config.
+
 ## Project Context
 
 The agent automatically loads project-specific context from:
