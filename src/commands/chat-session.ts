@@ -10,8 +10,10 @@ import type { Message } from '../core/types.js';
 import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
+import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { getPromptBoolean } from '../utils/prompt-result.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -36,7 +38,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
   let currentConfig = options.config;
-  let inputHistory: string[] = [];
+  const inputHistory: string[] = [];
   let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
 
   // Check storage limit on startup
@@ -102,7 +104,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // Process the prompt
     console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
-    const response = await agent.run(userInput, history);
+    await agent.run(userInput, history);
     console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
 
     // Exit after processing
@@ -295,7 +297,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             fs.mkdirSync(configDir, { recursive: true });
           }
 
-          let config: any = {};
+          let config: Record<string, unknown> = {};
           if (fs.existsSync(configPath)) {
             const configContent = fs.readFileSync(configPath, 'utf-8');
             config = JSON.parse(configContent);
@@ -304,7 +306,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           if (!config.permissions) {
             config.permissions = {};
           }
-          config.permissions.profile = profileChoice.profile;
+          (config.permissions as {profile?: string}).profile = profileChoice.profile;
 
           fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -362,7 +364,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Allow reading files and listing directories without asking?',
           initial: true,
         });
-        if (q1.value) {
+        const allowReadOnly = getPromptBoolean(q1);
+        if (allowReadOnly === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowReadOnly) {
           preApprovedTools.push('read_file', 'list_dir', 'search_text');
           console.log(chalk.gray('  ✓ Added: read_file, list_dir, search_text\n'));
         }
@@ -374,7 +381,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: `Allow writing/editing files in this directory (${options.workspaceRoot})?`,
           initial: false,
         });
-        if (q2.value) {
+        const allowWrites = getPromptBoolean(q2);
+        if (allowWrites === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowWrites) {
           preApprovedTools.push('write_file', 'edit_file');
           console.log(chalk.gray('  ✓ Added: write_file, edit_file\n'));
         }
@@ -386,7 +398,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Allow executing shell commands (non-admin, e.g., npm, git)?',
           initial: false,
         });
-        if (q3.value) {
+        const allowShell = getPromptBoolean(q3);
+        if (allowShell === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowShell) {
           preApprovedTools.push('run_shell');
           console.log(chalk.gray('  ✓ Added: run_shell\n'));
         }
@@ -398,7 +415,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Common git operations (status, diff, log) without asking?',
           initial: true,
         });
-        if (q4.value) {
+        const allowGit = getPromptBoolean(q4);
+        if (allowGit === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowGit) {
           console.log(chalk.gray('  ℹ️  Git operations use run_shell (already configured)\n'));
         }
 
@@ -409,7 +431,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Common package manager operations (npm install, build, test)?',
           initial: false,
         });
-        if (q5.value) {
+        const allowPackageOps = getPromptBoolean(q5);
+        if (allowPackageOps === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowPackageOps) {
           console.log(chalk.gray('  ℹ️  Package operations use run_shell (already configured)\n'));
         }
 
@@ -434,7 +461,13 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           initial: true,
         });
 
-        if (confirm.value) {
+        const shouldSave = getPromptBoolean(confirm);
+        if (shouldSave === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+
+        if (shouldSave) {
           // Save to config
           try {
             const fs = await import('node:fs');
@@ -450,7 +483,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             }
 
             // Read existing config or create new
-            let config: any = {};
+            let config: Record<string, unknown> = {};
             if (fs.existsSync(configPath)) {
               const configContent = fs.readFileSync(configPath, 'utf-8');
               config = JSON.parse(configContent);
@@ -460,7 +493,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             if (!config.permissions) {
               config.permissions = {};
             }
-            config.permissions.autoApprove = preApprovedTools;
+            (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
 
             // Write config
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -485,7 +518,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             console.log(chalk.red(`\n✗ Error saving config: ${errorMsg}\n`));
           }
         } else {
-          console.log(chalk.gray('\n  Configuration not saved\n'));
+          console.log(chalk.gray('\nConfiguration not saved.\n'));
         }
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -521,14 +554,21 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             initial: true,
           });
 
-          if (cleanup.value) {
+          const shouldCleanup = getPromptBoolean(cleanup);
+          if (shouldCleanup === null) {
+            console.log(chalk.gray('\nCleanup cancelled.\n'));
+            continue;
+          }
+
+          if (shouldCleanup) {
             enforceStorageLimit(configDir, true);
           }
         } else if (info.usagePercent > 80) {
           console.log(chalk.yellow('💡 Tips:\n'));
-          console.log(chalk.gray('  • Increase limit: export SC_MAX_STORAGE_GB=2'));
-          console.log(chalk.gray('  • Clean manually: rm -rf ~/.sc-agent/old-files'));
-          console.log(chalk.gray('  • Auto-cleanup runs when limit is exceeded\n'));
+          for (const tip of getStorageGuidance()) {
+            console.log(chalk.gray(tip));
+          }
+          console.log();
         } else {
           console.log(chalk.green('✓ Storage usage is healthy\n'));
         }

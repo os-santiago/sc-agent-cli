@@ -4,7 +4,8 @@ import type { ProjectConfig } from '../core/types.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { isDangerousCommand, formatDangerousWarning, getHighestSeverity } from './dangerous-commands.js';
+import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
+import { getPromptBoolean, getPromptString } from './prompt-result.js';
 
 export interface PermissionContext {
   toolName: string;
@@ -58,12 +59,18 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       initial: false,
     });
 
-    if (response.approved === false) {
+    const approved = getPromptBoolean(response, 'approved');
+    if (approved === null) {
+      console.log(chalk.gray('\n   ℹ️  Permission prompt cancelled. No action was taken.\n'));
+      return false;
+    }
+
+    if (approved === false) {
       console.log(chalk.gray(`\n   ℹ️  Action denied. The agent will try another approach.\n`));
       return false;
     }
 
-    return response.approved ?? false;
+    return approved;
   }
 
   // TRADITIONAL MODE: Continue with normal permission flow
@@ -97,9 +104,14 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
     initial: 0, // Default to "Yes (once)"
   });
 
-  const choice = response.choice;
+  const choice = getPromptString<'yes' | 'always' | 'session' | 'no'>(response, 'choice');
 
-  if (!choice || choice === 'no') {
+  if (choice === null) {
+    console.log(chalk.gray('\n   ℹ️  Permission prompt cancelled. No action was taken.\n'));
+    return false;
+  }
+
+  if (choice === 'no') {
     console.log(chalk.gray(`\n   ℹ️  Action denied. The agent will try another approach.\n`));
     return false;
   }
@@ -116,20 +128,24 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       }
 
       // Read or create config
-      let configContent: any = {};
+      let configContent: Record<string, unknown> = {};
       if (existsSync(configPath)) {
         const fileContent = readFileSync(configPath, 'utf-8');
         configContent = JSON.parse(fileContent);
       }
 
-      if (!configContent.permissions) {
-        configContent.permissions = {};
+      interface PermissionsConfig {
+        autoApprove?: string[];
+        profile?: 'traditional' | 'blacklist';
+        denyPaths?: string[];
       }
-      if (!configContent.permissions.autoApprove) {
-        configContent.permissions.autoApprove = [];
+      const permissions = (configContent.permissions as PermissionsConfig) || {};
+      if (!permissions.autoApprove) {
+        permissions.autoApprove = [];
       }
-      if (!configContent.permissions.autoApprove.includes(ctx.toolName)) {
-        configContent.permissions.autoApprove.push(ctx.toolName);
+      if (!permissions.autoApprove.includes(ctx.toolName)) {
+        permissions.autoApprove.push(ctx.toolName);
+        configContent.permissions = permissions;
         writeFileSync(configPath, JSON.stringify(configContent, null, 2));
         console.log(chalk.gray(`\n   ✓ Added "${ctx.toolName}" to auto-approve list\n`));
       }
