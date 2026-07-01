@@ -43,11 +43,16 @@ export class OpenAICompatibleProvider {
       tools: options.tools,
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (err: unknown) {
+      throw new Error(formatProviderRequestError(this.config.baseUrl, err));
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -154,4 +159,67 @@ export class OpenAICompatibleProvider {
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
+}
+
+function formatProviderRequestError(baseUrl: string, err: unknown): string {
+  const providerTarget = safeProviderTarget(baseUrl);
+  const detail = getErrorDetail(err);
+
+  if (isLocalProvider(baseUrl)) {
+    return [
+      `Could not reach local provider at ${providerTarget}.`,
+      'Check that the server is running and the configured base URL is correct.',
+      detail ? `Details: ${detail}` : undefined,
+    ].filter(Boolean).join(' ');
+  }
+
+  return [
+    `Could not reach provider at ${providerTarget}.`,
+    'Check your internet connection, provider status, and configured base URL.',
+    detail ? `Details: ${detail}` : undefined,
+  ].filter(Boolean).join(' ');
+}
+
+function safeProviderTarget(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    return url.origin;
+  } catch {
+    return baseUrl;
+  }
+}
+
+function isLocalProvider(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function getErrorDetail(err: unknown): string | undefined {
+  if (!(err instanceof Error)) {
+    return undefined;
+  }
+
+  const cause = err.cause;
+  if (cause && typeof cause === 'object') {
+    const code = 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined;
+    const message = 'message' in cause && typeof cause.message === 'string' ? cause.message : undefined;
+
+    if (code && message) {
+      return `${code}: ${message}`;
+    }
+
+    if (code) {
+      return code;
+    }
+
+    if (message) {
+      return message;
+    }
+  }
+
+  return err.message || undefined;
 }
