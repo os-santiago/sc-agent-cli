@@ -3,8 +3,32 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+type PromptFn = (...args: Parameters<typeof prompts>) => ReturnType<typeof prompts>;
+
+const profileDeps: {
+  prompts: PromptFn;
+  loadConfig: typeof loadConfig;
+  saveConfig: typeof saveConfig;
+} = {
+  prompts,
+  loadConfig,
+  saveConfig,
+};
+
+export function setProfileCommandDepsForTesting(
+  overrides: Partial<typeof profileDeps>
+): void {
+  Object.assign(profileDeps, overrides);
+}
+
+export function resetProfileCommandDepsForTesting(): void {
+  profileDeps.prompts = prompts;
+  profileDeps.loadConfig = loadConfig;
+  profileDeps.saveConfig = saveConfig;
+}
+
 export async function listProfiles(): Promise<void> {
-  const config = await loadConfig();
+  const config = await profileDeps.loadConfig();
   const profiles = config.profiles || {};
 
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
@@ -18,10 +42,10 @@ export async function listProfiles(): Promise<void> {
 }
 
 export async function addProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await profileDeps.loadConfig();
 
   if (!name) {
-    const response = await prompts({
+    const response = await profileDeps.prompts({
       type: 'text',
       name: 'name',
       message: 'Profile name:',
@@ -34,7 +58,7 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
-  const response = await prompts([
+  const response = await profileDeps.prompts([
     {
       type: 'text',
       name: 'baseUrl',
@@ -66,12 +90,12 @@ export async function addProfile(name?: string): Promise<void> {
   config.profiles = config.profiles || {};
   config.profiles[name] = profile;
 
-  await saveConfig(config, true);
+  await profileDeps.saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" added successfully`));
 }
 
 export async function useProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await profileDeps.loadConfig();
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
@@ -80,12 +104,18 @@ export async function useProfile(name?: string): Promise<void> {
       return;
     }
 
-    const response = await prompts({
+    const response = await profileDeps.prompts({
       type: 'select',
       name: 'profile',
       message: 'Select a profile:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+
+    if (!response.profile) {
+      console.log(chalk.gray('Profile selection cancelled'));
+      return;
+    }
+
     name = response.profile;
   }
 
@@ -100,12 +130,12 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   config.activeProfile = name;
-  await saveConfig(config, true);
+  await profileDeps.saveConfig(config, true);
   console.log(chalk.green(`✓ Switched to profile "${name}"`));
 }
 
 export async function removeProfile(name?: string): Promise<void> {
-  const config = await loadConfig();
+  const config = await profileDeps.loadConfig();
 
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
@@ -114,12 +144,18 @@ export async function removeProfile(name?: string): Promise<void> {
       return;
     }
 
-    const response = await prompts({
+    const response = await profileDeps.prompts({
       type: 'select',
       name: 'profile',
       message: 'Select a profile to remove:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+
+    if (!response.profile) {
+      console.log(chalk.gray('Profile removal cancelled'));
+      return;
+    }
+
     name = response.profile;
   }
 
@@ -139,6 +175,6 @@ export async function removeProfile(name?: string): Promise<void> {
     config.activeProfile = undefined;
   }
 
-  await saveConfig(config, true);
+  await profileDeps.saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
 }

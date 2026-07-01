@@ -40,7 +40,7 @@ export function getDirectorySize(dirPath: string): number {
         totalSize += stats.size;
       }
     }
-  } catch (err) {
+  } catch {
     // Ignore permission errors
   }
 
@@ -104,7 +104,7 @@ export function cleanupOldestFiles(dirPath: string, targetSizeBytes: number): nu
           });
         }
       }
-    } catch (err) {
+    } catch {
       // Ignore permission errors
     }
   }
@@ -126,7 +126,7 @@ export function cleanupOldestFiles(dirPath: string, targetSizeBytes: number): nu
     try {
       unlinkSync(file.path);
       deletedSize += file.size;
-    } catch (err) {
+    } catch {
       // Ignore errors
     }
   }
@@ -156,12 +156,12 @@ function cleanupEmptyDirs(dirPath: string) {
           if (contents.length === 0) {
             rmdirSync(itemPath);
           }
-        } catch (err) {
+        } catch {
           // Not empty or permission error
         }
       }
     }
-  } catch (err) {
+  } catch {
     // Ignore errors
   }
 }
