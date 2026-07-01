@@ -161,6 +161,7 @@ You: /model
   nvidia - meta/llama-3.3-70b-instruct
 
 ✓ Switched to: nvidia
+  Saved as the active profile for future sessions
 ```
 
 ---

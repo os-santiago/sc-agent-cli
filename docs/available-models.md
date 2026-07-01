@@ -187,9 +187,10 @@ You: /model
 ✓ Switched to: llama-3.3-70b
   Model: meta/llama-3.3-70b-instruct
   Provider: https://integrate.api.nvidia.com/v1
+  Saved as the active profile for future sessions
 ```
 
-**Note:** Switching models clears conversation history.
+**Note:** Switching models clears conversation history and saves the selected profile for future sessions.
 
 ---
 
