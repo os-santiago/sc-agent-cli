@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig, ModelConfig } from './types.js';
@@ -116,16 +116,25 @@ export function getGlobalConfigPath(): string {
 
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
   const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
-
-  if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
-  }
-
-  await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
+  await writeConfigFile(targetPath, config);
 }
 
-export async function initConfig(): Promise<void> {
-  await saveConfig(DEFAULT_CONFIG, true);
+interface InitConfigOptions {
+  force?: boolean;
+  configPath?: string;
+}
+
+export async function initConfig(options: InitConfigOptions = {}): Promise<void> {
+  const targetPath = options.configPath ?? CONFIG_PATH;
+
+  if (!options.force && await pathExists(targetPath)) {
+    throw new Error(
+      `Global config already exists at ${targetPath}. ` +
+      `Re-run "sc config-init --force" to overwrite it.`
+    );
+  }
+
+  await writeConfigFile(targetPath, DEFAULT_CONFIG);
 }
 
 function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial<T>): T {
@@ -144,4 +153,31 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
     }
   }
   return result;
+}
+
+async function writeConfigFile(targetPath: string, config: ProjectConfig): Promise<void> {
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw err;
+  }
+}
+
+function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
+  return Boolean(
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as NodeJS.ErrnoException).code === 'ENOENT'
+  );
 }

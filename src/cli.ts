@@ -76,9 +76,10 @@ program
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .action(async () => {
+  .option('-f, --force', 'Overwrite an existing global config file')
+  .action(async (options) => {
     try {
-      await initConfig();
+      await initConfig({ force: options.force });
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
