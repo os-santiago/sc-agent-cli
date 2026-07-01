@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { initConfig, loadConfig, validateConfig, getGlobalConfigPath } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -64,6 +64,46 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
       return true;
     }
   );
+});
+
+test('initConfig preserves an existing global config unless forced', async () => {
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalHome = process.env.HOME;
+  const tempHome = await mkdtemp(path.join(tmpdir(), 'sc-agent-home-'));
+  process.env.USERPROFILE = tempHome;
+  process.env.HOME = tempHome;
+
+  try {
+    await initConfig();
+    const configPath = getGlobalConfigPath();
+    const initialContent = await readFile(configPath, 'utf-8');
+
+    await writeFile(configPath, '{"model":{"baseUrl":"http://example.test/v1","model":"custom"}}', 'utf-8');
+
+    await assert.rejects(
+      () => initConfig(),
+      /Global config already exists .*sc config-init --force/
+    );
+
+    const preservedContent = await readFile(configPath, 'utf-8');
+    assert.equal(preservedContent, '{"model":{"baseUrl":"http://example.test/v1","model":"custom"}}');
+
+    await initConfig(true);
+    const overwrittenContent = await readFile(configPath, 'utf-8');
+    assert.equal(overwrittenContent, initialContent);
+  } finally {
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+  }
 });
 
 function escapeRegex(value: string): string {
