@@ -145,8 +145,24 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
-  await saveConfig(DEFAULT_CONFIG, true);
+export async function initConfig(force = false): Promise<void> {
+  await mkdir(CONFIG_DIR, { recursive: true });
+
+  try {
+    await writeFile(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2), {
+      encoding: 'utf-8',
+      flag: force ? 'w' : 'wx',
+    });
+  } catch (err: unknown) {
+    if (isFileAlreadyExistsError(err)) {
+      throw new Error(
+        `Global config already exists at ${CONFIG_PATH}. ` +
+        'Re-run "sc config-init --force" to overwrite it.'
+      );
+    }
+
+    throw err;
+  }
 }
 
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {
@@ -209,4 +225,12 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function isFileAlreadyExistsError(err: unknown): err is NodeJS.ErrnoException {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+
+  return 'code' in err && (err as NodeJS.ErrnoException).code === 'EEXIST';
 }
