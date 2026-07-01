@@ -306,7 +306,7 @@ Result:
 ### Traditional + Permission Modes
 ```
 /profile → Traditional
-/permissions → Ask once per command
+/permissions → Ask once per tool
 ```
 
 Result:
