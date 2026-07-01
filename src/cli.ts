@@ -69,16 +69,23 @@ program
   .command('init')
   .description('Initialize a new project with AGENTS.md')
   .action(async () => {
-    await initProject(process.cwd());
+    try {
+      await initProject(process.cwd());
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Error: Failed to create AGENTS.md: ${errorMsg}`));
+      process.exit(1);
+    }
   });
 
 // Config init
 program
   .command('config-init')
   .description('Initialize global config with default profiles')
-  .action(async () => {
+  .option('-f, --force', 'Overwrite an existing global config file')
+  .action(async (options) => {
     try {
-      await initConfig();
+      await initConfig(options.force);
       console.log(chalk.green(`✓ Config initialized at ${getGlobalConfigPath()}`));
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
