@@ -13,6 +13,19 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { type PermissionMode, shouldAutoApproveForPermissionMode } from './permission-mode.js';
+
+function createSessionAgent(
+  options: AgentOptions,
+  currentConfig: AgentOptions['config'],
+  currentPermissionMode: PermissionMode
+): Agent {
+  return new Agent({
+    ...options,
+    config: currentConfig,
+    autoApprove: shouldAutoApproveForPermissionMode(currentPermissionMode),
+  });
+}
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -34,11 +47,11 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 }
 
 export async function startChatSession(options: AgentOptions): Promise<void> {
-  let agent = new Agent(options);
   let history: Message[] = [];
   let currentConfig = options.config;
   const inputHistory: string[] = [];
-  let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
+  let currentPermissionMode: PermissionMode = options.autoApprove ? 'unlimited' : 'ask_once';
+  let agent = createSessionAgent(options, currentConfig, currentPermissionMode);
 
   // Check storage limit on startup
   const configDir = join(homedir(), '.sc-agent');
@@ -212,35 +225,23 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         }
 
         // Update agent with new permission mode
-        const selectedMode = permissionMode.mode as 'ask_once' | 'always_ask' | 'unlimited';
+        const selectedMode = permissionMode.mode as PermissionMode;
         currentPermissionMode = selectedMode;
 
         if (selectedMode === 'unlimited') {
-          agent = new Agent({
-            ...options,
-            config: currentConfig,
-            autoApprove: true,
-          });
+          agent = createSessionAgent(options, currentConfig, currentPermissionMode);
           console.log(chalk.yellow('\n⚠️  Permission mode: Unlimited (dangerous)'));
           console.log(chalk.gray('   All tools will auto-approve without asking'));
           console.log(chalk.gray('   Use with caution!\n'));
         } else if (selectedMode === 'always_ask') {
           // Clear any session permissions when switching to always ask
           clearSessionPermissions();
-          agent = new Agent({
-            ...options,
-            config: currentConfig,
-            autoApprove: false,
-          });
+          agent = createSessionAgent(options, currentConfig, currentPermissionMode);
           console.log(chalk.green('\n✓ Permission mode: Always ask (safer)'));
           console.log(chalk.gray('   You will be prompted for every tool use\n'));
         } else {
           // ask_once - default behavior with session tracking
-          agent = new Agent({
-            ...options,
-            config: currentConfig,
-            autoApprove: false,
-          });
+          agent = createSessionAgent(options, currentConfig, currentPermissionMode);
           console.log(chalk.cyan('\n✓ Permission mode: Ask once per command (recommended)'));
           console.log(chalk.gray('   First use prompts, then auto-approves for session\n'));
         }
@@ -316,11 +317,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           currentConfig.permissions.profile = profileChoice.profile;
 
           // Recreate agent with new config
-          agent = new Agent({
-            ...options,
-            config: currentConfig,
-            autoApprove: currentPermissionMode === 'unlimited',
-          });
+          agent = createSessionAgent(options, currentConfig, currentPermissionMode);
 
           if (profileChoice.profile === 'traditional') {
             console.log(chalk.green('\n✓ Permission profile: Traditional'));
@@ -473,11 +470,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             const reloadedConfig = await loadConfig(options.workspaceRoot);
             currentConfig = reloadedConfig;
 
-            agent = new Agent({
-              ...options,
-              config: currentConfig,
-              autoApprove: false,
-            });
+            agent = createSessionAgent(options, currentConfig, currentPermissionMode);
 
             console.log(chalk.cyan('✓ Configuration reloaded'));
             console.log(chalk.gray('  Pre-approved tools are now active\n'));
@@ -560,10 +553,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         }
 
         // Create new agent with reloaded config
-        agent = new Agent({
-          ...options,
-          config: currentConfig,
-        });
+        agent = createSessionAgent(options, currentConfig, currentPermissionMode);
 
         console.log(chalk.green('✓ Configuration reloaded successfully!'));
         console.log(chalk.gray(`  Active profile: ${currentConfig.activeProfile || 'none'}`));
@@ -657,10 +647,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         }
 
         // Create new agent with updated config
-        agent = new Agent({
-          ...options,
-          config: currentConfig,
-        });
+        agent = createSessionAgent(options, currentConfig, currentPermissionMode);
 
         console.log(chalk.green(`\n✓ Switched to: ${selection.profile}`));
         console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
