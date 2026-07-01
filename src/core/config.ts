@@ -71,7 +71,7 @@ const API_KEY_REQUIREMENTS = [
 ] as const;
 
 export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
-  let config = { ...DEFAULT_CONFIG };
+  let config = structuredClone(DEFAULT_CONFIG);
 
   // Load global config
   config = await mergeConfigFile(config, CONFIG_PATH, 'global');

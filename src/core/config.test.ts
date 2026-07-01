@@ -66,6 +66,21 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
   );
 });
 
+test('loadConfig returns isolated defaults for each call', async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
+
+  const firstConfig = await loadConfig(projectRoot);
+  firstConfig.permissions?.denyPaths?.push('mutated-secret.txt');
+  if (firstConfig.profiles?.ollama) {
+    firstConfig.profiles.ollama.model = 'mutated-model';
+  }
+
+  const secondConfig = await loadConfig(projectRoot);
+
+  assert.equal(secondConfig.permissions?.denyPaths?.includes('mutated-secret.txt'), false);
+  assert.equal(secondConfig.profiles?.ollama?.model, 'llama3.2');
+});
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
