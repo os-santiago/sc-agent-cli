@@ -119,6 +119,9 @@ export class OpenAICompatibleProvider {
                       function: { name: tc.function?.name || '', arguments: tc.function?.arguments || '' },
                     });
                   } else {
+                    if (tc.id && !existing.id) {
+                      existing.id = tc.id;
+                    }
                     if (tc.function?.name) {
                       existing.function.name += tc.function.name;
                     }
