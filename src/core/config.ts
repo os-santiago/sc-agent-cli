@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
@@ -135,18 +135,27 @@ export function getGlobalConfigPath(): string {
   return CONFIG_PATH;
 }
 
-export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
-  const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
+export async function saveConfig(
+  config: ProjectConfig,
+  global = true,
+  targetPath?: string
+): Promise<void> {
+  const resolvedPath = targetPath || (global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json'));
 
-  if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
-  }
+  await mkdir(path.dirname(resolvedPath), { recursive: true });
 
-  await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
+  await writeFile(resolvedPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
-  await saveConfig(DEFAULT_CONFIG, true);
+export async function initConfig(force = false, configPath = CONFIG_PATH): Promise<void> {
+  if (!force && await pathExists(configPath)) {
+    throw new Error(
+      `Global config already exists at ${configPath}. ` +
+      `Re-run "sc config-init --force" to overwrite it.`
+    );
+  }
+
+  await saveConfig(DEFAULT_CONFIG, true, configPath);
 }
 
 function deepMerge<T extends object>(base: T, override: Partial<T>): T {
@@ -209,4 +218,17 @@ function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
   }
 
   return 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (err: unknown) {
+    if (isMissingFileError(err)) {
+      return false;
+    }
+
+    throw err;
+  }
 }
