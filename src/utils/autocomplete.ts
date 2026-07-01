@@ -1,4 +1,4 @@
-import { readdirSync, statSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { join, dirname, basename, sep } from 'node:path';
 
 // Available slash commands
@@ -124,14 +124,13 @@ function autocompleteFilePath(line: string, workspaceRoot: string): string[] {
         return true;
       })
       .map(entry => {
-        const fullEntryPath = join(dirPath, entry.name);
         const isDir = entry.isDirectory();
         return isDir ? `${entry.name}/` : entry.name;
       })
       .slice(0, 20); // Limit to 20 suggestions
 
     return matches;
-  } catch (err) {
+  } catch {
     return [];
   }
 }
