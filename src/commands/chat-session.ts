@@ -13,6 +13,7 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { getPromptBoolean } from '../utils/prompt-result.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -363,7 +364,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Allow reading files and listing directories without asking?',
           initial: true,
         });
-        if (q1.value) {
+        const allowReadOnly = getPromptBoolean(q1);
+        if (allowReadOnly === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowReadOnly) {
           preApprovedTools.push('read_file', 'list_dir', 'search_text');
           console.log(chalk.gray('  ✓ Added: read_file, list_dir, search_text\n'));
         }
@@ -375,7 +381,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: `Allow writing/editing files in this directory (${options.workspaceRoot})?`,
           initial: false,
         });
-        if (q2.value) {
+        const allowWrites = getPromptBoolean(q2);
+        if (allowWrites === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowWrites) {
           preApprovedTools.push('write_file', 'edit_file');
           console.log(chalk.gray('  ✓ Added: write_file, edit_file\n'));
         }
@@ -387,7 +398,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Allow executing shell commands (non-admin, e.g., npm, git)?',
           initial: false,
         });
-        if (q3.value) {
+        const allowShell = getPromptBoolean(q3);
+        if (allowShell === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowShell) {
           preApprovedTools.push('run_shell');
           console.log(chalk.gray('  ✓ Added: run_shell\n'));
         }
@@ -399,7 +415,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Common git operations (status, diff, log) without asking?',
           initial: true,
         });
-        if (q4.value) {
+        const allowGit = getPromptBoolean(q4);
+        if (allowGit === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowGit) {
           console.log(chalk.gray('  ℹ️  Git operations use run_shell (already configured)\n'));
         }
 
@@ -410,7 +431,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           message: 'Common package manager operations (npm install, build, test)?',
           initial: false,
         });
-        if (q5.value) {
+        const allowPackageOps = getPromptBoolean(q5);
+        if (allowPackageOps === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+        if (allowPackageOps) {
           console.log(chalk.gray('  ℹ️  Package operations use run_shell (already configured)\n'));
         }
 
@@ -435,7 +461,13 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           initial: true,
         });
 
-        if (confirm.value) {
+        const shouldSave = getPromptBoolean(confirm);
+        if (shouldSave === null) {
+          console.log(chalk.gray('\nInterview cancelled. No changes were saved.\n'));
+          continue;
+        }
+
+        if (shouldSave) {
           // Save to config
           try {
             const fs = await import('node:fs');
@@ -486,7 +518,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             console.log(chalk.red(`\n✗ Error saving config: ${errorMsg}\n`));
           }
         } else {
-          console.log(chalk.gray('\n  Configuration not saved\n'));
+          console.log(chalk.gray('\nConfiguration not saved.\n'));
         }
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -522,7 +554,13 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             initial: true,
           });
 
-          if (cleanup.value) {
+          const shouldCleanup = getPromptBoolean(cleanup);
+          if (shouldCleanup === null) {
+            console.log(chalk.gray('\nCleanup cancelled.\n'));
+            continue;
+          }
+
+          if (shouldCleanup) {
             enforceStorageLimit(configDir, true);
           }
         } else if (info.usagePercent > 80) {
