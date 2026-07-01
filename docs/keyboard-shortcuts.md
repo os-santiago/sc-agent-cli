@@ -106,7 +106,7 @@ Quick access to permission modes:
 You: /permissions
 
 ? Select permission mode: › - Use arrow-keys. Return to submit.
-❯   Ask once per command (recommended)
+❯   Ask once per tool (recommended)
     Always ask (safer)
     Unlimited (dangerous)
 ```
@@ -226,12 +226,13 @@ You: /info
 
 📊 Current Configuration:
 
-  Profile:     nvidia
+  Profile:            nvidia
   Model:       meta/llama-3.3-70b-instruct
   Provider:    https://integrate.api.nvidia.com/v1
   Temperature: 0.7
   Max Tokens:  4096
-  Permissions: Ask once per command
+  Permissions:        Ask once per tool
+  Permission profile: Traditional
   Auto-approve: read_file, list_dir, search_text
   Storage:     450.23 MB / 1.00 GB (45.0%)
   History:     12 messages
