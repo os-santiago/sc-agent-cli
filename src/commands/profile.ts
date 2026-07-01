@@ -7,6 +7,11 @@ export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
 
+  if (Object.keys(profiles).length === 0) {
+    printNoProfilesGuidance();
+    return;
+  }
+
   console.log(chalk.bold('\n📋 Available Profiles:\n'));
   for (const [name, profile] of Object.entries(profiles)) {
     const active = name === config.activeProfile ? chalk.green(' (active)') : '';
@@ -76,7 +81,7 @@ export async function useProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      printNoProfilesGuidance();
       return;
     }
 
@@ -95,7 +100,7 @@ export async function useProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    printProfileNotFound(name, Object.keys(config.profiles || {}));
     return;
   }
 
@@ -110,7 +115,7 @@ export async function removeProfile(name?: string): Promise<void> {
   if (!name) {
     const profiles = Object.keys(config.profiles || {});
     if (profiles.length === 0) {
-      console.log(chalk.red('No profiles available'));
+      printNoProfilesGuidance();
       return;
     }
 
@@ -129,7 +134,7 @@ export async function removeProfile(name?: string): Promise<void> {
   }
 
   if (!config.profiles?.[name]) {
-    console.log(chalk.red(`Profile "${name}" not found`));
+    printProfileNotFound(name, Object.keys(config.profiles || {}));
     return;
   }
 
@@ -141,4 +146,21 @@ export async function removeProfile(name?: string): Promise<void> {
 
   await saveConfig(config, true);
   console.log(chalk.green(`✓ Profile "${name}" removed`));
+}
+
+function printNoProfilesGuidance(): void {
+  console.log(chalk.red('No profiles available.'));
+  console.log(chalk.gray('Run `sc config-init` to restore the default profiles or `sc profile add <name>` to create one.'));
+}
+
+function printProfileNotFound(name: string, availableProfiles: string[]): void {
+  console.log(chalk.red(`Profile "${name}" not found.`));
+
+  if (availableProfiles.length === 0) {
+    console.log(chalk.gray('Run `sc config-init` to restore the default profiles or `sc profile add <name>` to create one.'));
+    return;
+  }
+
+  console.log(chalk.gray(`Available profiles: ${availableProfiles.join(', ')}`));
+  console.log(chalk.gray('Run `sc profile list` to inspect profile details.'));
 }
