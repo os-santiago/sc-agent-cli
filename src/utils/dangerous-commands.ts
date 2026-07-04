@@ -250,6 +250,38 @@ export const DANGEROUS_COMMANDS: DangerousPattern[] = [
     severity: 'high',
   },
 
+  // Container Operations (Podman/Docker) - HIGH
+  {
+    pattern: /\bpodman\s+run\s+.*--privileged/,
+    category: 'container-privileged',
+    description: 'Run container with elevated privileges',
+    severity: 'high',
+  },
+  {
+    pattern: /\bpodman\s+run\s+.*--(cap-add|security-opt)\s+/, 
+    category: 'container-capabilities',
+    description: 'Add Linux capabilities to container',
+    severity: 'high',
+  },
+  {
+    pattern: /\bpodman\s+(rm|rmi)\s+-f/,
+    category: 'container-deletion',
+    description: 'Force remove containers/images',
+    severity: 'medium',
+  },
+  {
+    pattern: /\bpodman\s+system\s+prune/,
+    category: 'container-prune',
+    description: 'Remove all unused containers/images',
+    severity: 'medium',
+  },
+  {
+    pattern: /\bpodman\s+run\s+.*-v\s+\/:/,
+    category: 'container-host-mount',
+    description: 'Mount host root filesystem into container',
+    severity: 'high',
+  },
+
   // Git Operations - MEDIUM
   {
     pattern: /\bgit\s+push\s+(-f|--force)/,

@@ -4,6 +4,8 @@ import { join, dirname, basename, sep } from 'node:path';
 // Available slash commands
 const SLASH_COMMANDS = [
   '/help',
+  '/config',
+  '/hud',
   '/model',
   '/permissions',
   '/profile',
@@ -11,7 +13,9 @@ const SLASH_COMMANDS = [
   '/storage',
   '/reload',
   '/clear',
+  '/memory',
   '/info',
+  '/env',
 ];
 
 // Available tools
@@ -22,6 +26,10 @@ const TOOLS = [
   'list_dir',
   'search_text',
   'run_shell',
+  'web_fetch',
+  'git',
+  'memory_read',
+  'memory_write',
 ];
 
 export function autocomplete(line: string, workspaceRoot: string): [string[], string] {

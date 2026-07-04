@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import * as readline from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
@@ -13,6 +13,10 @@ import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/st
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
+import { persistentMemory } from '../utils/memory.js';
+import { boxHeader, boxFooter } from '../utils/box-drawing.js';
+import { showConfig } from '../utils/config-display.js';
+import { resolveSettings } from '../utils/settings.js';
 
 // Helper to read user input with history navigation and autocomplete
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -39,6 +43,39 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let currentConfig = options.config;
   const inputHistory: string[] = [];
   let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
+  const settings = resolveSettings(currentConfig);
+  let hudEnabled = settings.hud;
+
+  // Truncate helper for banner
+  function trunc(s: string, max: number): string {
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  }
+
+  // Load persisted conversation history
+  const HISTORY_FILE = join(homedir(), '.sc-agent', 'memory', 'history.json');
+  try {
+    const { readFileSync, existsSync } = await import('node:fs');
+    if (existsSync(HISTORY_FILE)) {
+      const data = readFileSync(HISTORY_FILE, 'utf-8');
+      history = JSON.parse(data);
+    }
+  } catch {
+    // Start fresh
+  }
+
+  // Load saved permissions (needed for banner display)
+  let savedPerms: { mode: string; restoreOnStart: boolean } | undefined;
+  if (options.autoApprove === undefined) {
+    try {
+      const { loadPermissions } = await import('../utils/permissions-store.js');
+      savedPerms = loadPermissions();
+      if (savedPerms.restoreOnStart) {
+        currentPermissionMode = savedPerms.mode as 'ask_once' | 'always_ask' | 'unlimited';
+      }
+    } catch {
+      // No saved permissions
+    }
+  }
 
   // Check storage limit on startup
   const configDir = join(homedir(), '.sc-agent');
@@ -49,24 +86,88 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   const isNonInteractive = Boolean(options.initialPrompt);
 
   if (!isQuiet) {
-    console.log(chalk.gray('╔════════════════════════════════════════════════════════════╗'));
-    console.log(chalk.bold.cyan('  🤖 SC-Agent CLI'));
-    console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
-    console.log(chalk.gray(`  Workspace: ${options.workspaceRoot}`));
-    console.log(chalk.gray(`  Model:     ${currentConfig.model.model}`));
-    console.log(chalk.gray(`  Provider:  ${currentConfig.model.baseUrl}`));
-    console.log(chalk.gray(`  Storage:   ${formatBytes(storageInfo.currentSize)} / ${formatBytes(storageInfo.maxSize)} (${storageInfo.usagePercent.toFixed(1)}%)`));
-    console.log(chalk.gray('╠════════════════════════════════════════════════════════════╣'));
-    if (!isNonInteractive) {
-      console.log(chalk.gray('  Type "exit" or "quit" to end the session'));
-      console.log(chalk.gray('  Type "/help" for available commands'));
-    }
-    console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
+    const tw = process.stdout.columns || 80;
+    const outer = tw - 2;
+    const colW = Math.floor((outer - 6) / 2);
 
-    // Warn if storage is getting high
+    function row2(label1: string, val1: string, label2: string, val2: string): void {
+      const t1 = `${label1} ${val1}`;
+      const t2 = `${label2} ${val2}`;
+      const fill1 = colW - t1.length + 2;
+      console.log(chalk.cyan(`│ ${t1}${' '.repeat(Math.max(0, fill1))}${t2}${' '.repeat(Math.max(0, outer - 4 - t1.length - Math.max(0, fill1) - t2.length))} │`));
+    }
+
+    console.log(chalk.cyan(`┌${'─'.repeat(outer)}┐`));
+    const title = `  ⚡ scc  —  SC-Agent CLI`;
+    console.log(chalk.cyan(`│ ${chalk.bold(title)}${' '.repeat(outer - title.length - 2)} │`));
+    console.log(chalk.cyan(`├${'─'.repeat(outer)}┤`));
+
+    // Row 1: Workspace (full width)
+    const ws = `${chalk.gray('📁 Workspace')} ${chalk.white(options.workspaceRoot)}`;
+    console.log(chalk.cyan(`│ ${ws}${' '.repeat(outer - ws.length - 2)} │`));
+
+    // Row 2: Model + Storage
+    row2(
+      chalk.gray('🧠 Model'), chalk.white(trunc(currentConfig.model.model, colW - 10)),
+      chalk.gray('💾 Storage'), chalk.white(`${formatBytes(storageInfo.currentSize)} / ${formatBytes(storageInfo.maxSize)}`)
+    );
+
+    // Row 3: Provider + History
+    const providerShort = currentConfig.model.baseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+    row2(
+      chalk.gray('🔗 Provider'), chalk.white(trunc(providerShort, colW - 12)),
+      chalk.gray('📋 History'), chalk.white(`${history.length} msgs`)
+    );
+
+    // Row 4: Permissions
+    const permLabel = chalk.gray('🔐 Permissions');
+    let permVal: string;
+    if (savedPerms?.restoreOnStart) {
+      const modeLabel = savedPerms.mode === 'unlimited' ? 'Unlimited' : savedPerms.mode === 'always_ask' ? 'Always ask' : 'Ask once';
+      permVal = chalk.white(`${modeLabel} (auto)`);
+    } else if (options.autoApprove) {
+      permVal = chalk.white('Unlimited (-y)');
+    } else {
+      permVal = chalk.white('Ask once');
+    }
+    const permRow = `${permLabel} ${permVal}`;
+    console.log(chalk.cyan(`│ ${permRow}${' '.repeat(outer - permRow.length - 2)} │`));
+
+    console.log(chalk.cyan(`├${'─'.repeat(outer)}┤`));
+    const tips = 'exit/quit  /help  /hud  /permissions  /env  /model';
+    console.log(chalk.cyan(`│ ${chalk.gray(tips)}${' '.repeat(outer - tips.length - 2)} │`));
+    console.log(chalk.cyan(`└${'─'.repeat(outer)}┘\n`));
+
     if (storageInfo.usagePercent > 80 && !storageInfo.needsCleanup) {
-      console.log(chalk.yellow(`⚠️  Storage usage is at ${storageInfo.usagePercent.toFixed(1)}%`));
-      console.log(chalk.gray(`   Consider increasing SC_MAX_STORAGE_GB or cleaning old files\n`));
+      console.log(chalk.yellow(`⚠️  Storage usage at ${storageInfo.usagePercent.toFixed(1)}% — set SC_MAX_STORAGE_GB`));
+    }
+  }
+
+  // Permission restore prompt (after banner, only if not auto-restored and mode was changed)
+  if (options.autoApprove === undefined && savedPerms && !savedPerms.restoreOnStart && savedPerms.mode !== 'ask_once' && !isQuiet && !isNonInteractive) {
+    const { savePermissions } = await import('../utils/permissions-store.js');
+    const saved = savedPerms;
+    const modeLabel = saved.mode === 'unlimited' ? 'Unlimited' : 'Always ask';
+    const response = await prompts({
+      type: 'select',
+      name: 'choice',
+      message: `Previous session had "${modeLabel}" permissions. Restore?`,
+      choices: [
+        { title: 'Yes', value: 'yes', description: `Use ${modeLabel} mode` },
+        { title: 'No (ask once)', value: 'no', description: 'Start with default Ask once mode' },
+        { title: "Don't ask again", value: 'always', description: 'Always restore last mode without asking' },
+      ],
+    });
+    if (response.choice === 'yes' || response.choice === 'always') {
+      currentPermissionMode = saved.mode as 'ask_once' | 'always_ask' | 'unlimited';
+      console.log(chalk.gray(`\n  ✓ Restored: ${modeLabel}\n`));
+    }
+    if (response.choice === 'always') {
+      savePermissions({ restoreOnStart: true });
+      console.log(chalk.gray(`  ✓ Won't ask again. Use /permissions to change.\n`));
+    }
+    if (response.choice === 'no') {
+      currentPermissionMode = 'ask_once';
     }
   }
 
@@ -96,15 +197,19 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     const userInput = options.initialPrompt;
 
     if (!isQuiet) {
-      console.log(chalk.blue('\n┌─ Prompt ──────────────────────────────────────────────────┐'));
+      console.log(chalk.blue(`\n${boxHeader('Prompt')}`));
       console.log(chalk.gray(`│ ${userInput}`));
-      console.log(chalk.blue('└───────────────────────────────────────────────────────────┘'));
+      console.log(chalk.blue(boxFooter()));
     }
 
     // Process the prompt
-    console.log(chalk.gray('\n┌─ Assistant ───────────────────────────────────────────────┐'));
+    if (!isQuiet) {
+      console.log(chalk.gray(`\n${boxHeader('Assistant')}`));
+    }
     await agent.run(userInput, history);
-    console.log(chalk.gray('└───────────────────────────────────────────────────────────┘\n'));
+    if (!isQuiet) {
+      console.log(chalk.gray(`${boxFooter()}\n`));
+    }
 
     // Exit after processing
     return;
@@ -119,11 +224,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // User input separator
     if (!isQuiet) {
-      console.log(chalk.blue('\n┌─ You ─────────────────────────────────────────────────────┐'));
+      console.log(chalk.blue(`\n${boxHeader('You')}`));
     }
     const userInput = await readUserInput(inputHistory, options.workspaceRoot);
     if (!isQuiet) {
-      console.log(chalk.blue('└───────────────────────────────────────────────────────────┘'));
+      console.log(chalk.blue(boxFooter()));
     }
 
     // Hide status bar while processing
@@ -159,7 +264,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.white('  /storage                       ') + chalk.gray('- Show storage usage and cleanup options'));
       console.log(chalk.white('  /reload                        ') + chalk.gray('- Reload configuration from disk'));
       console.log(chalk.white('  /clear                         ') + chalk.gray('- Clear conversation history'));
-      console.log(chalk.white('  /info                          ') + chalk.gray('- Show current model and config'));
+      console.log(chalk.white('  /memory                        ') + chalk.gray('- View/manage persistent memory'));
+      console.log(chalk.white('  /config                        ') + chalk.gray('- Show full configuration details'));
+      console.log(chalk.white('  /hud                           ') + chalk.gray('- Toggle compact status bar'));
+      console.log(chalk.white('  /env                           ') + chalk.gray('- Environment diagnostic (tools, shell, versions)'));
+      console.log(chalk.white('  /info                          ') + chalk.gray('- Quick summary'));
       console.log(chalk.white('  exit, quit                     ') + chalk.gray('- End the chat session'));
       console.log(chalk.cyan('\n💡 Tools Available:\n'));
       console.log(chalk.gray('  • read_file     - Read file contents'));
@@ -168,6 +277,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.gray('  • list_dir      - List directory contents'));
       console.log(chalk.gray('  • search_text   - Search text in files'));
       console.log(chalk.gray('  • run_shell     - Execute shell commands'));
+      console.log(chalk.gray('  • web_fetch     - Fetch URL content (docs, APIs)'));
+      console.log(chalk.gray('  • git           - Native git operations'));
+      console.log(chalk.gray('  • memory_*      - Persistent cross-session memory'));
       console.log();
       continue;
     }
@@ -179,30 +291,165 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       continue;
     }
 
+    // Handle /hud command
+    if (userInput.toLowerCase() === '/hud') {
+      hudEnabled = !hudEnabled;
+      const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { homedir } = await import('node:os');
+      const configPath = join(homedir(), '.sc-agent', 'config.json');
+      const configDir = join(homedir(), '.sc-agent');
+      if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+      let cfg: Record<string, unknown> = {};
+      if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+      if (!cfg.settings) cfg.settings = {};
+      (cfg.settings as Record<string, unknown>).hud = hudEnabled;
+      writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+
+      if (hudEnabled) {
+        console.log(chalk.cyan('\n📊 HUD enabled'));
+        console.log(chalk.gray('  Shows: model | profile | memories | messages | storage | permissions'));
+        console.log(chalk.gray('  Set SC_HUD=false to disable via env\n'));
+      } else {
+        console.log(chalk.yellow('\n📊 HUD disabled'));
+        console.log(chalk.gray('  Set SC_HUD=true to re-enable via env'));
+        console.log(chalk.gray('  Or use /hud again\n'));
+      }
+      continue;
+    }
+
+    // Handle /env command - environment diagnostic
+    if (userInput.toLowerCase() === '/env') {
+      try {
+        const { detectShell } = await import('../utils/shell-env.js');
+        const shellInfo = detectShell();
+        const { checkStorageLimit, formatBytes } = await import('../utils/storage-limit.js');
+        const storageInfo = checkStorageLimit(join(homedir(), '.sc-agent'));
+
+        console.log(chalk.cyan('\n🔍 Environment Diagnostic'));
+        console.log(chalk.gray('═'.repeat(50)));
+
+        console.log(chalk.gray('\n📋 Shell'));
+        console.log(chalk.gray(`  Type:     ${shellInfo.type}`));
+        console.log(chalk.gray(`  Platform: ${process.platform}`));
+        console.log(chalk.gray(`  Arch:     ${process.arch}`));
+        console.log(chalk.gray(`  Node:     ${process.version}`));
+
+        console.log(chalk.gray('\n🔧 Tools'));
+        const tools = shellInfo.tools;
+        for (const [name, available] of Object.entries(tools)) {
+          const icon = available ? chalk.green('✓') : chalk.red('✗');
+          console.log(chalk.gray(`  ${icon} ${name}`));
+        }
+
+        console.log(chalk.gray('\n💾 Storage'));
+        console.log(chalk.gray(`  ${formatBytes(storageInfo.currentSize)} / ${formatBytes(storageInfo.maxSize)} (${storageInfo.usagePercent.toFixed(1)}%)`));
+
+        console.log(chalk.gray('\n📂 Workspace'));
+        console.log(chalk.gray(`  ${options.workspaceRoot}`));
+
+        console.log(chalk.gray('\n🌐 Config'));
+        console.log(chalk.gray(`  ~/.sc-agent/config.json`));
+        console.log(chalk.gray(`  Active profile: ${currentConfig.activeProfile || 'none'}`));
+        console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
+        console.log();
+      } catch {
+        console.log(chalk.red('\n⚠️  Environment diagnostic failed\n'));
+      }
+      continue;
+    }
+
+    // Handle /memory command
+    if (userInput.toLowerCase().startsWith('/memory')) {
+      try {
+        const args = userInput.trim().split(/\s+/);
+        const subcommand = args[1]?.toLowerCase();
+
+        if (subcommand === 'clear') {
+          await persistentMemory.clear();
+          console.log(chalk.green('\n✓ All persistent memories cleared\n'));
+        } else if (subcommand === 'forget' && args[2]) {
+          const key = args.slice(2).join(' ');
+          const removed = await persistentMemory.forget(key);
+          if (removed) {
+            console.log(chalk.green(`\n✓ Forgotten memory: "${key}"\n`));
+          } else {
+            console.log(chalk.yellow(`\n⚠ No memory found with key: "${key}"\n`));
+          }
+        } else if (subcommand === 'show' && args[2]) {
+          const key = args.slice(2).join(' ');
+          const content = await persistentMemory.recall(key);
+          if (content) {
+            console.log(chalk.cyan(`\n📝 Memory: ${key}\n`));
+            console.log(chalk.gray(content));
+            console.log();
+          } else {
+            console.log(chalk.yellow(`\n⚠ No memory found with key: "${key}"\n`));
+          }
+        } else {
+          // Show summary
+          const summary = await persistentMemory.getSummary();
+          console.log(chalk.cyan(`\n${summary}\n`));
+
+          if (summary !== 'No stored memories.') {
+            console.log(chalk.gray('Commands:'));
+            console.log(chalk.gray('  /memory show <key>   - View a specific memory'));
+            console.log(chalk.gray('  /memory forget <key> - Remove a memory'));
+            console.log(chalk.gray('  /memory clear        - Remove all memories'));
+            console.log();
+          }
+        }
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.log(chalk.red(`\n✗ Error: ${errorMsg}\n`));
+      }
+      continue;
+    }
+
     // Handle /permissions command
     if (userInput.toLowerCase() === '/permissions') {
       try {
+    const { savePermissions } = await import('../utils/permissions-store.js');
+        const savedPerms = loadPermissions();
+
+        const permChoices = [
+          {
+            title: 'Ask once per command (recommended)',
+            value: 'ask_once',
+            description: 'Prompt once per unique tool, then auto-approve for session'
+          },
+          {
+            title: 'Always ask (safer)',
+            value: 'always_ask',
+            description: 'Prompt every time a tool is used'
+          },
+          {
+            title: 'Unlimited (dangerous)',
+            value: 'unlimited',
+            description: 'Auto-approve all tools without asking'
+          },
+        ];
+
+        // Add toggle for auto-restore on session start
+        if (savedPerms.restoreOnStart) {
+          permChoices.push({
+            title: 'Disable auto-restore on session start',
+            value: 'no_restore',
+            description: 'Ask me what to do each time I start a new session'
+          });
+        } else {
+          permChoices.push({
+            title: 'Auto-restore on session start',
+            value: 'auto_restore',
+            description: 'Always restore last permission mode without asking'
+          });
+        }
+
         const permissionMode = await prompts({
           type: 'select',
           name: 'mode',
-          message: 'Select permission mode:',
-          choices: [
-            {
-              title: 'Ask once per command (recommended)',
-              value: 'ask_once',
-              description: 'Prompt once per unique tool, then auto-approve for session'
-            },
-            {
-              title: 'Always ask (safer)',
-              value: 'always_ask',
-              description: 'Prompt every time a tool is used'
-            },
-            {
-              title: 'Unlimited (dangerous)',
-              value: 'unlimited',
-              description: 'Auto-approve all tools without asking'
-            },
-          ],
+          message: `Select (current: ${currentPermissionMode}):`,
+          choices: permChoices,
           initial: 0,
         });
 
@@ -211,9 +458,23 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           continue;
         }
 
+        const selectedMode = permissionMode.mode as string;
+
+        // Handle restore toggle options
+        if (selectedMode === 'no_restore') {
+          savePermissions({ restoreOnStart: false });
+          console.log(chalk.gray('\n✓ Auto-restore disabled. You will be asked on next session start.\n'));
+          continue;
+        }
+        if (selectedMode === 'auto_restore') {
+          savePermissions({ restoreOnStart: true });
+          console.log(chalk.gray('\n✓ Auto-restore enabled. Last mode will be restored silently.\n'));
+          continue;
+        }
+
         // Update agent with new permission mode
-        const selectedMode = permissionMode.mode as 'ask_once' | 'always_ask' | 'unlimited';
-        currentPermissionMode = selectedMode;
+        currentPermissionMode = selectedMode as 'ask_once' | 'always_ask' | 'unlimited';
+        savePermissions({ mode: currentPermissionMode, sessionTools: [] });
 
         if (selectedMode === 'unlimited') {
           agent = new Agent({
@@ -576,34 +837,28 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       continue;
     }
 
-    // Handle /info command
+    // Handle /config command (comprehensive config view)
+    if (userInput.toLowerCase() === '/config') {
+      await showConfig(currentConfig, {
+        permissionMode: currentPermissionMode,
+        historyLength: history.length,
+      });
+      continue;
+    }
+
+    // Handle /info command (short summary)
     if (userInput.toLowerCase() === '/info') {
-      console.log(chalk.cyan('\n📊 Current Configuration:\n'));
+      console.log(chalk.cyan('\n📋 Quick Info:\n'));
       console.log(chalk.white('  Profile:     ') + chalk.green(currentConfig.activeProfile || 'none'));
       console.log(chalk.white('  Model:       ') + chalk.gray(currentConfig.model.model));
       console.log(chalk.white('  Provider:    ') + chalk.gray(currentConfig.model.baseUrl));
-      console.log(chalk.white('  Temperature: ') + chalk.gray(`${currentConfig.model.temperature ?? 0.7}`));
-      console.log(chalk.white('  Max Tokens:  ') + chalk.gray(`${currentConfig.model.maxTokens ?? 4096}`));
       console.log(chalk.white('  Permissions: ') + (
-        currentPermissionMode === 'unlimited' ? chalk.yellow('Unlimited (dangerous)') :
-        currentPermissionMode === 'always_ask' ? chalk.green('Always ask (safer)') :
-        chalk.cyan('Ask once per command')
+        currentPermissionMode === 'unlimited' ? chalk.yellow('Unlimited') :
+        currentPermissionMode === 'always_ask' ? chalk.green('Always ask') :
+        chalk.cyan('Ask once')
       ));
-
-      // Show permission profile
-      const permProfile = currentConfig.permissions?.profile || 'traditional';
-      console.log(chalk.white('  Profile:     ') + (
-        permProfile === 'blacklist' ? chalk.cyan('Blacklist (smart)') :
-        chalk.gray('Traditional')
-      ));
-
-      // Show auto-approved tools
-      const autoApproveList = currentConfig.permissions?.autoApprove || [];
-      if (autoApproveList.length > 0) {
-        console.log(chalk.white('  Auto-approve:') + chalk.gray(` ${autoApproveList.join(', ')}`));
-      }
-
       console.log(chalk.white('  History:     ') + chalk.gray(`${history.length} messages`));
+      console.log(chalk.white('  Tools:       ') + chalk.gray('10 available (see /config for details)'));
       console.log();
       continue;
     }
@@ -664,10 +919,37 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
         console.log(chalk.green(`\n✓ Switched to: ${selection.profile}`));
         console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
-        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}\n`));
+        console.log(chalk.gray(`  Provider: ${currentConfig.model.baseUrl}`));
+        console.log(chalk.gray(`  History: ${history.length} messages preserved for continuity\n`));
 
-        // Clear history when switching models
-        history = [];
+        // Ask to save as default for future sessions
+        const saveDefault = await prompts({
+          type: 'confirm',
+          name: 'value',
+          message: 'Save as default for future sessions?',
+          initial: false,
+        });
+
+        if (saveDefault.value) {
+          try {
+            const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
+            const { join } = await import('node:path');
+            const { homedir } = await import('node:os');
+            const configPath = join(homedir(), '.sc-agent', 'config.json');
+            const configDir = join(homedir(), '.sc-agent');
+            if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+            let cfg: Record<string, unknown> = {};
+            if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+            cfg.activeProfile = selection.profile;
+            writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+            console.log(chalk.gray(`  ✓ Saved "${selection.profile}" as default\n`));
+          } catch {
+            console.log(chalk.gray(`  ⚠️  Could not save to config\n`));
+          }
+        } else {
+          console.log();
+        }
+
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.log(chalk.red(`\n✗ Error: ${errorMsg}\n`));
@@ -676,9 +958,44 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     }
 
     try {
-      console.log(chalk.green('\n┌─ Assistant ───────────────────────────────────────────────┐'));
+      if (!isQuiet) {
+        console.log(chalk.green(`\n${boxHeader('Assistant')}`));
+      }
       history = await agent.run(userInput, history);
-      console.log(chalk.green('\n└───────────────────────────────────────────────────────────┘\n'));
+      // Persist conversation history for cross-session/model continuity
+      try {
+        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
+        const dir = dirname(HISTORY_FILE);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+      } catch {
+        // Silent: persistence is optional
+      }
+      if (!isQuiet) {
+        console.log(chalk.green(`\n${boxFooter()}`));
+      }
+
+      // HUD: compact status line after each response
+      if (hudEnabled && !isQuiet) {
+        const mem = await persistentMemory.getAll();
+        const storage = checkStorageLimit(join(homedir(), '.sc-agent'));
+        const permIcon = currentPermissionMode === 'unlimited' ? '∞' : currentPermissionMode === 'always_ask' ? '🔔' : '✓';
+        const profileIcon = currentConfig.permissions?.profile === 'blacklist' ? '🛡️' : '🔒';
+        const modelShort = currentConfig.model.model.length > 16
+          ? currentConfig.model.model.substring(0, 14) + '..'
+          : currentConfig.model.model;
+        const tokens = history.filter(m => m.role === 'assistant').length;
+
+        const parts = [
+          chalk.cyan(modelShort),
+          chalk.gray(`@${currentConfig.activeProfile || 'default'}`),
+          chalk.gray(`🧠${mem.length}`),
+          chalk.gray(`💬${tokens}`),
+          chalk.gray(`💾${formatBytes(storage.currentSize)}`),
+          `${profileIcon}${permIcon}`,
+        ];
+        console.log(chalk.gray(`  ${parts.join(chalk.dim(' │ '))}\n`));
+      }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.log(chalk.red(`\n✗ Error: ${errorMsg}\n`));

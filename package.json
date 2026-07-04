@@ -1,6 +1,6 @@
 {
   "name": "sc-agent-cli",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Provider-agnostic CLI agent with tool use, compatible with any OpenAI-compatible API",
   "type": "module",
   "main": "dist/index.js",

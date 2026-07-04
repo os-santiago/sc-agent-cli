@@ -5,6 +5,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
+import { boxHeader, boxFooter } from './box-drawing.js';
 
 export interface PermissionContext {
   toolName: string;
@@ -39,7 +40,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
     }
 
     // Dangerous command - show warning and ask
-    console.log(chalk.gray('\n  ┌─ Dangerous Command Alert ──────────────────────────────┐'));
+    console.log(chalk.gray(`\n${boxHeader('Dangerous Command Alert', 2)}`));
     console.log(chalk.gray(`  │ ${chalk.red('⚠️')}  Tool: ${ctx.toolName}`));
     console.log(chalk.gray(`  │    Command: ${command}`));
     console.log(chalk.gray('  │'));
@@ -49,7 +50,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       console.log(chalk.gray(`  │    ${chalk.yellow(line)}`));
     });
 
-    console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+    console.log(chalk.gray(boxFooter(2)));
 
     const response = await prompts({
       type: 'confirm',
@@ -79,10 +80,10 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   }
 
   // Ask user with helpful context
-  console.log(chalk.gray('\n  ┌─ Permission ────────────────────────────────────────────┐'));
+  console.log(chalk.gray(`\n${boxHeader('Permission', 2)}`));
   console.log(chalk.gray(`  │ ${chalk.yellow('🔐')} Tool: ${ctx.toolName}`));
   console.log(chalk.gray(`  │    Args: ${JSON.stringify(ctx.args)}`));
-  console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+  console.log(chalk.gray(boxFooter(2)));
 
   const response = await prompts({
     type: 'select',
@@ -105,29 +106,22 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   }
 
   if (choice === 'always') {
-    // Save to config permanently
+    // Save to config permanently AND update in-memory config to avoid re-prompting
     try {
       const configDir = path.join(homedir(), '.sc-agent');
       const configPath = path.join(configDir, 'config.json');
 
-      // Ensure directory exists
       if (!existsSync(configDir)) {
         mkdirSync(configDir, { recursive: true });
       }
 
-      // Read or create config
       let configContent: Record<string, unknown> = {};
       if (existsSync(configPath)) {
         const fileContent = readFileSync(configPath, 'utf-8');
         configContent = JSON.parse(fileContent);
       }
 
-      interface PermissionsConfig {
-        autoApprove?: string[];
-        profile?: 'traditional' | 'blacklist';
-        denyPaths?: string[];
-      }
-      const permissions = (configContent.permissions as PermissionsConfig) || {};
+      const permissions = (configContent.permissions as { autoApprove?: string[]; profile?: string; denyPaths?: string[] }) || {};
       if (!permissions.autoApprove) {
         permissions.autoApprove = [];
       }
@@ -135,8 +129,20 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
         permissions.autoApprove.push(ctx.toolName);
         configContent.permissions = permissions;
         writeFileSync(configPath, JSON.stringify(configContent, null, 2));
-        console.log(chalk.gray(`\n   ✓ Added "${ctx.toolName}" to auto-approve list\n`));
       }
+
+      // Also update in-memory config for immediate effect in this session
+      const configPermissions = ctx.config.permissions;
+      if (configPermissions) {
+        if (!configPermissions.autoApprove) {
+          configPermissions.autoApprove = [];
+        }
+        if (!configPermissions.autoApprove.includes(ctx.toolName)) {
+          configPermissions.autoApprove.push(ctx.toolName);
+        }
+      }
+
+      console.log(chalk.gray(`\n   ✓ "${ctx.toolName}" auto-approved for this and future sessions\n`));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.log(chalk.gray(`\n   ⚠️  Could not save to config: ${errorMsg}`));

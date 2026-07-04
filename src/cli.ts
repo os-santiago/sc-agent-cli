@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
+
+// Force color support for markdown rendering and UI
+if (chalk.level < 2) chalk.level = 2;
 import { createRequire } from 'node:module';
 import { loadConfig, initConfig, getGlobalConfigPath } from './core/config.js';
 import { startChatSession } from './commands/chat-session.js';
 import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
+import { showConfig } from './utils/config-display.js';
 
 const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../package.json') as { version: string };
@@ -70,6 +74,21 @@ program
   .description('Initialize a new project with AGENTS.md')
   .action(async () => {
     await initProject(process.cwd());
+  });
+
+// Show current configuration
+program
+  .command('config')
+  .description('Show current full configuration')
+  .action(async () => {
+    try {
+      const config = await loadConfig(process.cwd());
+      await showConfig(config);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Error: ${errorMsg}`));
+      process.exit(1);
+    }
   });
 
 // Config init

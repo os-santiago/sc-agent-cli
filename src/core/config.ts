@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: ProjectConfig = {
     stream: true,
   },
   permissions: {
-    autoApprove: ['read_file', 'list_dir', 'search_text'],
+    autoApprove: ['read_file', 'list_dir', 'search_text', 'web_fetch', 'memory_read'],
     denyPaths: ['.env', '.env.*', '**/*.key', '**/*.pem'],
   },
   profiles: {
@@ -39,6 +39,7 @@ const DEFAULT_CONFIG: ProjectConfig = {
       apiKey: '<YOUR_NVIDIA_KEY>',
       model: 'nvidia/nemotron-3-ultra-550b-a55b',
       temperature: 1,
+      top_p: 0.95,
       maxTokens: 16384,
     },
     'llama-3.3-70b': {
@@ -82,6 +83,12 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config = await mergeConfigFile(config, projectConfigPath, 'project');
   }
 
+  // Override active profile from environment variable if set
+  const envProfile = process.env.SC_PROFILE;
+  if (envProfile && config.profiles?.[envProfile]) {
+    config.activeProfile = envProfile;
+  }
+
   // Apply active profile if set
   if (config.activeProfile && config.profiles?.[config.activeProfile]) {
     const profile = config.profiles[config.activeProfile];
@@ -102,6 +109,12 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
 
   if (envApiKey) {
     config.model.apiKey = envApiKey;
+  }
+
+  // Override model from environment variable if set (highest priority)
+  const envModel = process.env.SC_MODEL;
+  if (envModel) {
+    config.model.model = envModel;
   }
 
   // Validate required fields
@@ -145,7 +158,21 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export async function initConfig(): Promise<void> {
+export async function initConfig(force = false): Promise<void> {
+  // Check if config exists and don't overwrite unless force=true
+  if (!force) {
+    try {
+      const fs = await import('fs');
+      if (fs.existsSync(CONFIG_PATH)) {
+        throw new Error(`Config already exists at ${CONFIG_PATH}. Use --force to overwrite.`);
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
+      }
+    }
+  }
+
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
@@ -185,7 +212,8 @@ async function mergeConfigFile(
 
     throw new Error(
       `Could not read ${scope} config at ${configPath}. ` +
-      `Check file permissions and try again.`
+      `Check file permissions and try again.`,
+      { cause: err }
     );
   }
 
@@ -196,7 +224,8 @@ async function mergeConfigFile(
     const details = err instanceof Error ? err.message : 'Invalid JSON';
     throw new Error(
       `Invalid JSON in ${scope} config at ${configPath}: ${details}. ` +
-      `Fix the file or re-run "sc config-init" to recreate the default config.`
+      `Fix the file or re-run "sc config-init" to recreate the default config.`,
+      { cause: err }
     );
   }
 

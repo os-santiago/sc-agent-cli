@@ -5,6 +5,9 @@ import { editFileTool } from './edit-file.js';
 import { listDirTool } from './list-dir.js';
 import { searchTextTool } from './search-text.js';
 import { runShellTool } from './run-shell.js';
+import { webFetchTool } from './web-fetch.js';
+import { memoryReadTool, memoryWriteTool } from './memory-tools.js';
+import { gitTool } from './git-tool.js';
 
 export const ALL_TOOLS: Tool[] = [
   readFileTool,
@@ -13,6 +16,10 @@ export const ALL_TOOLS: Tool[] = [
   listDirTool,
   searchTextTool,
   runShellTool,
+  webFetchTool,
+  memoryReadTool,
+  memoryWriteTool,
+  gitTool,
 ];
 
 export function getToolByName(name: string): Tool | undefined {
