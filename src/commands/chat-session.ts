@@ -409,7 +409,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     // Handle /permissions command
     if (userInput.toLowerCase() === '/permissions') {
       try {
-    const { savePermissions } = await import('../utils/permissions-store.js');
+        const { loadPermissions, savePermissions } = await import('../utils/permissions-store.js');
         const savedPerms = loadPermissions();
 
         const permChoices = [
