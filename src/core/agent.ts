@@ -1,12 +1,18 @@
 import chalk from 'chalk';
-import type { Message, ProjectConfig, StreamDelta } from './types.js';
+import type { Message, ProjectConfig, StreamDelta, AgentCallbacks } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { loadProjectContext } from './project-context.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
 import { autoCorrectMessageSequence } from './message-validator.js';
+import { persistentMemory } from '../utils/memory.js';
+import { detectShell, getShellPromptSections } from '../utils/shell-env.js';
+import type { ShellInfo } from '../utils/shell-env.js';
+import { renderInline } from '../utils/markdown-renderer.js';
+import { enhanceError, formatEnhancedError } from '../utils/error-enhancer.js';
+import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files and executing commands.
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
 Guidelines:
 - Always read files before editing them to understand their structure
@@ -15,12 +21,43 @@ Guidelines:
 - Ask for clarification if the user's request is ambiguous
 - Be concise but thorough in your responses
 
-Platform-specific commands:
-- On Windows use: dir (not ls), cd (not pwd), type (not cat), where (not which)
-- For list_dir tool: use "." for current directory, never use empty string
-- For paths: "~" works for home directory, "." for current directory
-- If a command fails, try an alternative approach instead of retrying the same command
-- Stop after 3 failed attempts of the same operation
+ERROR HANDLING (CRITICAL):
+When a tool returns an [ERROR] result, it includes: category, likely cause, and suggested actions.
+- READ the error analysis carefully
+- EXPLAIN the error to the user in plain language (no raw error dumps)
+- SUGGEST what to do next based on the category:
+  · compatibility: Offer a platform-specific alternative command
+  · blocking: Explain why it can't proceed and suggest workarounds
+  · expectable: Explain it's a normal condition (e.g., resource doesn't exist)
+  · unknown: Suggest a different approach entirely
+- NEVER ask the user to fix system-level issues unless you've exhausted all alternatives
+- ALWAYS try at least one alternative approach before giving up
+- If you've tried 3 different approaches and all fail, summarize what was attempted
+
+NEW TOOLS AVAILABLE:
+1. web_fetch: Fetch web content (docs, APIs, GitHub). No API key needed.
+2. git: Native git operations with structured output (status, diff, log, branch, add, commit)
+3. memory_read/memory_write: Cross-session persistent memory. Save user preferences, project rules, context. Data persists between sessions.
+4. read_file, write_file, edit_file, list_dir, search_text: Standard file operations
+5. run_shell: Execute shell commands
+
+MEMORY SYSTEM (Cross-Session):
+- Use memory_read to recall information from previous sessions
+- Use memory_write to save important context, user preferences, project rules
+- Memory persists across restarts - use it to build long-term understanding
+- Save key facts like: user's name, preferred languages, project architecture decisions
+
+GIT TOOL:
+- Use 'git status' before any file operations to understand the repo state
+- Use 'git diff' to review changes before committing
+- Use 'git log' to understand recent project activity
+- Available operations: status, diff, log, show, branch, add, commit
+
+WEB FETCH TOOL:
+- Use web_fetch to read documentation, check APIs, browse GitHub
+- Returns cleaned text content from any URL
+- Supports HTML, JSON, and plain text responses
+- Has a 30-second timeout and 30KB response limit
 
 GitHub integration (PRIORITY ORDER):
 1. FIRST: Always try 'gh' CLI (GitHub's official tool)
@@ -328,31 +365,6 @@ If you see error "unexpected token" or "accepts 1 arg(s), received N":
   → You used single quotes or multiple expressions. FIX IT immediately.
 
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║ CRITICAL: Windows Command Compatibility                                  ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-
-You're running in Git Bash (POSIX sh), NOT PowerShell or CMD.
-
-❌ Commands that DO NOT WORK on Windows:
-  head, tail                    → Not available (use gh with --limit or jq)
-  grep (as pipe)                → Not available (use gh --jq or built-in grep)
-  PowerShell cmdlets            → ConvertTo-Json, $variables, etc.
-  Bash heredoc in PowerShell    → <<< syntax
-
-✅ Commands that WORK cross-platform:
-  echo, cat, ls, cd, pwd        → Basic POSIX commands
-  gh api with --jq              → Use double quotes
-  curl, wget                    → Available in Git Bash
-  write_file tool               → For creating JSON files
-
-Examples:
-  ❌ gh api ... | head -10                    (head not available)
-  ✅ gh api ... --jq ".[:10]"                 (limit with jq)
-
-  ❌ gh api ... 2>&1 | head -100              (head not available)
-  ✅ gh api ...                               (no pipe, let output flow)
-
-╔═══════════════════════════════════════════════════════════════════════════╗
 ║ CRITICAL: 404 Error Handling                                             ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
@@ -380,16 +392,55 @@ Common 404 scenarios:
 RULE: DO NOT attempt the same 404 endpoint more than ONCE.
 If first attempt returns 404, STOP and explain to user.
 
-Available CLI tools you should leverage:
+╔═══════════════════════════════════════════════════════════════════════════╗
+║ Podman Container Management                                               ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Podman is the default container tool (rootless, daemonless, already installed).
+
+COMMANDS (same CLI as docker):
+  podman ps                    → List running containers
+  podman images                → List images
+  podman pull <image>          → Pull an image
+  podman run -it <image>       → Run a container
+  podman exec -it <name> <cmd> → Execute in running container
+  podman build -t <tag> .      → Build from Dockerfile
+  podman compose up            → Docker Compose equivalent (podman-compose)
+  podman logs <name>           → View container logs
+
+DIFFERENCES FROM DOCKER:
+  • Rootless by default (no sudo needed)
+  • No daemon (containers are systemd user units)
+  • Pods support (podman pod) for multi-container groups
+  • docker.io images work: podman pull docker.io/nginx
+
+WSL + PODMAN:
+  • Podman works natively in WSL (Linux kernel)
+  • podman machine not needed in WSL (unlike macOS)
+  • Use podman pull/podman run directly in WSL shell
+
+Windows-specific: On Windows host, use podman machine:
+  podman machine init
+  podman machine start
+  podman machine stop
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║ Available CLI tools                                                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
 - gh: GitHub CLI (for PRs, issues, repos)
 - git: Version control (for commits, branches, status)
 - npm/yarn/pnpm: Package managers
-- docker: Container management (if installed)
+- podman: Container management (preferred, rootless, already installed; use instead of docker)
 - kubectl: Kubernetes (if installed)
 
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║ WSL (Windows Subsystem for Linux) Integration                            ║
+║ WSL (Windows Subsystem for Linux) + Podman Integration                   ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
+
+WSL is the default Linux environment (already installed). Use it for:
+  • Linux-native commands that don't work on Windows
+  • Podman containers (runs natively in WSL, no VM needed)
+  • Linux tooling (gh CLI, git, bash scripts)
 
 When user mentions "WSL" or "use WSL account":
 
@@ -520,6 +571,7 @@ export interface AgentOptions {
   systemPrompt?: string;
   initialPrompt?: string;
   quiet?: boolean;
+  callbacks?: AgentCallbacks; // ← NUEVO: Optional callbacks for UI-agnostic events
 }
 
 export class Agent {
@@ -527,8 +579,12 @@ export class Agent {
   private toolContext: ToolContext;
   private systemPrompt: string;
   private isFirstChunk: boolean = true;
+  private _thinkingShown: boolean = false;
+  private shellInfo: ShellInfo;
+  private callbacks?: AgentCallbacks; // ← NUEVO: Store callbacks
 
   constructor(private options: AgentOptions) {
+    this.callbacks = options.callbacks;
     this.provider = new OpenAICompatibleProvider(options.config.model);
     this.toolContext = {
       workspaceRoot: options.workspaceRoot,
@@ -536,6 +592,81 @@ export class Agent {
       autoApprove: options.autoApprove,
     };
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    this.shellInfo = detectShell();
+  }
+
+  /**
+   * Conditional log - only outputs if not in quiet mode
+   * Emits via callbacks if provided, otherwise falls back to console.log
+   */
+  private log(...args: Parameters<typeof console.log>): void {
+    if (this.options.quiet) {
+      return; // Suppress all logs in quiet mode
+    }
+
+    // If callbacks provided, emit log event
+    if (this.callbacks?.onLog) {
+      const message = args.map(arg =>
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+      ).join(' ');
+
+      this.callbacks.onLog({
+        type: 'log',
+        timestamp: Date.now(),
+        data: {
+          level: 'info',
+          message,
+          args,
+        },
+      });
+    } else {
+      // Fallback to console.log (CLI mode)
+      console.log(...args);
+    }
+  }
+
+  /**
+   * Emit progress event
+   */
+  private emitProgress(status: string, step?: number, total?: number): void {
+    this.callbacks?.onProgress?.({
+      type: 'progress',
+      timestamp: Date.now(),
+      data: { status, step, total },
+    });
+  }
+
+  /**
+   * Emit tool start event
+   */
+  private emitToolStart(name: string, args: any): void {
+    this.callbacks?.onToolStart?.({
+      type: 'tool_start',
+      timestamp: Date.now(),
+      data: { name, args },
+    });
+  }
+
+  /**
+   * Emit tool complete event
+   */
+  private emitToolComplete(name: string, result: string, duration: number): void {
+    this.callbacks?.onToolComplete?.({
+      type: 'tool_complete',
+      timestamp: Date.now(),
+      data: { name, result, duration },
+    });
+  }
+
+  /**
+   * Emit tool error event
+   */
+  private emitToolError(name: string, error: string): void {
+    this.callbacks?.onToolError?.({
+      type: 'tool_error',
+      timestamp: Date.now(),
+      data: { name, error },
+    });
   }
 
   async run(userMessage: string, history: Message[] = []): Promise<Message[]> {
@@ -545,9 +676,18 @@ export class Agent {
     const hasSystemMessage = messages.some((m) => m.role === 'system');
     if (!hasSystemMessage) {
       const projectContext = await loadProjectContext(this.options.workspaceRoot);
-      const fullSystemPrompt = projectContext
-        ? `${this.systemPrompt}\n\n# Project Context\n${projectContext}`
-        : this.systemPrompt;
+      const memoryContext = await persistentMemory.getContextString();
+
+      // Detect shell environment for cross-platform adaptation
+      const shellInfo = detectShell();
+      const shellContext = `\n# Shell Environment\n- Type: ${shellInfo.type}\n- Platform: ${process.platform}\n- Tips:\n${shellInfo.tips.map(t => `  • ${t}`).join('\n')}`;
+      const shellPromptGuide = getShellPromptSections(shellInfo);
+
+      const contextParts = [this.systemPrompt, shellContext, shellPromptGuide];
+      if (projectContext) contextParts.push(`\n# Project Context\n${projectContext}`);
+      if (memoryContext) contextParts.push(memoryContext);
+
+      const fullSystemPrompt = contextParts.join('\n');
       messages.unshift({ role: 'system', content: fullSystemPrompt });
     }
 
@@ -575,6 +715,12 @@ export class Agent {
         throw error;
       }
 
+      // Show thinking indicator on first iteration
+      if (iterations === 1 && !this.options.quiet) {
+        process.stdout.write(chalk.gray('\n  🤔 '));
+        this._thinkingShown = true;
+      }
+
       const response = await this.provider.chatCompletion(
         {
           messages,
@@ -592,88 +738,133 @@ export class Agent {
       };
       messages.push(assistantMessage);
 
-      // Handle tool calls if any
-      if (response.tool_calls && response.tool_calls.length > 0) {
-        console.log(chalk.gray('\n  ┌─ Tools ─────────────────────────────────────────────────┐'));
+      // Handle EMPTY RESPONSES (no content, no tool calls)
+      const isEmptyResponse = (!response.content || response.content.trim() === '') &&
+        (!response.tool_calls || response.tool_calls.length === 0);
 
-        // Group message for multiple tools
-        if (response.tool_calls.length > 1) {
-          console.log(chalk.gray(`  │ 🔧 Executing ${response.tool_calls.length} tools...`));
+      if (isEmptyResponse) {
+        if (iterations < 3) {
+          // Re-prompt: some models need a nudge to generate text
+          messages.push({
+            role: 'user',
+            content: 'Please provide a helpful text response. Do not call any tools.',
+          });
+          if (!this.options.quiet) {
+            this.log(chalk.gray('\n  │ 🔄 Re-prompting for response...'));
+          }
+          continue;
+        } else {
+          // Multiple empty responses – show fallback
+          if (!this.options.quiet) {
+            this.log(chalk.yellow('\n  ⚠️  I encountered an issue generating a response.'));
+            this.log(chalk.yellow('  Please try rephrasing your question.\n'));
+          }
+          continueLoop = false;
+          continue;
+        }
+      }
+
+      // Handle tool calls if any - PARALLEL EXECUTION
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        this.log(chalk.gray(`\n${boxHeader('Tools', 2)}`));
+
+        const isMultiple = response.tool_calls.length > 1;
+        if (isMultiple) {
+          this.log(chalk.gray(`  │ 🚀 Executing ${response.tool_calls.length} tools in parallel...`));
         }
 
-        for (const toolCall of response.tool_calls) {
+        // Emit progress event
+        this.emitProgress(
+          `Executing ${response.tool_calls.length} tool${response.tool_calls.length > 1 ? 's' : ''}`,
+          undefined,
+          response.tool_calls.length
+        );
+
+        // Execute all tool calls in parallel for maximum efficiency
+        const toolResults = await Promise.all(response.tool_calls.map(async (toolCall) => {
           const toolName = toolCall.function.name;
           const tool = getToolByName(toolName);
 
           if (!tool) {
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
+            if (!isMultiple) this.log(chalk.gray(`  │ ${chalk.red('✗')} Unknown tool: ${toolName}`));
+            this.emitToolError(toolName, 'Unknown tool');
             toolsUsed.push({name: toolName, success: false, error: 'Unknown tool'});
-            // CRITICAL: Tool error responses use role:'tool', not 'assistant'
-            // DO NOT CHANGE - see CRITICAL-FIXES.md
-            messages.push({
-              role: 'tool',
+            return {
+              role: 'tool' as const,
               content: `Error: Unknown tool ${toolName}`,
               tool_call_id: toolCall.id,
               name: toolName,
-            });
-            continue;
+            };
           }
 
           try {
             const args = JSON.parse(toolCall.function.arguments);
+            const toolStartTime = Date.now();
 
-            // Compact output for multiple tools
-            if (response.tool_calls.length === 1) {
-              console.log(chalk.gray(`  │ 🔧 Using tool: ${toolName}`));
-              console.log(chalk.gray(`  │    Args: ${JSON.stringify(args)}`));
-            } else {
-              console.log(chalk.gray(`  │    → ${toolName}: ${JSON.stringify(args)}`));
-            }
+            // Emit tool start event
+            this.emitToolStart(toolName, args);
 
             const result = await tool.execute(args, this.toolContext);
+            const toolDuration = Date.now() - toolStartTime;
 
-            if (response.tool_calls.length === 1) {
-              console.log(chalk.gray(`  │ ${chalk.green('✓')} Tool completed`));
+            // Emit tool complete event
+            this.emitToolComplete(toolName, result, toolDuration);
+
+            if (isMultiple) {
+              this.log(chalk.gray(`  │    ${chalk.green('✓')} ${toolName}`));
+            } else {
+              this.log(chalk.gray(`  │ 🔧 Using tool: ${toolName}`));
+              this.log(chalk.gray(`  │    Args: ${JSON.stringify(args)}`));
+              this.log(chalk.gray(`  │ ${chalk.green('✓')} Tool completed`));
             }
 
             toolsUsed.push({name: toolName, success: true, args});
-
-            // CRITICAL: Tool results use role:'tool', not 'assistant'
-            // DO NOT CHANGE - see CRITICAL-FIXES.md
-            messages.push({
-              role: 'tool',
+            return {
+              role: 'tool' as const,
               content: result,
               tool_call_id: toolCall.id,
               name: toolName,
-            });
+            };
           } catch (err: unknown) {
             const errorMsg = err instanceof Error ? err.message : String(err);
-            console.log(chalk.gray(`  │ ${chalk.red('✗')} ${toolName} failed: ${errorMsg}`));
+            const errorIcon = isMultiple ? '' : chalk.red('✗');
+
+            // Emit tool error event
+            this.emitToolError(toolName, errorMsg);
+
+            this.log(chalk.gray(`  │ ${errorIcon} ${toolName} failed: ${errorMsg}`));
             toolsUsed.push({name: toolName, success: false, error: errorMsg, args: JSON.parse(toolCall.function.arguments)});
-            // CRITICAL: Tool error responses use role:'tool', not 'assistant'
-            // DO NOT CHANGE - see CRITICAL-FIXES.md
-            messages.push({
-              role: 'tool',
-              content: `Error: ${errorMsg}`,
+
+            // Enrich error with contextual analysis so the LLM can respond intelligently
+            const enhanced = enhanceError(toolName, errorMsg, this.shellInfo.type);
+            const enrichedContent = formatEnhancedError(enhanced);
+
+            return {
+              role: 'tool' as const,
+              content: enrichedContent,
               tool_call_id: toolCall.id,
               name: toolName,
-            });
+            };
           }
+        }));
+
+        // Push all results to messages
+        for (const result of toolResults) {
+          messages.push(result);
         }
 
         // Summary for multiple tools
-        if (response.tool_calls.length > 1) {
+        if (isMultiple) {
           const successful = toolsUsed.filter(t => t.success).length;
           const failed = toolsUsed.filter(t => !t.success).length;
+          this.log(chalk.gray(`  │`));
           if (failed > 0) {
-            console.log(chalk.gray(`  │`));
-            console.log(chalk.gray(`  │ ${chalk.yellow('📊')} Tools: ${successful} succeeded, ${failed} failed`));
+            this.log(chalk.gray(`  │ ${chalk.yellow('📊')} Tools: ${successful} succeeded, ${failed} failed`));
           } else {
-            console.log(chalk.gray(`  │`));
-            console.log(chalk.gray(`  │ ${chalk.green('✓')} All ${successful} tools completed successfully`));
+            this.log(chalk.gray(`  │ ${chalk.green('✓')} All ${successful} tools completed successfully`));
           }
         }
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+        this.log(chalk.gray(boxFooter(2)));
 
         // CRITICAL: Check if the model only responded with tool calls and no text
         // Some models (NVIDIA Nemotron, older Llama) don't auto-generate synthesis
@@ -686,7 +877,7 @@ export class Agent {
         if (hasToolCallsWithoutContent) {
           messages.push({
             role: 'user',
-            content: 'Please provide a text summary of the tool results above. DO NOT call more tools.',
+            content: 'Summarize the tool results above for the user in natural language. If there were errors, explain what happened, why, and suggest what to do next. DO NOT call more tools.',
           });
         }
       } else {
@@ -699,17 +890,7 @@ export class Agent {
     const failedTools = toolsUsed.filter(t => !t.success);
     const hadErrors = failedTools.length > 0;
 
-    // Classify errors into 3 categories: compatibility, blocking, expectable
-    const compatibilityErrors = failedTools.filter(t => {
-      const errorMsg = (t.error || '').toLowerCase();
-      // Windows compatibility issues (need fixing in system prompt)
-      const isCompatibility =
-        errorMsg.includes('is not recognized as an internal or external command') || // head, tail, find, etc.
-        errorMsg.includes('cannot find the path specified') && errorMsg.includes('wsl') || // WSL pipe issues
-        errorMsg.includes('the system cannot find the file specified');
-      return isCompatibility;
-    });
-
+    // Classify blocking errors (task-crippling vs recovarable)
     const blockingErrors = failedTools.filter(t => {
       const errorMsg = (t.error || '').toLowerCase();
       // Blocking errors: permission denied, file not found in critical operations, syntax errors
@@ -722,54 +903,29 @@ export class Agent {
       return isBlocking;
     });
 
-    const expectableErrors = failedTools.filter(t => {
-      const errorMsg = (t.error || '').toLowerCase();
-      // Expectable errors: command exit codes, API 404s, GitHub restrictions, resource not found
-      const isExpectable =
-        errorMsg.includes('command exited with code') ||
-        errorMsg.includes('could not resolve to') || // GitHub PR/issue not found
-        errorMsg.includes('not found') && t.name === 'run_shell' ||
-        errorMsg.includes('graphql:') || // GitHub GraphQL errors
-        errorMsg.includes('review can not approve your own') || // GitHub self-approve restriction
-        errorMsg.includes('repository rule violations found') || // Branch protection
-        errorMsg.includes('waiting for code scanning') || // Code scanning pending
-        errorMsg.includes('base branch policy prohibits') || // Branch policy
-        errorMsg.includes('is not mergeable') || // PR not mergeable
-        errorMsg.includes('failed to parse jq expression') || // jq syntax error (common)
-        errorMsg.includes('accepts 1 arg'); // jq args error
-      return isExpectable && !compatibilityErrors.includes(t);
-    });
-
     // Detect repeated errors (infinite loop detection)
-    // Key: normalize by tool name + command (not error message)
     const errorCounts = new Map<string, number>();
     failedTools.forEach(t => {
-      // Exclude certain error types from loop detection:
       const errorMsg = (t.error || '').toLowerCase();
       const shouldExclude =
-        errorMsg.includes('404') || // Resource not found (expected)
-        errorMsg.includes('not found') || // Resource doesn't exist
-        errorMsg.includes('not recognized') || // Command not available (compatibility)
-        errorMsg.includes('cannot find the path'); // Windows path issues
+        errorMsg.includes('404') ||
+        errorMsg.includes('not found') ||
+        errorMsg.includes('not recognized') ||
+        errorMsg.includes('cannot find the path');
 
       if (shouldExclude) return;
 
-      // Build key from tool name + normalized command
       let commandKey = t.name;
       if (t.args && typeof t.args === 'object') {
-        // For run_shell: use base command (ignore arguments)
         const args = t.args as Record<string, unknown>;
         if (t.name === 'run_shell' && typeof args.command === 'string') {
           const cmd = args.command.toLowerCase().trim();
-          // Extract base command (first word before space/pipe)
           const baseCmd = cmd.split(/[\s|]/)[0];
           commandKey = `${t.name}:${baseCmd}`;
         } else {
-          // For other tools: use tool name only
           commandKey = t.name;
         }
       }
-
       errorCounts.set(commandKey, (errorCounts.get(commandKey) || 0) + 1);
     });
 
@@ -778,147 +934,65 @@ export class Agent {
 
     // Determine if task actually completed despite errors
     const successfulTools = toolsUsed.filter(t => t.success);
-    const hasSubstantialWork = successfulTools.length >= 3; // At least 3 successful operations
-    const hasOnlyExpectableErrors = blockingErrors.length === 0 && expectableErrors.length > 0;
-    const hasCompatibilityIssues = compatibilityErrors.length > 0;
-    const taskCompleted = hasSubstantialWork && hasOnlyExpectableErrors && !hitIterationLimit;
+    const hasBlockingErrors = blockingErrors.length > 0;
+    const taskCompleted = successfulTools.length >= 1 && !hasBlockingErrors && !hitIterationLimit;
 
+    // Compact fallback warning for iteration limit
     if (hitIterationLimit) {
-      console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
-      console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Maximum iteration limit reached`));
-      console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+      this.log(chalk.gray(`\n  ⚠️  Maximum iteration limit (${MAX_ITERATIONS}) reached`));
+      if (hadErrors) console.log(chalk.gray(`  ${failedTools.length} error(s) encountered. The task may be incomplete.`));
     }
 
     // Warning for repeated errors (loop detection)
-    if (hasRepeatedErrors) {
-      console.log(chalk.gray('\n  ┌─ Warning ───────────────────────────────────────────────┐'));
-      console.log(chalk.gray(`  │ ${chalk.yellow('⚠')} Detected repeated errors (possible infinite loop)`));
-      console.log(chalk.gray('  │'));
-      repeatedErrors.forEach(([errorKey, count]) => {
-        const truncated = errorKey.substring(0, 50);
-        console.log(chalk.gray(`  │    ${chalk.red('•')} ${count}x: ${truncated}...`));
-      });
-      console.log(chalk.gray('  │'));
-      console.log(chalk.gray('  │    The agent attempted the same failing operation multiple times.'));
-      console.log(chalk.gray('  │    This usually indicates a need for a different approach.'));
-      console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
+    if (hasRepeatedErrors && !taskCompleted) {
+      this.log(chalk.gray('\n  ⚠️  Detected repeated errors (possible infinite loop):'));
+      repeatedErrors.forEach(([errorKey, count]) => console.log(chalk.gray(`  ${count}x: ${errorKey.substring(0, 50)}...`)));
+      this.log(chalk.gray('  The agent attempted the same failing operation multiple times.'));
     }
 
-    // Final summary if tools were used
-    if (toolsUsed.length > 0) {
-      if (hadErrors) {
-        console.log(chalk.gray('\n  ┌─ Summary ───────────────────────────────────────────────┐'));
-        console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')}  ${failedTools.length} error(s) encountered`));
-        failedTools.forEach(t => {
-          // Clean error message: take first line only and truncate if too long
-          const errorMsg = (t.error || 'Unknown error')
-            .split('\n')[0]
-            .substring(0, 80);
-          console.log(chalk.gray(`  │    ${chalk.red('•')} ${t.name}: ${errorMsg}`));
-        });
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
-      }
-
-      // Generate final status message
-      if (hitIterationLimit || hadErrors) {
-        console.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
-
-        if (hitIterationLimit && hadErrors) {
-          console.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - iteration limit reached with errors`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    The task could not be completed due to:'));
-          console.log(chalk.gray(`  │    • Hit maximum iterations (${MAX_ITERATIONS})`));
-          console.log(chalk.gray(`  │    • Encountered ${failedTools.length} error(s)`));
-        } else if (hitIterationLimit) {
-          console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - iteration limit reached`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    The task may not be fully complete.'));
-          console.log(chalk.gray(`  │    Reached maximum ${MAX_ITERATIONS} iterations.`));
-          console.log(chalk.gray('  │    Consider increasing SC_MAX_ITERATIONS if needed.'));
-        } else if (taskCompleted) {
-          // Task completed successfully despite expectable errors
-          const statusIcon = hasCompatibilityIssues ? chalk.yellow('⚠️') : chalk.green('✓');
-          const statusText = hasCompatibilityIssues ? 'Task completed with warnings' : 'Task completed with notes';
-          console.log(chalk.gray(`  │ ${statusIcon} ${statusText}`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray(`  │    Successfully completed with ${successfulTools.length} operations.`));
-
-          if (hasCompatibilityIssues) {
-            console.log(chalk.gray(`  │    ${compatibilityErrors.length} compatibility error(s) need fixing.`));
-          }
-          if (expectableErrors.length > 0) {
-            console.log(chalk.gray(`  │    ${expectableErrors.length} expected error(s) occurred (not blockers).`));
-          }
-          console.log(chalk.gray('  │'));
-
-          // Show compatibility issues first (HIGHER PRIORITY)
-          if (hasCompatibilityIssues) {
-            console.log(chalk.gray('  │    Windows compatibility issues detected:'));
-            compatibilityErrors.forEach(t => {
-              const args = t.args as Record<string, unknown> | undefined;
-              const cmd = typeof args?.command === 'string' ? args.command : 'unknown';
-              if (typeof cmd === 'string' && cmd.includes('|') && cmd.startsWith('wsl ')) {
-                console.log(chalk.gray('  │    • WSL pipe syntax: use `wsl bash -c "cmd | pipe"`'));
-              } else if (typeof t.error === 'string' && t.error.includes('not recognized')) {
-                const missing = t.error.match(/'([^']+)' is not recognized/)?.[1] || 'command';
-                console.log(chalk.gray(`  │    • Missing command: ${missing} (not available on Windows)`));
-              }
-            });
-            console.log(chalk.gray('  │'));
-          }
-
-          // Show specific context for GitHub branch protection errors
-          const branchProtectionErrors = expectableErrors.filter(t => {
-            const msg = (t.error || '').toLowerCase();
-            return msg.includes('repository rule violations') ||
-                   msg.includes('waiting for code scanning') ||
-                   msg.includes('base branch policy prohibits');
-          });
-
-          if (branchProtectionErrors.length > 0) {
-            console.log(chalk.gray('  │    Branch protection prevented merge:'));
-            console.log(chalk.gray('  │    • Code Scanning checks are required but pending'));
-            console.log(chalk.gray('  │    • Use --auto flag to queue merge when checks pass'));
-            console.log(chalk.gray('  │    • Or wait for required status checks to complete'));
-          } else if (expectableErrors.length > 0 && !hasCompatibilityIssues) {
-            console.log(chalk.gray('  │    Examples of expected errors:'));
-            console.log(chalk.gray('  │    • Resource not found (PR/issue already merged/closed)'));
-            console.log(chalk.gray('  │    • GitHub restrictions (can\'t approve own PR)'));
-            console.log(chalk.gray('  │    • Command returned non-zero exit code'));
-          }
-        } else if (blockingErrors.length > 0) {
-          console.log(chalk.gray(`  │ ${chalk.red('❌')} Task incomplete - blocking errors encountered`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    Could not complete the task due to:'));
-          console.log(chalk.gray(`  │    • ${blockingErrors.length} blocking error(s)`));
-          console.log(chalk.gray('  │    • See error summary above for details.'));
-        } else {
-          console.log(chalk.gray(`  │ ${chalk.yellow('⚠️')} Task incomplete - errors encountered`));
-          console.log(chalk.gray('  │'));
-          console.log(chalk.gray('  │    Could not fully complete the task.'));
-          console.log(chalk.gray('  │    See error summary above for details.'));
-        }
-
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
-      } else {
-        // Success case
-        console.log(chalk.gray('\n  ┌─ Task Status ───────────────────────────────────────────┐'));
-        console.log(chalk.gray(`  │ ${chalk.green('✓')} Task completed successfully`));
-        console.log(chalk.gray('  └─────────────────────────────────────────────────────────┘'));
-      }
+    // One-line feedback per outcome
+    if (hitIterationLimit && !taskCompleted) {
+      this.log(chalk.gray('\n  ❌ Task incomplete - iteration limit reached'));
+    } else if (hasBlockingErrors) {
+      this.log(chalk.gray('\n  ❌ Task incomplete - blocking errors encountered'));
+    } else if (hadErrors && taskCompleted) {
+      const errorList = [...new Set(failedTools.map(t => t.name))].join(', ');
+      this.log(chalk.gray(`\n  ✓ Done (recovered from ${failedTools.length} error(s) in ${errorList})`));
+    } else if (hadErrors && !taskCompleted) {
+      this.log(chalk.gray('\n  ⚠️  Task may be incomplete - errors encountered'));
+    } else if (toolsUsed.length > 0) {
+      const toolNames = [...new Set(toolsUsed.map(t => t.name))].join(', ');
+      const plural = toolsUsed.length !== 1 ? 's' : '';
+      this.log(chalk.gray(`\n  ✓ Done (${toolsUsed.length} tool operation${plural}: ${toolNames})`));
     }
+
+    // Emit completion event
+    this.callbacks?.onComplete?.({
+      type: 'complete',
+      timestamp: Date.now(),
+      data: {
+        messages,
+        toolsUsed: toolsUsed.map(t => t.name),
+        iterations,
+      },
+    });
 
     return messages;
   }
 
   private onStreamChunk(delta: StreamDelta): void {
     if (delta.content) {
-      // Add newline before first chunk
+      // Clear thinking indicator on first content
+      if (this._thinkingShown) {
+        // ANSI: erase entire line, carriage return
+        process.stdout.write('\x1b[2K\r');
+        this._thinkingShown = false;
+      }
       if (this.isFirstChunk) {
         process.stdout.write('\n');
         this.isFirstChunk = false;
       }
-      process.stdout.write(chalk.green(delta.content));
+      process.stdout.write(chalk.green(renderInline(delta.content)));
     }
   }
 }

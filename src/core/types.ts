@@ -36,6 +36,8 @@ export interface ModelConfig {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  top_p?: number;
+  topP?: number;
 }
 
 export type PermissionProfile = 'traditional' | 'blacklist';
@@ -49,6 +51,9 @@ export interface ProjectConfig {
   };
   profiles?: Record<string, Partial<ModelConfig>>; // Named profiles
   activeProfile?: string;
+  settings?: {
+    hud?: boolean; // Show HUD status line after responses (default: true)
+  };
 }
 
 export interface StreamDelta {
@@ -65,4 +70,89 @@ export interface ToolCallDelta {
     name?: string;
     arguments?: string; // partial JSON
   };
+}
+
+/**
+ * Agent Event Types for UI-agnostic callbacks
+ */
+export type AgentEventType = 'progress' | 'tool_start' | 'tool_complete' | 'tool_error' | 'log' | 'complete';
+
+export interface AgentEvent {
+  type: AgentEventType;
+  timestamp: number;
+  data?: any;
+}
+
+export interface ToolEvent extends AgentEvent {
+  type: 'tool_start' | 'tool_complete' | 'tool_error';
+  data: {
+    name: string;
+    args?: any;
+    result?: string;
+    error?: string;
+    duration?: number;
+  };
+}
+
+export interface ProgressEvent extends AgentEvent {
+  type: 'progress';
+  data: {
+    status: string;
+    step?: number;
+    total?: number;
+  };
+}
+
+export interface LogEvent extends AgentEvent {
+  type: 'log';
+  data: {
+    level: 'info' | 'warn' | 'error' | 'debug';
+    message: string;
+    args?: any[];
+  };
+}
+
+export interface CompleteEvent extends AgentEvent {
+  type: 'complete';
+  data: {
+    messages: Message[];
+    toolsUsed: string[];
+    iterations: number;
+  };
+}
+
+/**
+ * Callbacks for UI-agnostic agent interaction
+ * Allows both CLI and Web to handle events differently
+ */
+export interface AgentCallbacks {
+  /**
+   * Called when agent progress updates (e.g., "thinking", "calling tools")
+   */
+  onProgress?: (event: ProgressEvent) => void;
+
+  /**
+   * Called when a tool execution starts
+   */
+  onToolStart?: (event: ToolEvent) => void;
+
+  /**
+   * Called when a tool execution completes successfully
+   */
+  onToolComplete?: (event: ToolEvent) => void;
+
+  /**
+   * Called when a tool execution fails
+   */
+  onToolError?: (event: ToolEvent) => void;
+
+  /**
+   * Called for log messages (replaces console.log in quiet mode)
+   */
+  onLog?: (event: LogEvent) => void;
+
+  /**
+   * Called when agent.run() completes
+   */
+  onComplete?: (event: CompleteEvent) => void;
 }
