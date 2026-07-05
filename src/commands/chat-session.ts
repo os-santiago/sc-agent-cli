@@ -27,15 +27,16 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     let historyIdx = history.length;
     let historyBuf = '';
 
-    let prevLineCount = 0;
+    let prevPhysicalRows = 0;
 
     function renderInput(): void {
       const tw = process.stdout.columns || 80;
       const prefix = chalk.bold.blue('│ ');
       // Move up and clear previous lines
-      for (let i = 0; i < prevLineCount; i++) {
+      for (let i = 0; i < prevPhysicalRows; i++) {
         process.stdout.write('\x1b[1A\x1b[2K\r');
       }
+      let totalPhysicalRows = 0;
       // Write current content
       for (let i = 0; i < buf.length; i++) {
         const line = buf[i];
@@ -48,8 +49,13 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           if (padding > 0) process.stdout.write(' '.repeat(padding));
         }
         process.stdout.write('\n');
+
+        // Calculate the physical rows this line occupies on the screen
+        const visualLength = 2 + (i === cursorLine ? Math.max(line.length, cursorCol + 1) : line.length);
+        const rows = Math.max(1, Math.ceil(visualLength / tw));
+        totalPhysicalRows += rows;
       }
-      prevLineCount = buf.length;
+      prevPhysicalRows = totalPhysicalRows;
     }
 
     function getFullInput(): string {
@@ -68,7 +74,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       input.setRawMode(false);
       input.removeAllListeners('keypress');
       // Erase the input area
-      for (let i = 0; i < prevLineCount; i++) {
+      for (let i = 0; i < prevPhysicalRows; i++) {
         process.stdout.write('\x1b[1A\x1b[2K\r');
       }
       resolve(getFullInput());
@@ -218,8 +224,12 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         const now = Date.now();
         if (lastKeyTime > 0) {
           const interval = now - lastKeyTime;
-          PASTE_INTERVALS.push(interval);
-          if (PASTE_INTERVALS.length > PASTE_WINDOW_SIZE) PASTE_INTERVALS.shift();
+          if (interval > PASTE_THRESHOLD_MS) {
+            PASTE_INTERVALS.length = 0;
+          } else {
+            PASTE_INTERVALS.push(interval);
+            if (PASTE_INTERVALS.length > PASTE_WINDOW_SIZE) PASTE_INTERVALS.shift();
+          }
         }
         lastKeyTime = now;
 
@@ -306,6 +316,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         // Regular character (name length = 1, e.g. letters, numbers, punctuation)
         if (name.length === 1 && !ctrl) {
           insertChar(name);
+          return;
+        }
+
+        // Handle printable characters (including symbols like '/' or ':' and emojis/surrogate pairs)
+        // that Node's keypress doesn't assign a single-character name to, or when pasting.
+        const char = _chunk ? _chunk.toString() : '';
+        if (char && !ctrl && !meta && !/[\x00-\x1f\x7f-\x9f]/.test(char)) {
+          insertChar(char);
           return;
         }
       } catch (err) {
@@ -523,6 +541,15 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     if (!userInput) {
       continue;
+    }
+
+    if (!isQuiet) {
+      // Re-print the user's input with the proper prefix inside the You box, and close it
+      const lines = userInput.split('\n');
+      for (const line of lines) {
+        console.log(chalk.blue('│ ') + line);
+      }
+      console.log(chalk.blue(boxFooter()));
     }
 
     // Add to input history (but not commands)

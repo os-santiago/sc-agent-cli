@@ -141,6 +141,11 @@ function getExpectableSuggestions(toolName: string, errorMsg: string): string[] 
     suggestions.push('Check if the command syntax is correct or if required tools are installed.');
   }
 
+  if (errorMsg.includes('Unknown JSON field')) {
+    suggestions.push('You specified an invalid field for --json in GitHub CLI. Review the printed "Available fields" list in the error message.');
+    suggestions.push('Use one of the listed available fields. For review threads/comments, use "reviews" or "comments" instead.');
+  }
+
   if (errorMsg.includes('not found') && toolName === 'run_shell') {
     suggestions.push('The command or tool is not installed. Try installing it or use an alternative approach.');
   }

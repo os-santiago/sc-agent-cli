@@ -11,7 +11,10 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node bin/sc.js",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "agent",
@@ -41,9 +44,11 @@
     "@types/prompts": "^2.4.9",
     "@typescript-eslint/eslint-plugin": "^8.62.0",
     "@typescript-eslint/parser": "^8.62.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
     "typescript": "^5.4.0",
-    "typescript-eslint": "^8.62.0"
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=18.0.0"

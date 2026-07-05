@@ -569,6 +569,33 @@ Common use cases:
      wsl gh pr merge 170 --merge --repo owner/repo
      wsl gh pr merge 147 --merge --repo owner/repo`;
 
+function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 1000): Message[] {
+  let toolMessageCount = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'tool') {
+      toolMessageCount++;
+    }
+  }
+
+  let toolMessagesSeen = 0;
+  return messages.map((msg) => {
+    if (msg.role === 'tool') {
+      toolMessagesSeen++;
+      const isOldToolMessage = (toolMessageCount - toolMessagesSeen) >= keepCount;
+      if (isOldToolMessage && msg.content && msg.content.length > maxLength) {
+        const originalLength = msg.content.length;
+        const startPreview = msg.content.substring(0, 300);
+        const endPreview = msg.content.substring(msg.content.length - 300);
+        return {
+          ...msg,
+          content: `${startPreview}\n\n... [Tool output of ${originalLength} characters truncated to save context window] ...\n\n${endPreview}`,
+        };
+      }
+    }
+    return msg;
+  });
+}
+
 export interface AgentOptions {
   workspaceRoot: string;
   config: ProjectConfig;
@@ -716,10 +743,10 @@ export class Agent {
       }
       iterations++;
 
-      // CRITICAL: Validate message sequence before sending to LLM.
-      // Auto-correct common errors (role:'assistant' → role:'tool').
-      // This prevents cryptic API errors and broken response generation.
+      // CRITICAL: Validate, prune, and auto-correct message sequence before sending to LLM.
+      // Pruning old large tool outputs keeps the context window and request size within limits.
       try {
+        messages = pruneMessageHistory(messages);
         messages = autoCorrectMessageSequence(messages);
       } catch (error) {
         console.error(chalk.red('Message sequence validation failed:'), error);
@@ -769,7 +796,17 @@ export class Agent {
           // Multiple empty responses – show fallback
           if (!this.options.quiet) {
             this.log(chalk.yellow('\n  ⚠️  I encountered an issue generating a response.'));
-            this.log(chalk.yellow('  Please try rephrasing your question.\n'));
+            if (toolsUsed.length > 0) {
+              this.log(chalk.gray('\n  Here is a summary of the tools executed in this session:'));
+              for (const tool of toolsUsed) {
+                if (tool.success) {
+                  this.log(chalk.green(`    ✓ ${tool.name} completed successfully.`));
+                } else {
+                  this.log(chalk.red(`    ✗ ${tool.name} failed: ${tool.error || 'Unknown error'}`));
+                }
+              }
+            }
+            this.log(chalk.yellow('\n  Please try rephrasing your question.\n'));
           }
           continueLoop = false;
           continue;
@@ -868,8 +905,23 @@ export class Agent {
           toolResults.push(...batchResults);
         }
 
+        // CRITICAL: Check if the model only responded with tool calls and no text
+        // Some models (NVIDIA Nemotron, older Llama) don't auto-generate synthesis
+        // Force a continuation prompt to get a visible response for the user
+        const hasToolCallsWithoutContent =
+          response.tool_calls &&
+          response.tool_calls.length > 0 &&
+          (!response.content || response.content.trim() === '');
+
         // Push all results to messages
-        for (const result of toolResults) {
+        for (let i = 0; i < toolResults.length; i++) {
+          const result = toolResults[i];
+          if (i === toolResults.length - 1 && hasToolCallsWithoutContent) {
+            // Append the nudge/instruction directly to the last tool result content.
+            // This maintains the strict API role sequence (user -> assistant -> tool -> assistant)
+            // for picky API gateways (e.g. Anthropic, NVIDIA NIM) while still prompting the model for synthesis.
+            result.content += '\n\n[Instruction: Summarize the tool results above for the user in natural language. If there were errors, explain what happened, why, and suggest what to do next. DO NOT call more tools.]';
+          }
           messages.push(result);
         }
 
@@ -885,21 +937,6 @@ export class Agent {
           }
         }
         this.log(chalk.gray(boxFooter(2)));
-
-        // CRITICAL: Check if the model only responded with tool calls and no text
-        // Some models (NVIDIA Nemotron, older Llama) don't auto-generate synthesis
-        // Force a continuation prompt to get a visible response for the user
-        const hasToolCallsWithoutContent =
-          response.tool_calls &&
-          response.tool_calls.length > 0 &&
-          (!response.content || response.content.trim() === '');
-
-        if (hasToolCallsWithoutContent) {
-          messages.push({
-            role: 'user',
-            content: 'Summarize the tool results above for the user in natural language. If there were errors, explain what happened, why, and suggest what to do next. DO NOT call more tools.',
-          });
-        }
       } else {
         // No tool calls — check if LLM is reporting errors without fixing them
         const content = response.content || '';
