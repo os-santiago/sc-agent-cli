@@ -596,6 +596,35 @@ function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLen
   });
 }
 
+function limitMessageHistory(messages: Message[], maxMessages: number = 25): Message[] {
+  if (messages.length <= maxMessages) return messages;
+
+  const systemMessage = messages.find((m) => m.role === 'system');
+  const startIndex = messages.length - maxMessages;
+  
+  // Find a safe start index at or before startIndex which is a 'user' message
+  let safeIndex = startIndex;
+  while (safeIndex > 0) {
+    if (messages[safeIndex].role === 'user') {
+      break;
+    }
+    safeIndex--;
+  }
+
+  // If we couldn't find a user message, we must start from index 1 (or 0 if no system message)
+  if (safeIndex <= 0) {
+    safeIndex = systemMessage ? 1 : 0;
+  }
+
+  const sliced = messages.slice(safeIndex);
+  
+  if (systemMessage && sliced[0] !== systemMessage) {
+    return [systemMessage, ...sliced];
+  }
+  return sliced;
+}
+
+
 export interface AgentOptions {
   workspaceRoot: string;
   config: ProjectConfig;
@@ -744,9 +773,10 @@ export class Agent {
       iterations++;
 
       // CRITICAL: Validate, prune, and auto-correct message sequence before sending to LLM.
-      // Pruning old large tool outputs keeps the context window and request size within limits.
+      // Pruning old large tool outputs and limiting history keeps the context window and request size within limits.
       try {
         messages = pruneMessageHistory(messages);
+        messages = limitMessageHistory(messages);
         messages = autoCorrectMessageSequence(messages);
       } catch (error) {
         console.error(chalk.red('Message sequence validation failed:'), error);
