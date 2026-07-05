@@ -4,6 +4,9 @@ import { join, dirname, basename, sep } from 'node:path';
 // Available slash commands
 const SLASH_COMMANDS = [
   '/help',
+  '/undo',
+    '/rollback',
+    '/session',
   '/config',
   '/hud',
   '/model',

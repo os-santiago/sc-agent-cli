@@ -35,6 +35,17 @@ export const writeFileTool: Tool = {
       throw new Error('Missing required arguments: path, content');
     }
 
+    // Check content size before writing
+    const maxBytes = ctx.config.settings?.maxWriteFileBytes ?? 10 * 1024 * 1024; // 10 MB default
+    const contentBytes = Buffer.byteLength(content, 'utf-8');
+    if (contentBytes > maxBytes) {
+      throw new Error(
+        `Content too large (${(contentBytes / 1024 / 1024).toFixed(1)} MB). ` +
+        `Maximum write size: ${(maxBytes / 1024 / 1024).toFixed(1)} MB. ` +
+        `Set maxWriteFileBytes in config to increase.`
+      );
+    }
+
     const approved = await requestPermission({
       toolName: 'write_file',
       args,

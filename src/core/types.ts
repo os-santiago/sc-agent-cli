@@ -53,6 +53,9 @@ export interface ProjectConfig {
   activeProfile?: string;
   settings?: {
     hud?: boolean; // Show HUD status line after responses (default: true)
+    hudFields?: string[]; // Fields to show in HUD: model, profile, memories, messages, storage, permissions
+    maxReadFileBytes?: number; // Max bytes for read_file (default: 1MB)
+    maxWriteFileBytes?: number; // Max bytes for write_file (default: 10MB)
   };
 }
 

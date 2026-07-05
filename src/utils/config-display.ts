@@ -96,6 +96,11 @@ export async function showConfig(
   console.log(` ${chalk.gray('  write_file    edit_file     run_shell    (requires permission)')}`);
   console.log(` ${chalk.gray('  git           memory_write               (requires permission)')}`);
 
+  const maxRead = config.settings?.maxReadFileBytes ?? 1 * 1024 * 1024;
+  const maxWrite = config.settings?.maxWriteFileBytes ?? 10 * 1024 * 1024;
+  field('Read limit', `${(maxRead / 1024 / 1024).toFixed(1)} MB`);
+  field('Write limit', `${(maxWrite / 1024 / 1024).toFixed(1)} MB`);
+
   // ── Storage ──
   const configDir = join(homedir(), '.sc-agent');
   const storageInfo = checkStorageLimit(configDir);

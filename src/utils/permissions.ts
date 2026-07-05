@@ -79,10 +79,15 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
     return true;
   }
 
-  // Ask user with helpful context
+  // Ask user with helpful context (redact sensitive fields)
+  const SENSITIVE_KEYS = new Set(['apiKey', 'api_key', 'password', 'token', 'secret', 'auth', 'key']);
+  const redactedArgs: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(ctx.args)) {
+    redactedArgs[k] = SENSITIVE_KEYS.has(k) ? '***' : v;
+  }
   console.log(chalk.gray(`\n${boxHeader('Permission', 2)}`));
   console.log(chalk.gray(`  │ ${chalk.yellow('🔐')} Tool: ${ctx.toolName}`));
-  console.log(chalk.gray(`  │    Args: ${JSON.stringify(ctx.args)}`));
+  console.log(chalk.gray(`  │    Args: ${JSON.stringify(redactedArgs)}`));
   console.log(chalk.gray(boxFooter(2)));
 
   const response = await prompts({

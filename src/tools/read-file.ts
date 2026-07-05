@@ -1,6 +1,8 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import type { Tool, ToolContext } from './tool.js';
 import { resolveSafePath } from '../utils/path-security.js';
+
+const DEFAULT_MAX_READ_BYTES = 1 * 1024 * 1024; // 1 MB
 
 export const readFileTool: Tool = {
   definition: {
@@ -28,6 +30,18 @@ export const readFileTool: Tool = {
     }
 
     const safePath = resolveSafePath(filePath, ctx.workspaceRoot, ctx.config);
+
+    // Check file size before reading
+    const maxBytes = ctx.config.settings?.maxReadFileBytes ?? DEFAULT_MAX_READ_BYTES;
+    const stats = await stat(safePath);
+    if (stats.size > maxBytes) {
+      throw new Error(
+        `File too large (${(stats.size / 1024 / 1024).toFixed(1)} MB). ` +
+        `Maximum read size: ${(maxBytes / 1024 / 1024).toFixed(1)} MB. ` +
+        `Set maxReadFileBytes in config to increase.`
+      );
+    }
+
     const content = await readFile(safePath, 'utf-8');
     return content;
   },

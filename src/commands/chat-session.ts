@@ -1,7 +1,7 @@
 import prompts from 'prompts';
 import chalk from 'chalk';
-import * as readline from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
+import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { Agent } from '../core/agent.js';
@@ -18,46 +18,341 @@ import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
 
-// Helper to read user input with history navigation and autocomplete
+// Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input,
-      output,
-      history,
-      historySize: 100,
-      prompt: chalk.bold.blue('│ '),
-      completer: createCompleter(workspaceRoot),
+    const buf: string[] = [''];
+    let cursorLine = 0;
+    let cursorCol = 0;
+    let historyIdx = history.length;
+    let historyBuf = '';
+
+    let prevLineCount = 0;
+
+    function renderInput(): void {
+      const tw = process.stdout.columns || 80;
+      const prefix = chalk.bold.blue('│ ');
+      // Move up and clear previous lines
+      for (let i = 0; i < prevLineCount; i++) {
+        process.stdout.write('\x1b[1A\x1b[2K\r');
+      }
+      // Write current content
+      for (let i = 0; i < buf.length; i++) {
+        const line = buf[i];
+        const display = i === cursorLine
+          ? line.slice(0, cursorCol) + (line[cursorCol] ? chalk.inverse(line[cursorCol]) + line.slice(cursorCol + 1) : chalk.inverse(' '))
+          : line;
+        process.stdout.write(prefix + display);
+        if (tw > 0) {
+          const padding = Math.max(0, tw - prefix.length - display.length - 2);
+          if (padding > 0) process.stdout.write(' '.repeat(padding));
+        }
+        process.stdout.write('\n');
+      }
+      prevLineCount = buf.length;
+    }
+
+    function getFullInput(): string {
+      return buf.join('\n');
+    }
+
+    function setFullInput(text: string): void {
+      buf.length = 0;
+      const lines = text.split('\n');
+      for (const l of lines) buf.push(l);
+      cursorLine = buf.length - 1;
+      cursorCol = buf[cursorLine].length;
+    }
+
+    function submit(): void {
+      input.setRawMode(false);
+      input.removeAllListeners('keypress');
+      // Erase the input area
+      for (let i = 0; i < prevLineCount; i++) {
+        process.stdout.write('\x1b[1A\x1b[2K\r');
+      }
+      resolve(getFullInput());
+    }
+
+    function insertChar(ch: string): void {
+      const line = buf[cursorLine];
+      buf[cursorLine] = line.slice(0, cursorCol) + ch + line.slice(cursorCol);
+      cursorCol += ch.length;
+      renderInput();
+    }
+
+    function newline(): void {
+      const line = buf[cursorLine];
+      const rest = line.slice(cursorCol);
+      buf[cursorLine] = line.slice(0, cursorCol);
+      cursorLine++;
+      cursorCol = 0;
+      buf.splice(cursorLine, 0, rest);
+      renderInput();
+    }
+
+    function cursorLeft(): void {
+      if (cursorCol > 0) {
+        cursorCol--;
+        renderInput();
+      } else if (cursorLine > 0) {
+        cursorLine--;
+        cursorCol = buf[cursorLine].length;
+        renderInput();
+      }
+    }
+
+    function cursorRight(): void {
+      const line = buf[cursorLine];
+      if (cursorCol < line.length) {
+        cursorCol++;
+        renderInput();
+      } else if (cursorLine < buf.length - 1) {
+        cursorLine++;
+        cursorCol = 0;
+        renderInput();
+      }
+    }
+
+    function cursorUp(): void {
+      if (cursorLine > 0) {
+        cursorLine--;
+        cursorCol = Math.min(cursorCol, buf[cursorLine].length);
+        renderInput();
+      } else if (historyIdx > 0) {
+        if (historyIdx === history.length) historyBuf = getFullInput();
+        historyIdx--;
+        setFullInput(history[historyIdx]);
+        renderInput();
+      }
+    }
+
+    function cursorDown(): void {
+      if (cursorLine < buf.length - 1) {
+        cursorLine++;
+        cursorCol = Math.min(cursorCol, buf[cursorLine].length);
+        renderInput();
+      } else if (historyIdx < history.length) {
+        historyIdx++;
+        if (historyIdx === history.length) {
+          setFullInput(historyBuf);
+        } else {
+          setFullInput(history[historyIdx]);
+        }
+        renderInput();
+      }
+    }
+
+    function backspace(): void {
+      if (cursorCol > 0) {
+        const line = buf[cursorLine];
+        buf[cursorLine] = line.slice(0, cursorCol - 1) + line.slice(cursorCol);
+        cursorCol--;
+        renderInput();
+      } else if (cursorLine > 0) {
+        const prevLine = buf[cursorLine - 1];
+        const curLine = buf[cursorLine];
+        buf[cursorLine - 1] = prevLine + curLine;
+        buf.splice(cursorLine, 1);
+        cursorLine--;
+        cursorCol = prevLine.length;
+        renderInput();
+      }
+    }
+
+    function del(): void {
+      const line = buf[cursorLine];
+      if (cursorCol < line.length) {
+        buf[cursorLine] = line.slice(0, cursorCol) + line.slice(cursorCol + 1);
+        renderInput();
+      } else if (cursorLine < buf.length - 1) {
+        buf[cursorLine] = line + buf[cursorLine + 1];
+        buf.splice(cursorLine + 1, 1);
+        renderInput();
+      }
+    }
+
+    function home(): void {
+      cursorCol = 0;
+      renderInput();
+    }
+
+    function end(): void {
+      cursorCol = buf[cursorLine].length;
+      renderInput();
+    }
+
+    function handleTab(): void {
+      const completer = createCompleter(workspaceRoot);
+      const full = getFullInput();
+      const [matches, matchLine] = completer(full);
+      if (matches.length === 1 && matches[0] !== matchLine) {
+        setFullInput(matches[0]);
+        renderInput();
+      }
+    }
+
+    input.setRawMode(true);
+    emitKeypressEvents(input);
+
+    // Safety net: if anything throws while in raw mode, restore it
+    function restoreRawMode(): void {
+      try { input.setRawMode(false); } catch { /* already restored */ }
+      input.removeAllListeners('keypress');
+    }
+
+    const PASTE_INTERVALS: number[] = [];
+    const PASTE_WINDOW_SIZE = 5;
+    const PASTE_THRESHOLD_MS = 80;
+    let lastKeyTime = 0;
+
+    function isPasteBurst(): boolean {
+      if (PASTE_INTERVALS.length < 2) return false;
+      const sorted = [...PASTE_INTERVALS].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      return median < PASTE_THRESHOLD_MS;
+    }
+
+    input.on('keypress', (_chunk: Buffer, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }) => {
+      try {
+        const now = Date.now();
+        if (lastKeyTime > 0) {
+          const interval = now - lastKeyTime;
+          PASTE_INTERVALS.push(interval);
+          if (PASTE_INTERVALS.length > PASTE_WINDOW_SIZE) PASTE_INTERVALS.shift();
+        }
+        lastKeyTime = now;
+
+        const name = key.name || '';
+        const ctrl = key.ctrl || false;
+        const meta = key.meta || false;
+        const shift = key.shift || false;
+
+        // Ctrl+C → clean up and exit
+        if (ctrl && name === 'c') {
+          restoreRawMode();
+          process.emit('SIGINT' as any);
+          return;
+        }
+
+        // Enter: submit only on deliberate press (median interval > threshold). During paste bursts, insert newline.
+        if (name === 'enter' && !shift && !meta) {
+          if (isPasteBurst()) {
+            newline();
+          } else {
+            submit();
+          }
+          return;
+        }
+
+        // Shift+Enter → newline
+        if (name === 'enter' && (shift || meta)) {
+          newline();
+          return;
+        }
+
+        // Tab → autocomplete
+        if (name === 'tab') {
+          handleTab();
+          return;
+        }
+
+        // Space (name is 'space', not ' ')
+        if (name === 'space') {
+          insertChar(' ');
+          return;
+        }
+
+        // Navigation
+        if (name === 'left') { cursorLeft(); return; }
+        if (name === 'right') { cursorRight(); return; }
+        if (name === 'up' && !ctrl) { cursorUp(); return; }
+        if (name === 'down' && !ctrl) { cursorDown(); return; }
+        if (name === 'home' || (ctrl && name === 'a')) { home(); return; }
+        if (name === 'end' || (ctrl && name === 'e')) { end(); return; }
+
+        // Delete
+        if (name === 'backspace') { backspace(); return; }
+        if (name === 'delete' || (ctrl && name === 'd' && getFullInput().length > 0)) { del(); return; }
+
+        // Ctrl+W → delete word backward
+        if (ctrl && name === 'w') {
+          const line = buf[cursorLine];
+          const before = line.slice(0, cursorCol);
+          const after = line.slice(cursorCol);
+          const trimmed = before.replace(/\s*\S+\s*$/, '');
+          buf[cursorLine] = trimmed + after;
+          cursorCol = trimmed.length;
+          renderInput();
+          return;
+        }
+
+        // Ctrl+U → clear line
+        if (ctrl && name === 'u') {
+          const after = buf[cursorLine].slice(cursorCol);
+          buf[cursorLine] = after;
+          cursorCol = 0;
+          renderInput();
+          return;
+        }
+
+        // Ctrl+K → delete to end of line
+        if (ctrl && name === 'k') {
+          buf[cursorLine] = buf[cursorLine].slice(0, cursorCol);
+          renderInput();
+          return;
+        }
+
+        // Regular character (name length = 1, e.g. letters, numbers, punctuation)
+        if (name.length === 1 && !ctrl) {
+          insertChar(name);
+          return;
+        }
+      } catch (err) {
+        restoreRawMode();
+        throw err;
+      }
     });
 
-    rl.question('', (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    // Initial render
+    renderInput();
   });
 }
 
 export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
+  let historyCheckpoints: Message[][] = [];
   let currentConfig = options.config;
-  const inputHistory: string[] = [];
+  let inputHistory: string[] = [];
   let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
-  const settings = resolveSettings(currentConfig);
+    const settings = resolveSettings(currentConfig);
   let hudEnabled = settings.hud;
+  let hudFields = settings.hudFields;
 
   // Truncate helper for banner
   function trunc(s: string, max: number): string {
     return s.length > max ? s.slice(0, max - 1) + '…' : s;
   }
 
-  // Load persisted conversation history
-  const HISTORY_FILE = join(homedir(), '.sc-agent', 'memory', 'history.json');
+  // Workspace-specific history files (so each directory has its own context)
+  function getHistoryPaths(ws: string): { conv: string; input: string } {
+    const safe = ws.replace(/[:/\\]/g, '_');
+    const base = join(homedir(), '.sc-agent', 'memory', 'workspaces');
+    return { conv: join(base, `conv-${safe}.json`), input: join(base, `input-${safe}.json`) };
+  }
+  const historyPaths = getHistoryPaths(options.workspaceRoot);
+
+  // Load persisted conversation + input history for this workspace
   try {
     const { readFileSync, existsSync } = await import('node:fs');
-    if (existsSync(HISTORY_FILE)) {
-      const data = readFileSync(HISTORY_FILE, 'utf-8');
+    if (existsSync(historyPaths.conv)) {
+      const data = readFileSync(historyPaths.conv, 'utf-8');
       history = JSON.parse(data);
+    }
+    if (existsSync(historyPaths.input)) {
+      const data = readFileSync(historyPaths.input, 'utf-8');
+      inputHistory = JSON.parse(data);
     }
   } catch {
     // Start fresh
@@ -114,9 +409,10 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
     // Row 3: Provider + History
     const providerShort = currentConfig.model.baseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+    const historyLabel = history.length > 0 ? `${history.length} msgs (restored)` : `${history.length} msgs`;
     row2(
       chalk.gray('🔗 Provider'), chalk.white(trunc(providerShort, colW - 12)),
-      chalk.gray('📋 History'), chalk.white(`${history.length} msgs`)
+      chalk.gray('📋 History'), chalk.white(historyLabel)
     );
 
     // Row 4: Permissions
@@ -217,24 +513,13 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
   // Interactive mode loop
   while (true) {
-    // Show status bar before each input
-    if (!isQuiet) {
-      statusBar.show(getShortcutsBar());
-    }
-
-    // User input separator
+    // Show status bar as prompt indicator, then hide during raw-mode input
+    if (!isQuiet) statusBar.show(getShortcutsBar());
     if (!isQuiet) {
       console.log(chalk.blue(`\n${boxHeader('You')}`));
     }
+    if (!isQuiet) statusBar.hide();
     const userInput = await readUserInput(inputHistory, options.workspaceRoot);
-    if (!isQuiet) {
-      console.log(chalk.blue(boxFooter()));
-    }
-
-    // Hide status bar while processing
-    if (!isQuiet) {
-      statusBar.hide();
-    }
 
     if (!userInput) {
       continue;
@@ -263,6 +548,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.white('  /pre-approved-commands         ') + chalk.gray('- Setup pre-approved commands via interview'));
       console.log(chalk.white('  /storage                       ') + chalk.gray('- Show storage usage and cleanup options'));
       console.log(chalk.white('  /reload                        ') + chalk.gray('- Reload configuration from disk'));
+      console.log(chalk.white('  /undo                          ') + chalk.gray('- Undo last exchange (stack-based)'));
+      console.log(chalk.white('  /rollback <n>                  ') + chalk.gray('- Rollback to message index <n>'));
+      console.log(chalk.white('  /session                       ') + chalk.gray('- Export/import session context'));
       console.log(chalk.white('  /clear                         ') + chalk.gray('- Clear conversation history'));
       console.log(chalk.white('  /memory                        ') + chalk.gray('- View/manage persistent memory'));
       console.log(chalk.white('  /config                        ') + chalk.gray('- Show full configuration details'));
@@ -291,29 +579,210 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       continue;
     }
 
-    // Handle /hud command
-    if (userInput.toLowerCase() === '/hud') {
-      hudEnabled = !hudEnabled;
-      const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-      const { join } = await import('node:path');
-      const { homedir } = await import('node:os');
-      const configPath = join(homedir(), '.sc-agent', 'config.json');
-      const configDir = join(homedir(), '.sc-agent');
-      if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
-      let cfg: Record<string, unknown> = {};
-      if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
-      if (!cfg.settings) cfg.settings = {};
-      (cfg.settings as Record<string, unknown>).hud = hudEnabled;
-      writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+    // Handle /undo command
+    if (userInput.toLowerCase() === '/undo') {
+      if (historyCheckpoints.length === 0) {
+        console.log(chalk.yellow('\n⚠ Nothing to undo\n'));
+        continue;
+      }
+      const checkpoint = historyCheckpoints.pop()!;
+      history = checkpoint;
+      // Persist restored history + input history
+      try {
+        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
+        const dir = dirname(historyPaths.conv);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+      } catch { /* silent */ }
+      console.log(chalk.green(`\n✓ Undone (${historyCheckpoints.length} checkpoint(s) remaining)\n`));
+      continue;
+    }
 
-      if (hudEnabled) {
-        console.log(chalk.cyan('\n📊 HUD enabled'));
-        console.log(chalk.gray('  Shows: model | profile | memories | messages | storage | permissions'));
-        console.log(chalk.gray('  Set SC_HUD=false to disable via env\n'));
+    // Handle /rollback command
+    if (userInput.toLowerCase().startsWith('/rollback')) {
+      const args = userInput.trim().split(/\s+/);
+      if (args.length < 2 || isNaN(Number(args[1]))) {
+        console.log(chalk.yellow('\n⚠ Usage: /rollback <message_index>\n'));
+        continue;
+      }
+      const idx = parseInt(args[1], 10);
+      if (idx < 0 || idx >= history.length) {
+        console.log(chalk.yellow(`\n⚠ Index must be 0-${history.length - 1}\n`));
+        continue;
+      }
+      historyCheckpoints.push(JSON.parse(JSON.stringify(history)));
+      history = history.slice(0, idx);
+      // Persist restored history + input history
+      try {
+        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
+        const dir = dirname(historyPaths.conv);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+      } catch { /* silent */ }
+      console.log(chalk.green(`\n✓ Rolled back to message ${idx} (${history.length} messages remaining)\n`));
+      continue;
+    }
+
+    // Handle /session export/import
+    if (userInput.toLowerCase().startsWith('/session')) {
+      const sessionArgs = userInput.trim().split(/\s+/);
+      const sessionSub = sessionArgs[1]?.toLowerCase();
+
+      if (sessionSub === 'export') {
+        const exportPath = sessionArgs[2] || join(process.cwd(), `session-${Date.now()}.json`);
+        try {
+          const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
+          const exportDir = dirname(exportPath);
+          if (!existsSync(exportDir)) mkdirSync(exportDir, { recursive: true });
+          const payload = {
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            workspace: options.workspaceRoot,
+            model: currentConfig.model.model,
+            provider: currentConfig.model.baseUrl,
+            profile: currentConfig.activeProfile || 'default',
+            history,
+            inputHistory,
+          };
+          writeFileSync(exportPath, JSON.stringify(payload, null, 2));
+          console.log(chalk.green(`\n✓ Session exported to ${exportPath} (${history.length} messages)\n`));
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.log(chalk.red(`\n✗ Export failed: ${errorMsg}\n`));
+        }
+      } else if (sessionSub === 'import') {
+        const importPath = sessionArgs[2];
+        if (!importPath) {
+          console.log(chalk.yellow('\n⚠ Usage: /session import <path-to-session.json>\n'));
+          continue;
+        }
+        try {
+          const { readFileSync, existsSync } = await import('node:fs');
+          if (!existsSync(importPath)) {
+            console.log(chalk.yellow(`\n⚠ File not found: ${importPath}\n`));
+            continue;
+          }
+          const data = JSON.parse(readFileSync(importPath, 'utf-8'));
+          if (!data.version || !Array.isArray(data.history)) {
+            console.log(chalk.yellow('\n⚠ Invalid session file format\n'));
+            continue;
+          }
+          historyCheckpoints.push(JSON.parse(JSON.stringify(history))); // Save checkpoint before importing
+          history = data.history;
+          inputHistory = data.inputHistory || [];
+          // Persist imported history
+          try {
+            const { writeFileSync, mkdirSync } = await import('node:fs');
+            const dir = dirname(historyPaths.conv);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
+            writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+          } catch { /* silent */ }
+          const importedFrom = data.model ? ` (model: ${data.model})` : '';
+          console.log(chalk.green(`\n✓ Session imported${importedFrom} — ${history.length} messages restored\n`));
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.log(chalk.red(`\n✗ Import failed: ${errorMsg}\n`));
+        }
+      } else if (sessionSub === 'info') {
+        const info = {
+          messages: history.length,
+          inputHistory: inputHistory.length,
+          workspace: options.workspaceRoot,
+          model: currentConfig.model.model,
+          provider: currentConfig.model.baseUrl,
+          profile: currentConfig.activeProfile || 'default',
+        };
+        console.log(chalk.cyan('\n📦 Session Info'));
+        console.log(chalk.gray(`  Messages:     ${info.messages}`));
+        console.log(chalk.gray(`  Input saved:  ${info.inputHistory}`));
+        console.log(chalk.gray(`  Workspace:    ${info.workspace}`));
+        console.log(chalk.gray(`  Model:        ${info.model}`));
+        console.log(chalk.gray(`  Provider:     ${info.provider}`));
+        console.log(chalk.gray(`  Profile:      ${info.profile}`));
+        console.log(chalk.gray(`  Usage:        /session export [path]`));
+        console.log(chalk.gray(`                /session import <path>\n`));
       } else {
-        console.log(chalk.yellow('\n📊 HUD disabled'));
-        console.log(chalk.gray('  Set SC_HUD=true to re-enable via env'));
-        console.log(chalk.gray('  Or use /hud again\n'));
+        console.log(chalk.cyan('\n📦 Session Commands'));
+        console.log(chalk.gray('  /session export [path]   - Export session to file'));
+        console.log(chalk.gray('  /session import <path>   - Import session from file'));
+        console.log(chalk.gray('  /session info            - Show session details\n'));
+      }
+      continue;
+    }
+
+    // Handle /hud command (toggle, fields, or field config)
+    if (userInput.toLowerCase().startsWith('/hud')) {
+      const hudArgs = userInput.trim().split(/\s+/);
+      const hudSub = hudArgs[1]?.toLowerCase();
+
+      if (hudSub === 'fields') {
+        // Interactive field picker
+        const current = hudFields;
+        const { ALL_HUD_FIELDS } = await import('../utils/settings.js');
+        const choices = ALL_HUD_FIELDS.map(f => ({
+          title: f,
+          value: f,
+          selected: current.includes(f),
+        }));
+        const sel = await prompts({
+          type: 'multiselect',
+          name: 'fields',
+          message: 'Select HUD fields to show:',
+          choices,
+          instructions: false,
+        });
+        if (sel.fields && sel.fields.length > 0) {
+          hudFields = sel.fields;
+          const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
+          const { join } = await import('node:path');
+          const { homedir } = await import('node:os');
+          const configPath = join(homedir(), '.sc-agent', 'config.json');
+          const configDir = join(homedir(), '.sc-agent');
+          if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+          let cfg: Record<string, unknown> = {};
+          if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+          if (!cfg.settings) cfg.settings = {};
+          (cfg.settings as Record<string, unknown>).hudFields = hudFields;
+          writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+          console.log(chalk.green(`\n✓ HUD fields: ${hudFields.join(', ')}\n`));
+        } else {
+          console.log(chalk.gray('\n  Fields unchanged\n'));
+        }
+      } else if (hudSub === 'list') {
+        console.log(chalk.cyan('\n📊 HUD Configuration'));
+        console.log(chalk.gray(`  Enabled: ${hudEnabled ? 'yes' : 'no'}`));
+        console.log(chalk.gray(`  Fields:  ${hudFields.join(', ')}`));
+        console.log(chalk.gray(`  Usage:   /hud          - toggle on/off`));
+        console.log(chalk.gray(`           /hud fields    - select which fields to show`));
+        console.log(chalk.gray(`           /hud list      - show current HUD config\n`));
+      } else {
+        // Toggle on/off
+        hudEnabled = !hudEnabled;
+        const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
+        const { join } = await import('node:path');
+        const { homedir } = await import('node:os');
+        const configPath = join(homedir(), '.sc-agent', 'config.json');
+        const configDir = join(homedir(), '.sc-agent');
+        if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+        let cfg: Record<string, unknown> = {};
+        if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+        if (!cfg.settings) cfg.settings = {};
+        (cfg.settings as Record<string, unknown>).hud = hudEnabled;
+        writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+
+        if (hudEnabled) {
+          console.log(chalk.cyan('\n📊 HUD enabled'));
+          console.log(chalk.gray(`  Fields: ${hudFields.join(' | ')}`));
+          console.log(chalk.gray('  Set SC_HUD=false to disable via env'));
+          console.log(chalk.gray('  Use /hud fields to customize, /hud list for details\n'));
+        } else {
+          console.log(chalk.yellow('\n📊 HUD disabled'));
+          console.log(chalk.gray('  Set SC_HUD=true to re-enable via env'));
+          console.log(chalk.gray('  Or use /hud again\n'));
+        }
       }
       continue;
     }
@@ -958,16 +1427,19 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     }
 
     try {
+      // Save checkpoint before agent run
+      historyCheckpoints.push(JSON.parse(JSON.stringify(history)));
       if (!isQuiet) {
         console.log(chalk.green(`\n${boxHeader('Assistant')}`));
       }
       history = await agent.run(userInput, history);
-      // Persist conversation history for cross-session/model continuity
+      // Persist conversation + input history for cross-session/workspace continuity
       try {
         const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
-        const dir = dirname(HISTORY_FILE);
+        const dir = dirname(historyPaths.conv);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
       } catch {
         // Silent: persistence is optional
       }
@@ -975,7 +1447,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         console.log(chalk.green(`\n${boxFooter()}`));
       }
 
-      // HUD: compact status line after each response
+      // HUD: compact status line with configurable fields
       if (hudEnabled && !isQuiet) {
         const mem = await persistentMemory.getAll();
         const storage = checkStorageLimit(join(homedir(), '.sc-agent'));
@@ -986,15 +1458,18 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           : currentConfig.model.model;
         const tokens = history.filter(m => m.role === 'assistant').length;
 
-        const parts = [
-          chalk.cyan(modelShort),
-          chalk.gray(`@${currentConfig.activeProfile || 'default'}`),
-          chalk.gray(`🧠${mem.length}`),
-          chalk.gray(`💬${tokens}`),
-          chalk.gray(`💾${formatBytes(storage.currentSize)}`),
-          `${profileIcon}${permIcon}`,
-        ];
-        console.log(chalk.gray(`  ${parts.join(chalk.dim(' │ '))}\n`));
+        const fieldParts: Record<string, string> = {
+          model: chalk.cyan(modelShort),
+          profile: chalk.gray(`@${currentConfig.activeProfile || 'default'}`),
+          memories: chalk.gray(`🧠${mem.length}`),
+          messages: chalk.gray(`💬${tokens}`),
+          storage: chalk.gray(`💾${formatBytes(storage.currentSize)}`),
+          permissions: `${profileIcon}${permIcon}`,
+        };
+        const parts = hudFields.filter(f => f in fieldParts).map(f => fieldParts[f]);
+        if (parts.length > 0) {
+          console.log(chalk.gray(`  ${parts.join(chalk.dim(' │ '))}\n`));
+        }
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);

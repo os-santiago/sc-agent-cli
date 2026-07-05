@@ -1,25 +1,26 @@
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import type { Tool, ToolContext } from './tool.js';
 import { requestPermission } from '../utils/permissions.js';
 
 function runGit(args: string[], cwd: string): string {
-  try {
-    const result = execSync(`git ${args.join(' ')}`, {
-      cwd,
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 30000,
-      windowsHide: true,
-    });
-    return result.trim();
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      const execErr = err as Error & { stderr?: Buffer | string };
-      const stderr = execErr.stderr?.toString().trim() || '';
-      throw new Error(stderr || `Git error: ${err.message}`, { cause: err });
-    }
-    throw err;
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf-8',
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 30000,
+    windowsHide: true,
+  });
+
+  if (result.error) {
+    throw new Error(`Git error: ${result.error.message}`, { cause: result.error });
   }
+
+  const stderr = (result.stderr || '').trim();
+  if (result.status !== 0) {
+    throw new Error(stderr || `Git exited with code ${result.status}`);
+  }
+
+  return (result.stdout || '').trim();
 }
 
 export const gitTool: Tool = {
@@ -72,9 +73,8 @@ export const gitTool: Tool = {
     }
 
     // Verify git is available
-    try {
-      execSync('git --version', { encoding: 'utf-8', windowsHide: true });
-    } catch {
+    const gitCheck = spawnSync('git', ['--version'], { encoding: 'utf-8', windowsHide: true, timeout: 5000 });
+    if (gitCheck.error || gitCheck.status !== 0) {
       throw new Error('Git is not installed or not in PATH');
     }
 

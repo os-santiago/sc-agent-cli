@@ -17,7 +17,11 @@ export const searchTextTool: Tool = {
           },
           glob: {
             type: 'string',
-            description: 'Glob pattern for files to search (e.g. "**/*.ts")',
+            description: 'Glob pattern for files to search (e.g. "**/*.ts"). Alias: path',
+          },
+          path: {
+            type: 'string',
+            description: 'Specific file or glob path to search (alias for glob). Example: "src/*.ts"',
           },
           regex: {
             type: 'boolean',
@@ -31,25 +35,40 @@ export const searchTextTool: Tool = {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const pattern = args.pattern as string;
-    const globPattern = (args.glob as string) || '**/*';
+    const globPattern = (args.path as string) || (args.glob as string) || '';
     const useRegex = (args.regex as boolean) || false;
 
     if (!pattern) {
       throw new Error('Missing required argument: pattern');
     }
 
+    if (!globPattern) {
+      return 'Error: missing search path. Specify which file(s) to search using "path" (e.g. "src/*.ts") or "glob". Searching all files is not allowed for performance reasons.';
+    }
+
     const regex = useRegex ? new RegExp(pattern, 'i') : null;
     const files = await fg(globPattern, {
       cwd: ctx.workspaceRoot,
       absolute: true,
-      ignore: ['**/node_modules/**', '**/.git/**'],
+      ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**'],
     });
 
+    if (files.length > 50) {
+      return `Error: pattern "${globPattern}" matched ${files.length} files (max 50). Narrow your search with a more specific glob (e.g. "src/**/*.ts", "scripts/*.gd").`;
+    }
+
     const results: string[] = [];
+    let totalBytes = 0;
+    const MAX_BYTES = 10 * 1024 * 1024; // 10MB total
 
     for (const file of files) {
       try {
         const content = await readFile(file, 'utf-8');
+        totalBytes += Buffer.byteLength(content, 'utf-8');
+        if (totalBytes > MAX_BYTES) {
+          results.push(`⚠️  Search stopped: total content exceeds 10MB limit. Narrow your search.`);
+          break;
+        }
         const lines = content.split('\n');
         const matches: string[] = [];
 

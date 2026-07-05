@@ -5,6 +5,7 @@ import path from 'node:path';
 
 const MEMORY_DIR = path.join(homedir(), '.sc-agent', 'memory');
 const MEMORY_FILE = path.join(MEMORY_DIR, 'memory.json');
+const MAX_MEMORY_ENTRIES = 1000;
 
 export interface MemoryEntry {
   key: string;
@@ -20,9 +21,21 @@ interface MemoryStore {
   version: number;
 }
 
+function isValidStore(data: unknown): data is MemoryStore {
+  if (!data || typeof data !== 'object') return false;
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.entries)) return false;
+  return obj.entries.every(e =>
+    e && typeof e === 'object' &&
+    typeof (e as Record<string, unknown>).key === 'string' &&
+    typeof (e as Record<string, unknown>).content === 'string'
+  );
+}
+
 export class PersistentMemory {
   private store: MemoryStore;
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor() {
     this.store = {
@@ -35,16 +48,31 @@ export class PersistentMemory {
 
   async init(): Promise<void> {
     if (this.initialized) return;
-    await mkdir(MEMORY_DIR, { recursive: true });
-    await this.load();
-    this.initialized = true;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      await mkdir(MEMORY_DIR, { recursive: true });
+      await this.load();
+      this.initialized = true;
+      this.initPromise = null;
+    })();
+    return this.initPromise;
   }
 
   private async load(): Promise<void> {
     try {
       if (existsSync(MEMORY_FILE)) {
         const data = await readFile(MEMORY_FILE, 'utf-8');
-        this.store = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        if (!isValidStore(parsed)) {
+          // Invalid format — start fresh but keep a backup
+          try {
+            const backupPath = MEMORY_FILE + '.bak';
+            await writeFile(backupPath, data, 'utf-8');
+          } catch { /* backup is optional */ }
+          this.store = { entries: [], created: Date.now(), updated: Date.now(), version: 1 };
+          return;
+        }
+        this.store = parsed;
       }
     } catch {
       // Start fresh if corrupt
@@ -63,6 +91,11 @@ export class PersistentMemory {
     if (existing >= 0) {
       this.store.entries[existing] = entry;
     } else {
+      // Enforce max entries limit: evict oldest if at cap
+      if (this.store.entries.length >= MAX_MEMORY_ENTRIES) {
+        this.store.entries.sort((a, b) => a.timestamp - b.timestamp);
+        this.store.entries.shift();
+      }
       this.store.entries.push(entry);
     }
     await this.save();

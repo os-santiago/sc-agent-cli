@@ -14,23 +14,28 @@ import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
+CRITICAL RULE — YOU MUST FIX WHAT YOU FIND:
+When you detect errors (compilation failures, test failures, syntax errors, missing files, etc.):
+1. DO NOT just report the errors and ask "do you want me to fix it?"
+2. DO NOT summarize errors and wait for instructions
+3. IMMEDIATELY proceed to fix ALL identified issues using the available tools
+4. After fixing, re-run the failing command to verify the fix works
+5. Keep iterating: fix → verify → fix → verify until the task succeeds
+6. Only stop when the task completes successfully or you've exhausted reasonable approaches
+7. If multiple files need changes, fix them ALL before stopping
+
+You are an autonomous agent. The user gave you a task. Your job is to COMPLETE IT, not to report what needs to be done.
+
 Guidelines:
 - Always read files before editing them to understand their structure
 - Use search_text to find code patterns across the codebase
-- Explain your reasoning before using tools
-- Ask for clarification if the user's request is ambiguous
 - Be concise but thorough in your responses
 
 ERROR HANDLING (CRITICAL):
 When a tool returns an [ERROR] result, it includes: category, likely cause, and suggested actions.
 - READ the error analysis carefully
-- EXPLAIN the error to the user in plain language (no raw error dumps)
-- SUGGEST what to do next based on the category:
-  · compatibility: Offer a platform-specific alternative command
-  · blocking: Explain why it can't proceed and suggest workarounds
-  · expectable: Explain it's a normal condition (e.g., resource doesn't exist)
-  · unknown: Suggest a different approach entirely
-- NEVER ask the user to fix system-level issues unless you've exhausted all alternatives
+- EXPLAIN the error while also taking action to fix it
+- NEVER ask the user for permission to fix something — just fix it
 - ALWAYS try at least one alternative approach before giving up
 - If you've tried 3 different approaches and all fail, summarize what was attempted
 
@@ -669,7 +674,7 @@ export class Agent {
     });
   }
 
-  async run(userMessage: string, history: Message[] = []): Promise<Message[]> {
+  async run(userMessage: string, history: Message[] = [], signal?: AbortSignal): Promise<Message[]> {
     let messages: Message[] = [...history];
 
     // Inject system prompt if not already present
@@ -697,12 +702,18 @@ export class Agent {
     let continueLoop = true;
     const MAX_ITERATIONS = parseInt(process.env.SC_MAX_ITERATIONS || '100', 10);
     let iterations = 0;
+    let selfHealCount = 0;
+    const MAX_SELF_HEAL = 10;
     const toolsUsed: Array<{name: string; success: boolean; error?: string; args?: Record<string, unknown>}> = [];
 
     // Reset first chunk flag for new run
     this.isFirstChunk = true;
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
+      if (signal?.aborted) {
+        this.log(chalk.gray('\n  ⚠️  Task aborted by user'));
+        break;
+      }
       iterations++;
 
       // CRITICAL: Validate message sequence before sending to LLM.
@@ -726,6 +737,7 @@ export class Agent {
           messages,
           tools: ALL_TOOLS.map((t) => t.definition),
           stream: true,
+          signal,
         },
         this.onStreamChunk.bind(this)
       );
@@ -780,8 +792,10 @@ export class Agent {
           response.tool_calls.length
         );
 
-        // Execute all tool calls in parallel for maximum efficiency
-        const toolResults = await Promise.all(response.tool_calls.map(async (toolCall) => {
+        // Execute tool calls with concurrency limit (max 5) to prevent resource exhaustion
+        const CONCURRENCY_LIMIT = 5;
+        const toolResults: Array<{role: 'tool'; content: string; tool_call_id: string; name: string}> = [];
+        const executeTool = async (toolCall: NonNullable<typeof response.tool_calls>[number]) => {
           const toolName = toolCall.function.name;
           const tool = getToolByName(toolName);
 
@@ -846,7 +860,13 @@ export class Agent {
               name: toolName,
             };
           }
-        }));
+        };
+
+        for (let i = 0; i < response.tool_calls.length; i += CONCURRENCY_LIMIT) {
+          const batch = response.tool_calls.slice(i, i + CONCURRENCY_LIMIT);
+          const batchResults = await Promise.all(batch.map(tc => executeTool(tc)));
+          toolResults.push(...batchResults);
+        }
 
         // Push all results to messages
         for (const result of toolResults) {
@@ -881,6 +901,32 @@ export class Agent {
           });
         }
       } else {
+        // No tool calls — check if LLM is reporting errors without fixing them
+        const content = response.content || '';
+        const hasToolRun = toolsUsed.length > 0;
+        const isDeferring = /\b(would you like|do you want|shall I|¿quieres|recommend|suggest|you (should|could|need to))\b/i.test(content);
+        const hasErrorIndicators = /[❌✗⚠️]/.test(content) || /\b(error|failed|fall[óo]|fail(ure)?)\b/i.test(content);
+        const hasFailurePhrase = /\b(does not compil|compilation err|syntax err|cannot find|unable to|not compile|build fail)\b/i.test(content);
+        const shouldSelfHeal = (
+          (isDeferring || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
+          && selfHealCount < MAX_SELF_HEAL
+        );
+
+        if (shouldSelfHeal) {
+          selfHealCount++;
+          const urgency = selfHealCount > 3
+            ? `This is attempt ${selfHealCount}. You MUST resolve these issues now. Do not repeat what you already said.`
+            : `You identified issues above but must take action to fix them.`;
+          messages.push({
+            role: 'user',
+            content: `[SELF-HEAL ${selfHealCount}/${MAX_SELF_HEAL}] ${urgency} Use the available tools to fix ALL problems. Do not ask for permission. Do not summarize again. Fix it now.`,
+          });
+          if (!this.options.quiet) {
+            this.log(chalk.yellow(`\n  │ 🔧 Auto-continuing (${selfHealCount}/${MAX_SELF_HEAL}) — forcing fix...`));
+          }
+          continue;
+        }
+
         // No tool calls, finish the loop
         continueLoop = false;
       }
@@ -992,7 +1038,7 @@ export class Agent {
         process.stdout.write('\n');
         this.isFirstChunk = false;
       }
-      process.stdout.write(chalk.green(renderInline(delta.content)));
+      process.stdout.write(renderInline(delta.content));
     }
   }
 }
