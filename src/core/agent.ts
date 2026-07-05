@@ -569,7 +569,7 @@ Common use cases:
      wsl gh pr merge 170 --merge --repo owner/repo
      wsl gh pr merge 147 --merge --repo owner/repo`;
 
-function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 1000): Message[] {
+export function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 1000): Message[] {
   let toolMessageCount = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'tool') {
@@ -596,32 +596,50 @@ function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLen
   });
 }
 
-function limitMessageHistory(messages: Message[], maxMessages: number = 25): Message[] {
+export function limitMessageHistory(messages: Message[], maxMessages: number = 25): Message[] {
   if (messages.length <= maxMessages) return messages;
 
   const systemMessage = messages.find((m) => m.role === 'system');
-  const startIndex = messages.length - maxMessages;
+  // Find the original user prompt (first 'user' message in the history)
+  const firstUserIndex = messages.findIndex((m) => m.role === 'user');
+  const firstUserMessage = firstUserIndex !== -1 ? messages[firstUserIndex] : undefined;
+
+  const targetStartIndex = messages.length - maxMessages;
   
-  // Find a safe start index at or before startIndex which is a 'user' message
-  let safeIndex = startIndex;
+  // Find a safe start index at or before targetStartIndex.
+  // We want to slice right before an 'assistant' or 'user' message to avoid orphaning tool results.
+  let safeIndex = targetStartIndex;
   while (safeIndex > 0) {
-    if (messages[safeIndex].role === 'user') {
+    const role = messages[safeIndex].role;
+    if (role === 'assistant' || role === 'user') {
       break;
     }
     safeIndex--;
   }
 
-  // If we couldn't find a user message, we must start from index 1 (or 0 if no system message)
+  // If we scanned all the way to the start, just return the messages
   if (safeIndex <= 0) {
-    safeIndex = systemMessage ? 1 : 0;
+    return messages;
   }
 
   const sliced = messages.slice(safeIndex);
+  const result: Message[] = [];
   
-  if (systemMessage && sliced[0] !== systemMessage) {
-    return [systemMessage, ...sliced];
+  if (systemMessage) {
+    result.push(systemMessage);
   }
-  return sliced;
+  
+  // If the first message in the sliced segment is not a user message, we prepend
+  // the user's original query. This guarantees the conversation starts with a 'user'
+  // role (after the system prompt), which is a strict requirement for some API gateways.
+  if (firstUserMessage && sliced[0].role !== 'user') {
+    if (sliced[0] !== firstUserMessage) {
+      result.push(firstUserMessage);
+    }
+  }
+  
+  result.push(...sliced);
+  return result;
 }
 
 
