@@ -649,6 +649,7 @@ export interface AgentOptions {
   quiet?: boolean;
   callbacks?: AgentCallbacks; // ← NUEVO: Optional callbacks for UI-agnostic events
   clearHistory?: boolean;
+  permissionMode?: 'ask_once' | 'always_ask' | 'unlimited';
 }
 
 export class Agent {

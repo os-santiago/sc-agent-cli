@@ -29,16 +29,44 @@ program
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
   .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
   .option('--clear', 'Clear conversation history for this workspace before starting')
+  .option('-p, --profile <profile>', 'Model profile to use for this session')
+  .option('--permissions <mode>', 'Permissions mode: ask_once, always_ask, or unlimited')
   .action(async (prompt: string | undefined, options) => {
     try {
-      const config = await loadConfig(process.cwd());
+      let config = await loadConfig(process.cwd());
+
+      // If a profile option is provided, override the active profile in config
+      if (options.profile) {
+        if (!config.profiles?.[options.profile]) {
+          console.error(chalk.red(`Error: Profile "${options.profile}" not found`));
+          process.exit(1);
+        }
+        config.activeProfile = options.profile;
+        const profile = config.profiles[options.profile];
+        config.model = {
+          ...config.model,
+          ...profile,
+        };
+      }
+
+      // Permissions mode mapping
+      let permMode: 'ask_once' | 'always_ask' | 'unlimited' | undefined = options.yes ? 'unlimited' : undefined;
+      if (options.permissions) {
+        if (!['ask_once', 'always_ask', 'unlimited'].includes(options.permissions)) {
+          console.error(chalk.red(`Error: Invalid permissions mode. Choose ask_once, always_ask, or unlimited`));
+          process.exit(1);
+        }
+        permMode = options.permissions as 'ask_once' | 'always_ask' | 'unlimited';
+      }
+
       await startChatSession({
         workspaceRoot: process.cwd(),
         config,
-        autoApprove: options.yes,
+        autoApprove: permMode === 'unlimited',
         initialPrompt: prompt,
         quiet: options.quiet,
         clearHistory: options.clear,
+        permissionMode: permMode,
       });
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);

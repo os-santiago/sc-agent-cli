@@ -348,7 +348,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   let historyCheckpoints: Message[][] = [];
   let currentConfig = options.config;
   let inputHistory: string[] = [];
-  let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.autoApprove ? 'unlimited' : 'ask_once';
+  let currentPermissionMode: 'ask_once' | 'always_ask' | 'unlimited' = options.permissionMode || (options.autoApprove ? 'unlimited' : 'ask_once');
     const settings = resolveSettings(currentConfig);
   let hudEnabled = settings.hud;
   let hudFields = settings.hudFields;
@@ -560,6 +560,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     await agent.run(userInput, history);
     if (!isQuiet) {
       console.log(chalk.gray(`${boxFooter()}\n`));
+      console.log(chalk.gray(`  🆔 ${sessionId}\n`));
     }
 
     // Exit after processing
