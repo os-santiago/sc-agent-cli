@@ -877,6 +877,8 @@ export class Agent {
           continueLoop = false;
           continue;
         }
+      } else {
+        emptyResponseCount = 0; // Reset consecutive empty responses counter
       }
 
       // Handle tool calls if any - PARALLEL EXECUTION

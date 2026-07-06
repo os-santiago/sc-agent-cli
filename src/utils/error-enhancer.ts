@@ -196,6 +196,11 @@ function getExpectableSuggestions(toolName: string, errorMsg: string): string[] 
     suggestions.push('Retrieve the full command output directly, or use PowerShell\'s "Select-Object" or Bash\'s "head" instead.');
   }
 
+  if (errorMsg.includes('ls') && errorMsg.includes('not recognized')) {
+    suggestions.push('The "ls" command is not available in this Windows CMD environment.');
+    suggestions.push('Use "dir" (CMD) or "Get-ChildItem" (PowerShell) to list directory contents.');
+  }
+
   if (suggestions.length === 0) {
     suggestions.push('This is an expected error. Try a different approach or retry with adjusted parameters.');
   }
