@@ -986,7 +986,7 @@ export class Agent {
             // Append the nudge/instruction directly to the last tool result content.
             // This maintains the strict API role sequence (user -> assistant -> tool -> assistant)
             // for picky API gateways (e.g. Anthropic, NVIDIA NIM) while still prompting the model for synthesis.
-            result.content += '\n\n[Instruction: Summarize the tool results above for the user in natural language. If there were errors, explain what happened, why, and suggest what to do next. DO NOT call more tools.]';
+            result.content += '\n\n[Instruction: Analyze the tool results above. If the task is not yet complete, proceed with the next steps or tool calls to complete the task. Otherwise, summarize the results for the user in natural language. If there were errors, explain what happened and take action to fix them.]';
           }
           messages.push(result);
         }
