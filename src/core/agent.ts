@@ -787,6 +787,7 @@ export class Agent {
     let iterations = 0;
     let selfHealCount = 0;
     const MAX_SELF_HEAL = 10;
+    let emptyResponseCount = 0;
     const toolsUsed: Array<{name: string; success: boolean; error?: string; args?: Record<string, unknown>}> = [];
 
     // Reset first chunk flag for new run
@@ -839,12 +840,20 @@ export class Agent {
         (!response.tool_calls || response.tool_calls.length === 0);
 
       if (isEmptyResponse) {
-        if (iterations < 3) {
-          // Re-prompt: some models need a nudge to generate text
-          messages.push({
-            role: 'user',
-            content: 'Please provide a helpful text response. Do not call any tools.',
-          });
+        messages.pop(); // Remove empty assistant message to prevent role sequence violations
+        emptyResponseCount++;
+        if (emptyResponseCount < 3) {
+          // Re-prompt: nudge the model to generate text by appending the instruction to the last message
+          const lastMessage = messages[messages.length - 1];
+          if (lastMessage) {
+            lastMessage.content = (lastMessage.content || '') + 
+              '\n\n[It looks like you returned an empty response. Please continue the task and output your response or call the next tools. DO NOT respond with an empty message.]';
+          } else {
+            messages.push({
+              role: 'user',
+              content: 'Please provide a helpful text response. Do not call any tools.',
+            });
+          }
           if (!this.options.quiet) {
             this.log(chalk.gray('\n  │ 🔄 Re-prompting for response...'));
           }
