@@ -181,6 +181,21 @@ function getExpectableSuggestions(toolName: string, errorMsg: string): string[] 
     suggestions.push('Example: gh api ... --jq ".field"  (NOT: --jq \'.field\')');
   }
 
+  if (errorMsg.includes('rebase-merge/head-name') || errorMsg.includes('rebase-merge')) {
+    suggestions.push('The git repository has a corrupted empty rebase state. Delete the directory ".git/rebase-merge" to resolve this.');
+    suggestions.push('Run: Remove-Item -Recurse -Force .git/rebase-merge (PowerShell) or rm -rf .git/rebase-merge (Bash).');
+  }
+
+  if (errorMsg.includes('refusing to fetch into branch') && errorMsg.includes('checked out at')) {
+    suggestions.push('Git refuses to fetch directly into the currently checked-out branch.');
+    suggestions.push('Try running "git fetch origin" to fetch updates globally, then merge or rebase them locally.');
+  }
+
+  if ((errorMsg.includes('select') || errorMsg.includes('head')) && errorMsg.includes('not recognized')) {
+    suggestions.push('The "select" or "head" commands are not available in this shell.');
+    suggestions.push('Retrieve the full command output directly, or use PowerShell\'s "Select-Object" or Bash\'s "head" instead.');
+  }
+
   if (suggestions.length === 0) {
     suggestions.push('This is an expected error. Try a different approach or retry with adjusted parameters.');
   }

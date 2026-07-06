@@ -1021,13 +1021,12 @@ export class Agent {
     const failedTools = toolsUsed.filter(t => !t.success);
     const hadErrors = failedTools.length > 0;
 
-    // Classify blocking errors (task-crippling vs recovarable)
+    // Classify blocking errors (task-crippling vs recoverable)
     const blockingErrors = failedTools.filter(t => {
       const errorMsg = (t.error || '').toLowerCase();
-      // Blocking errors: permission denied, file not found in critical operations, syntax errors
+      // Blocking errors: permission denied, syntax errors, unauthorized access
       const isBlocking =
         errorMsg.includes('permission denied') ||
-        errorMsg.includes('enoent') && t.name !== 'run_shell' || // File not found (except in shell commands)
         errorMsg.includes('syntax error') ||
         errorMsg.includes('cannot read') ||
         errorMsg.includes('access denied');
