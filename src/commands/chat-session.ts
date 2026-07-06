@@ -1,5 +1,9 @@
 import prompts from 'prompts';
 import chalk from 'chalk';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { version: packageVersion } = require('../../package.json') as { version: string };
 import { stdin as input, stdout as output } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
@@ -411,7 +415,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     }
 
     console.log(chalk.cyan(`┌${'─'.repeat(outer)}┐`));
-    const title = `  ⚡ scc  —  SC-Agent CLI`;
+    const title = `  ⚡ scc  —  SC-Agent CLI (v${packageVersion})`;
     console.log(chalk.cyan(`│ ${chalk.bold(title)}${' '.repeat(outer - title.length - 2)} │`));
     console.log(chalk.cyan(`├${'─'.repeat(outer)}┤`));
 
