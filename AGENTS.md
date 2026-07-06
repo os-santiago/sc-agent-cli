@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**SC-Agent CLI** (v0.4.1) is a provider-agnostic AI agent CLI tool that supports any OpenAI-compatible API (OpenAI, Anthropic, Ollama, LM Studio, NVIDIA, Groq, Together, etc.). It provides:
+**SC-Agent CLI** (v0.4.2) is a provider-agnostic AI agent CLI tool that supports any OpenAI-compatible API (OpenAI, Anthropic, Ollama, LM Studio, NVIDIA, Groq, Together, etc.). It provides:
 - **10+ built-in tools** (web fetch, git, file ops, shell, persistent memory)
 - **Parallel tool execution** for maximum performance
 - **Smart permission profiles** (Traditional, Blacklist, Custom)
