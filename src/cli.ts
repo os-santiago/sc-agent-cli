@@ -47,6 +47,20 @@ program
           ...config.model,
           ...profile,
         };
+
+        // Clean placeholder key
+        if (config.model.apiKey?.startsWith('<YOUR_')) {
+          config.model.apiKey = undefined;
+        }
+
+        // Re-apply environment variable overrides
+        const envApiKey = process.env.SC_API_KEY
+          || process.env.OPENAI_API_KEY
+          || process.env.ANTHROPIC_API_KEY
+          || process.env.NVIDIA_API_KEY;
+        if (envApiKey) {
+          config.model.apiKey = envApiKey;
+        }
       }
 
       // Permissions mode mapping
