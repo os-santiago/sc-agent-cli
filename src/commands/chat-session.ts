@@ -8,6 +8,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
@@ -365,9 +366,34 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
   }
   const historyPaths = getHistoryPaths(options.workspaceRoot);
 
+  // Generate session ID: safe workspace path + timestamp (using only alphanumeric and "-")
+  const safeWsPath = options.workspaceRoot.toLowerCase()
+    .replace(/[:/\\]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const timestamp = new Date().toISOString()
+    .replace(/\..+/, '')
+    .replace(/[^0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const sessionId = `${safeWsPath}-${timestamp}`;
+
+  // Helper to persist session trace to the unique instance directory
+  function saveSessionTrace(msgs: Message[]) {
+    try {
+      const sessionDir = join(homedir(), '.sc-agent', 'sessions', sessionId);
+      if (!existsSync(sessionDir)) {
+        mkdirSync(sessionDir, { recursive: true });
+      }
+      writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(msgs, null, 2));
+    } catch {
+      // Silent: logging is best-effort
+    }
+  }
+
   // Load persisted conversation + input history for this workspace
   try {
-    const { readFileSync, existsSync } = await import('node:fs');
     if (existsSync(historyPaths.conv)) {
       const data = readFileSync(historyPaths.conv, 'utf-8');
       history = JSON.parse(data);
@@ -376,6 +402,8 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       const data = readFileSync(historyPaths.input, 'utf-8');
       inputHistory = JSON.parse(data);
     }
+    // Save initial session trace
+    saveSessionTrace(history);
   } catch {
     // Start fresh
   }
@@ -606,6 +634,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     // Handle /clear command
     if (userInput.toLowerCase() === '/clear') {
       history = [];
+      saveSessionTrace(history);
       console.log(chalk.green('\n✓ Conversation history cleared\n'));
       continue;
     }
@@ -620,11 +649,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       history = checkpoint;
       // Persist restored history + input history
       try {
-        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
         const dir = dirname(historyPaths.conv);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        saveSessionTrace(history);
       } catch { /* silent */ }
       console.log(chalk.green(`\n✓ Undone (${historyCheckpoints.length} checkpoint(s) remaining)\n`));
       continue;
@@ -646,11 +675,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       history = history.slice(0, idx);
       // Persist restored history + input history
       try {
-        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
         const dir = dirname(historyPaths.conv);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        saveSessionTrace(history);
       } catch { /* silent */ }
       console.log(chalk.green(`\n✓ Rolled back to message ${idx} (${history.length} messages remaining)\n`));
       continue;
@@ -705,11 +734,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           inputHistory = data.inputHistory || [];
           // Persist imported history
           try {
-            const { writeFileSync, mkdirSync } = await import('node:fs');
             const dir = dirname(historyPaths.conv);
             if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
             writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
             writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+            saveSessionTrace(history);
           } catch { /* silent */ }
           const importedFrom = data.model ? ` (model: ${data.model})` : '';
           console.log(chalk.green(`\n✓ Session imported${importedFrom} — ${history.length} messages restored\n`));
@@ -1466,11 +1495,11 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       history = await agent.run(userInput, history);
       // Persist conversation + input history for cross-session/workspace continuity
       try {
-        const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
         const dir = dirname(historyPaths.conv);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        saveSessionTrace(history);
       } catch {
         // Silent: persistence is optional
       }
@@ -1498,6 +1527,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
           permissions: `${profileIcon}${permIcon}`,
         };
         const parts = hudFields.filter(f => f in fieldParts).map(f => fieldParts[f]);
+        // Append unique session ID to the end of HUD status bar
+        parts.push(chalk.yellow(`🆔 ${sessionId}`));
+
         if (parts.length > 0) {
           console.log(chalk.gray(`  ${parts.join(chalk.dim(' │ '))}\n`));
         }
