@@ -38,8 +38,8 @@ export function resolveSafePath(
       `  Workspace root: ${workspaceRoot}\n` +
       `  Requested path: ${resolved}\n\n` +
       `💡 Tip: I can only access files within the current workspace for security.\n` +
-      `   To work with files in other directories, navigate there first:\n` +
-      `   → Use "cd <directory>" to change workspace`
+      `   For safety, you cannot work with files outside the workspace root during this session.\n` +
+      `   If you must edit or read files from a git branch, checkout the branch directly within the workspace (e.g. using git checkout or git stash).`
     );
   }
 

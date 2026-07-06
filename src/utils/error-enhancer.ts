@@ -133,7 +133,7 @@ function getBlockingSuggestions(toolName: string, errorMsg: string): string[] {
   return suggestions;
 }
 
-function getExpectableSuggestions(toolName: string, errorMsg: string): string[] {
+function getExpectableSuggestions(toolName: string, errorMsg: string, shellInfo?: string): string[] {
   const suggestions: string[] = [];
 
   if (errorMsg.includes('command exited with code')) {
@@ -197,8 +197,12 @@ function getExpectableSuggestions(toolName: string, errorMsg: string): string[] 
   }
 
   if (errorMsg.includes('ls') && errorMsg.includes('not recognized')) {
-    suggestions.push('The "ls" command is not available in this Windows CMD environment.');
-    suggestions.push('Use "dir" (CMD) or "Get-ChildItem" (PowerShell) to list directory contents.');
+    suggestions.push('The "ls" command is not available in this Windows environment.');
+    if (shellInfo === 'cmd') {
+      suggestions.push('Use the CMD-native "dir" command to list directory contents.');
+    } else {
+      suggestions.push('Use "dir" (CMD) or "Get-ChildItem" (PowerShell) to list directory contents.');
+    }
   }
 
   if (errorMsg.includes('Could not resolve to PullRequestReviewThread node') || errorMsg.includes('PRRC_')) {
