@@ -72,7 +72,7 @@ sc
 
 ```bash
 # Set API key
-export NVIDIA_API_KEY="nvapi-your-nvidia-key-here"
+export NVIDIA_API_KEY="nvapi-your-key-here"
 
 # Use NVIDIA profile
 sc profile use nvidia

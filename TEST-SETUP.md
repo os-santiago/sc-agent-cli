@@ -20,7 +20,7 @@ scc --version
 
 ```powershell
 echo $env:NVIDIA_API_KEY
-# Expected: nvapi-your-nvidia-key-here
+# Expected: nvapi-your-key-here
 ```
 
 ✅ Pass if key shows  
@@ -75,7 +75,7 @@ scc --version
 
 ```bash
 echo $NVIDIA_API_KEY
-# Expected: nvapi-your-nvidia-key-here
+# Expected: nvapi-your-key-here
 ```
 
 ✅ Pass if key shows  
@@ -165,12 +165,12 @@ alias scc='node /mnt/d/git/sc-agent-cli/bin/sc.js'
 
 **PowerShell:**
 ```powershell
-$env:NVIDIA_API_KEY = "nvapi-your-nvidia-key-here"
+$env:NVIDIA_API_KEY = "nvapi-your-key-here"
 ```
 
 **WSL:**
 ```bash
-export NVIDIA_API_KEY="nvapi-your-nvidia-key-here"
+export NVIDIA_API_KEY="nvapi-your-key-here"
 ```
 
 ### NVIDIA Profile Not Active
