@@ -648,6 +648,7 @@ export interface AgentOptions {
   initialPrompt?: string;
   quiet?: boolean;
   callbacks?: AgentCallbacks; // ← NUEVO: Optional callbacks for UI-agnostic events
+  clearHistory?: boolean;
 }
 
 export class Agent {

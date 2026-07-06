@@ -28,6 +28,7 @@ program
   .argument('[prompt]', 'Optional prompt for non-interactive mode')
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
   .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
+  .option('--clear', 'Clear conversation history for this workspace before starting')
   .action(async (prompt: string | undefined, options) => {
     try {
       const config = await loadConfig(process.cwd());
@@ -37,6 +38,7 @@ program
         autoApprove: options.yes,
         initialPrompt: prompt,
         quiet: options.quiet,
+        clearHistory: options.clear,
       });
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);

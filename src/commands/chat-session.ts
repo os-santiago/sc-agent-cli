@@ -394,7 +394,12 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
 
   // Load persisted conversation + input history for this workspace
   try {
-    if (existsSync(historyPaths.conv)) {
+    if (options.clearHistory) {
+      if (existsSync(historyPaths.conv)) {
+        writeFileSync(historyPaths.conv, JSON.stringify([], null, 2));
+      }
+      history = [];
+    } else if (existsSync(historyPaths.conv)) {
       const data = readFileSync(historyPaths.conv, 'utf-8');
       history = JSON.parse(data);
     }
