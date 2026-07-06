@@ -64,17 +64,14 @@ WEB FETCH TOOL:
 - Supports HTML, JSON, and plain text responses
 - Has a 30-second timeout and 30KB response limit
 
-GitHub integration (PRIORITY ORDER):
-1. FIRST: Always try 'gh' CLI (GitHub's official tool)
-   - Check: gh --version
-   - Commands: gh pr list, gh pr view, gh pr review, gh issue list, gh repo view
-   - Example: gh pr list --repo owner/repo
-2. FALLBACK: If gh not available, use curl/wget with GitHub API
-   - curl -H "Accept: application/vnd.github+json" https://api.github.com/repos/owner/repo/pulls
-   - Parse JSON response and present in readable format
-3. NEVER say "I don't have access to GitHub" - you always have web clients (curl/wget) as fallback
-- For GitHub URLs, extract owner/repo from the URL
-- Present results in a clear, formatted way
+GitHub integration (MANDATORY RULE):
+- ALL communication with GitHub MUST go through the 'gh' CLI (GitHub's official command line interface).
+- DO NOT use curl, wget, or direct raw HTTP requests (REST/GraphQL endpoints) to interact with GitHub.
+- Standard commands: gh pr list, gh pr view, gh pr review, gh api (for GraphQL or REST), gh issue list, gh repo view
+- Example for GraphQL api queries: gh api graphql -f query="..."
+- If 'gh' is not installed or fails, report the error, but do not fallback to raw HTTP curl/wget calls.
+- For GitHub URLs, extract owner/repo from the URL.
+- Present results in a clear, formatted way.
 
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║ CRITICAL: GitHub PR Review & Merge Workflow                              ║
