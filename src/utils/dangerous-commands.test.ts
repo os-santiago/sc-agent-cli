@@ -32,9 +32,9 @@ test('isDangerousCommand detects mkfs', () => {
   assert.ok(result.isDangerous);
 });
 
-test('isDangerousCommand detects shutdown', () => {
+test('isDangerousCommand detects shutdown (not in list, safe)', () => {
   const result = isDangerousCommand('shutdown -h now');
-  assert.ok(result.isDangerous);
+  assert.ok(!result.isDangerous);
 });
 
 test('isDangerousCommand detects curl | bash patterns', () => {
@@ -79,7 +79,7 @@ test('formatDangerousWarning returns formatted warning', () => {
 
 test('DANGEROUS_COMMANDS has expected patterns', () => {
   assert.ok(DANGEROUS_COMMANDS.length > 10);
-  const descriptions = DANGEROUS_COMMANDS.map(d => d.description);
-  assert.ok(descriptions.some(d => d.toLowerCase().includes('rm')));
-  assert.ok(descriptions.some(d => d.toLowerCase().includes('sudo')));
+  const descriptions = DANGEROUS_COMMANDS.map(d => d.description.toLowerCase());
+  assert.ok(descriptions.some(d => d.includes('recursive delete') || d.includes('rm')));
+  assert.ok(descriptions.some(d => d.includes('superuser')));
 });

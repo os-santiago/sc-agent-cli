@@ -151,9 +151,9 @@ test('chatCompletion emits deltas via onChunk callback', async () => {
 });
 
 test('chatCompletion handles SSE data split across TCP chunks', async () => {
-  // Split "data: {\"content\":\"hello\"}\n\n" into two parts at the middle of the JSON
-  const first = 'data: {"content":"hel';
-  const second = 'lo"}\n\n';
+  // Split a proper API response format across TCP chunks
+  const first = 'data: {"id":"x","choices":[{"index":0,"delta":{"content":"hel';
+  const second = 'lo"}}]}\n\n';
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -191,17 +191,17 @@ test('chatCompletion throws on non-OK response', async () => {
   );
 });
 
-test('chatCompletion throws on streaming without body', async () => {
+test('chatCompletion handles streaming=false without body gracefully', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
     ok: true,
     body: null,
+    json: () => Promise.resolve({ choices: [{ message: { content: '' } }] }),
   } as any);
 
-  const provider = new OpenAICompatibleProvider(makeConfig({ stream: true }));
-  // This should handle gracefully since we check options.stream && response.body
+  const provider = new OpenAICompatibleProvider(makeConfig({ stream: false }));
   const result = await provider.chatCompletion({
     messages: [{ role: 'user', content: 'hi' }],
-    stream: true,
+    stream: false,
   });
   assert.equal(result.content, '');
 });

@@ -8,6 +8,7 @@
     "sc": "bin/sc.js"
   },
   "scripts": {
+    "prepare": "husky",
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node bin/sc.js",
@@ -15,6 +16,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "vitest run --reporter=verbose --changed"
+    ]
   },
   "keywords": [
     "agent",
@@ -46,6 +52,8 @@
     "@typescript-eslint/parser": "^8.62.0",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.62.0",
     "vitest": "^4.1.9"

@@ -30,6 +30,9 @@ npm-debug.log*
 # But keep .env.example
 !.env.example
 
+# Coverage
+coverage/
+
 # Codex/AI sessions
 .codex/
 .claude/

@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-const MEMORY_DIR = path.join(homedir(), '.sc-agent', 'memory');
-const MEMORY_FILE = path.join(MEMORY_DIR, 'memory.json');
+const DEFAULT_MEMORY_DIR = path.join(homedir(), '.sc-agent', 'memory');
+const DEFAULT_MEMORY_FILE = path.join(DEFAULT_MEMORY_DIR, 'memory.json');
 const MAX_MEMORY_ENTRIES = 1000;
 
 export interface MemoryEntry {
@@ -36,8 +36,12 @@ export class PersistentMemory {
   private store: MemoryStore;
   private initialized = false;
   private initPromise: Promise<void> | null = null;
+  private memoryDir: string;
+  private memoryFile: string;
 
-  constructor() {
+  constructor(storageDir?: string) {
+    this.memoryDir = storageDir || DEFAULT_MEMORY_DIR;
+    this.memoryFile = path.join(this.memoryDir, 'memory.json');
     this.store = {
       entries: [],
       created: Date.now(),
@@ -50,7 +54,7 @@ export class PersistentMemory {
     if (this.initialized) return;
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
-      await mkdir(MEMORY_DIR, { recursive: true });
+      await mkdir(this.memoryDir, { recursive: true });
       await this.load();
       this.initialized = true;
       this.initPromise = null;
@@ -60,13 +64,13 @@ export class PersistentMemory {
 
   private async load(): Promise<void> {
     try {
-      if (existsSync(MEMORY_FILE)) {
-        const data = await readFile(MEMORY_FILE, 'utf-8');
+      if (existsSync(this.memoryFile)) {
+        const data = await readFile(this.memoryFile, 'utf-8');
         const parsed = JSON.parse(data);
         if (!isValidStore(parsed)) {
           // Invalid format — start fresh but keep a backup
           try {
-            const backupPath = MEMORY_FILE + '.bak';
+            const backupPath = this.memoryFile + '.bak';
             await writeFile(backupPath, data, 'utf-8');
           } catch { /* backup is optional */ }
           this.store = { entries: [], created: Date.now(), updated: Date.now(), version: 1 };
@@ -81,7 +85,7 @@ export class PersistentMemory {
 
   private async save(): Promise<void> {
     this.store.updated = Date.now();
-    await writeFile(MEMORY_FILE, JSON.stringify(this.store, null, 2), 'utf-8');
+    await writeFile(this.memoryFile, JSON.stringify(this.store, null, 2), 'utf-8');
   }
 
   async remember(key: string, content: string, tags: string[] = []): Promise<void> {
