@@ -29,7 +29,7 @@ program
   .option('-y, --yes', 'Auto-approve all tool executions (use with caution)')
   .option('-q, --quiet', 'Suppress UI decorations (for non-interactive use)')
   .option('--clear', 'Clear conversation history for this workspace before starting')
-  .option('-p, --profile <profile>', 'Model profile to use for this session')
+  .option('-m, --profile <profile>', 'Model profile to use for this session')
   .option('--permissions <mode>', 'Permissions mode: ask_once, always_ask, or unlimited')
   .action(async (prompt: string | undefined, options) => {
     try {
