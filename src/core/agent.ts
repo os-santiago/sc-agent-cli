@@ -11,6 +11,8 @@ import type { ShellInfo } from '../utils/shell-env.js';
 import { renderInline } from '../utils/markdown-renderer.js';
 import { enhanceError, formatEnhancedError } from '../utils/error-enhancer.js';
 import { boxHeader, boxFooter } from '../utils/box-drawing.js';
+import { TokenTracker, estimateMessageTokens } from '../utils/token-tracker.js';
+import { saveCheckpoint } from '../utils/checkpoint.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
@@ -566,6 +568,47 @@ Common use cases:
      wsl gh pr merge 170 --merge --repo owner/repo
      wsl gh pr merge 147 --merge --repo owner/repo`;
 
+export function compressOldMessages(
+  messages: Message[],
+  keepRecentCount: number = 30,
+  maxToolLength: number = 300
+): Message[] {
+  if (messages.length <= keepRecentCount * 2) return messages;
+
+  const systemMsgs = messages.filter(m => m.role === 'system');
+  const nonSystem = messages.filter(m => m.role !== 'system');
+  const keepCount = Math.min(keepRecentCount, Math.floor(nonSystem.length / 2));
+  const recentMessages = nonSystem.slice(-keepCount * 2);
+  const oldMessages = nonSystem.slice(0, nonSystem.length - keepCount * 2);
+
+  const compressed: Message[] = [];
+
+  for (const msg of oldMessages) {
+    if (msg.role === 'tool') {
+      const originalLength = msg.content.length;
+      if (originalLength > maxToolLength) {
+        const start = msg.content.substring(0, maxToolLength);
+        compressed.push({
+          ...msg,
+          content: `${start}\n\n... [Tool output compressed: ${originalLength} chars → ${maxToolLength} chars] ...`,
+        });
+        continue;
+      }
+    }
+    if (msg.role === 'assistant' && !msg.tool_calls && msg.content.length > maxToolLength * 2) {
+      compressed.push({
+        ...msg,
+        content: msg.content.substring(0, maxToolLength * 2) +
+          `\n\n... [Assistant response compressed: ${msg.content.length} chars → ${maxToolLength * 2} chars] ...`,
+      });
+      continue;
+    }
+    compressed.push(msg);
+  }
+
+  return [...systemMsgs, ...compressed, ...recentMessages];
+}
+
 export function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 600): Message[] {
   let toolMessageCount = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -647,9 +690,10 @@ export interface AgentOptions {
   systemPrompt?: string;
   initialPrompt?: string;
   quiet?: boolean;
-  callbacks?: AgentCallbacks; // ← NUEVO: Optional callbacks for UI-agnostic events
+  callbacks?: AgentCallbacks;
   clearHistory?: boolean;
   permissionMode?: 'ask_once' | 'always_ask' | 'unlimited';
+  sessionId?: string;
 }
 
 export class Agent {
@@ -659,7 +703,12 @@ export class Agent {
   private isFirstChunk: boolean = true;
   private _thinkingShown: boolean = false;
   private shellInfo: ShellInfo;
-  private callbacks?: AgentCallbacks; // ← NUEVO: Store callbacks
+  private callbacks?: AgentCallbacks;
+  public tokenTracker: TokenTracker;
+  private _iterations: number = 0;
+  private _toolRunCount: number = 0;
+  private _lastCheckpointIteration: number = 0;
+  private _sessionId: string = '';
 
   constructor(private options: AgentOptions) {
     this.callbacks = options.callbacks;
@@ -671,6 +720,12 @@ export class Agent {
     };
     this.systemPrompt = options.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     this.shellInfo = detectShell();
+    this.tokenTracker = new TokenTracker(options.config.model.model);
+    this._sessionId = options.sessionId || '';
+  }
+
+  getStats(): { iterations: number; toolRunCount: number; sessionId: string } {
+    return { iterations: this._iterations, toolRunCount: this._toolRunCount, sessionId: this._sessionId };
   }
 
   /**
@@ -798,16 +853,33 @@ export class Agent {
         break;
       }
       iterations++;
+      this._iterations = iterations;
 
-      // CRITICAL: Validate, prune, and auto-correct message sequence before sending to LLM.
-      // Pruning old large tool outputs and limiting history keeps the context window and request size within limits.
+      // CRITICAL: Validate, compress, prune, and auto-correct message sequence before sending to LLM.
+      // Compression+pruning keeps the context window and request size within limits for long runs.
       try {
-        messages = pruneMessageHistory(messages);
-        messages = limitMessageHistory(messages, 60);
+        messages = compressOldMessages(messages, 30, 300);
+        messages = pruneMessageHistory(messages, 10, 600);
+        messages = limitMessageHistory(messages, 80);
         messages = autoCorrectMessageSequence(messages);
       } catch (error) {
         console.error(chalk.red('Message sequence validation failed:'), error);
         throw error;
+      }
+
+      // Monitor memory usage every 10 iterations
+      if (iterations % 10 === 0) {
+        const memUsage = process.memoryUsage();
+        const heapMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+        const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+        if (heapMB > heapTotalMB * 0.8) {
+          this.log(chalk.yellow(`\n  ⚠️  High memory usage: ${heapMB}MB/${heapTotalMB}MB. Consider using /checkpoint save and restart.`));
+        }
+      }
+
+      // Estimate input tokens before sending
+      for (const msg of messages) {
+        this.tokenTracker.addInput(estimateMessageTokens(msg));
       }
 
       // Show thinking indicator on first iteration
@@ -825,6 +897,32 @@ export class Agent {
         },
         this.onStreamChunk.bind(this)
       );
+
+      // Track output tokens
+      if (response.content) {
+        this.tokenTracker.addOutput(estimateMessageTokens({ role: 'assistant', content: response.content }));
+      }
+      if (response.tool_calls) {
+        for (const tc of response.tool_calls) {
+          this.tokenTracker.addOutput(estimateMessageTokens({ role: 'assistant', content: tc.function.name + tc.function.arguments }));
+        }
+      }
+
+      // Save checkpoint every 5 iterations for long-running sessions
+      if (this._sessionId && iterations - this._lastCheckpointIteration >= 5) {
+        try {
+          this._lastCheckpointIteration = iterations;
+          const { saveCheckpoint: saveCp } = await import('../utils/checkpoint.js');
+          saveCp({
+            sessionId: this._sessionId,
+            workspaceRoot: this.options.workspaceRoot,
+            history: messages,
+            inputHistory: [],
+            iterations,
+            toolRunCount: this._toolRunCount,
+          });
+        } catch { /* checkpoint is best-effort */ }
+      }
 
       // Add assistant response to history
       const assistantMessage: Message = {
@@ -898,8 +996,9 @@ export class Agent {
 
         // Execute tool calls with concurrency limit (max 5) to prevent resource exhaustion
         const CONCURRENCY_LIMIT = 5;
-        const toolResults: Array<{role: 'tool'; content: string; tool_call_id: string; name: string}> = [];
-        const executeTool = async (toolCall: NonNullable<typeof response.tool_calls>[number]) => {
+    const toolResults: Array<{role: 'tool'; content: string; tool_call_id: string; name: string}> = [];
+    const executeTool = async (toolCall: NonNullable<typeof response.tool_calls>[number]) => {
+      this._toolRunCount++;
           const toolName = toolCall.function.name;
           const tool = getToolByName(toolName);
 
@@ -980,9 +1079,19 @@ export class Agent {
           response.tool_calls.length > 0 &&
           (!response.content || response.content.trim() === '');
 
+        // Auto-compress giant tool results before adding to history to prevent memory saturation
+        const MAX_TOOL_RESULT_CHARS = 10 * 1024;
+        function compressResult(content: string): string {
+          if (content.length <= MAX_TOOL_RESULT_CHARS) return content;
+          const start = content.substring(0, 5000);
+          const end = content.substring(content.length - 3000);
+          return `${start}\n\n[... Tool output compressed: ${content.length} chars → 8000 chars to prevent memory saturation ...]\n\n${end}`;
+        }
+
         // Push all results to messages
         for (let i = 0; i < toolResults.length; i++) {
           const result = toolResults[i];
+          result.content = compressResult(result.content);
           if (i === toolResults.length - 1 && hasToolCallsWithoutContent) {
             // Append the nudge/instruction directly to the last tool result content.
             // This maintains the strict API role sequence (user -> assistant -> tool -> assistant)
@@ -1009,24 +1118,39 @@ export class Agent {
         const content = response.content || '';
         const hasToolRun = toolsUsed.length > 0;
         const isDeferring = /\b(would you like|do you want|shall I|¿quieres|recommend|suggest|you (should|could|need to))\b/i.test(content);
+        const isFutureIntention = this.options.autoApprove && /\b(i will|i'll|i am going to|let's|let me|i need to|i should|i plan to|first, I|first, let|we will|we'll|voy a|comenzaré|primero|debo|tengo que|procederé)\b/i.test(content);
         const hasErrorIndicators = /[❌✗⚠️]/.test(content) || /\b(error|failed|fall[óo]|fail(ure)?)\b/i.test(content);
         const hasFailurePhrase = /\b(does not compil|compilation err|syntax err|cannot find|unable to|not compile|build fail)\b/i.test(content);
         const shouldSelfHeal = (
-          (isDeferring || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
+          (isDeferring || isFutureIntention || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
           && selfHealCount < MAX_SELF_HEAL
         );
 
         if (shouldSelfHeal) {
           selfHealCount++;
+          // Build strategy-aware prompt: track what's been tried
+          const triedTools = [...new Set(toolsUsed.filter(t => !t.success).map(t => t.name))].join(', ');
+          const errorSummary = toolsUsed.filter(t => !t.success).slice(-5)
+            .map(t => `  - ${t.name}: ${(t.error || '').substring(0, 100)}`)
+            .join('\n');
           let urgency = selfHealCount > 3
             ? `This is attempt ${selfHealCount}. You MUST resolve these issues now. Do not repeat what you already said.`
             : `You identified issues above but must take action to fix them.`;
+          if (triedTools) {
+            urgency += `\nTools that have failed: ${triedTools}.\nRecent errors:\n${errorSummary}\nTry a DIFFERENT approach — don't repeat the same failing operations.`;
+          }
           if (this.options.autoApprove) {
-            urgency += ` You are in non-interactive auto-approve mode, so you have full permission. Execute the tools to apply your proposal immediately.`;
+            if (isFutureIntention) {
+              urgency = `You described a plan or future intention, but you did not execute any tools in this iteration. You are in non-interactive auto-approve mode, so you have full permission. You MUST NOT just describe your plan. Execute the tools immediately to proceed with your plan.`;
+            } else if (isDeferring) {
+              urgency = `You proposed or suggested an action, but you did not execute any tools in this iteration. You are in non-interactive auto-approve mode, so you have full permission. Execute the tools immediately to apply your proposal.`;
+            } else {
+              urgency += ` You are in non-interactive auto-approve mode, so you have full permission. Execute the tools to apply your proposal immediately.`;
+            }
           }
           messages.push({
             role: 'user',
-            content: `[SELF-HEAL ${selfHealCount}/${MAX_SELF_HEAL}] ${urgency} Use the available tools to fix ALL problems. Do not ask for permission. Do not summarize again. Fix it now.`,
+            content: `[SELF-HEAL ${selfHealCount}/${MAX_SELF_HEAL} — iteration ${iterations}] ${urgency} Use the available tools to fix ALL problems. Do not ask for permission. Do not summarize again. Fix it now.`,
           });
           if (!this.options.quiet) {
             this.log(chalk.yellow(`\n  │ 🔧 Auto-continuing (${selfHealCount}/${MAX_SELF_HEAL}) — forcing fix...`));

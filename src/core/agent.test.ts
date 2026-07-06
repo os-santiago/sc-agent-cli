@@ -1,6 +1,6 @@
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { pruneMessageHistory, limitMessageHistory } from './agent.js';
+import { pruneMessageHistory, limitMessageHistory, Agent } from './agent.js';
 import type { Message } from './types.js';
 
 test('pruneMessageHistory keeps recent tool messages fully intact and truncates old ones', () => {
@@ -68,4 +68,36 @@ test('limitMessageHistory slices safely when targetStartIndex lands on a tool re
   assert.equal(limited[0].role, 'system');
   assert.equal(limited[1].content, 'original prompt');
   assert.equal(limited[2].content, 'thought 1');
+});
+
+test('Agent.run self-heals when model outputs future intention in autoApprove mode without tool calls', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mockChatCompletion = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async (params) => {
+    callCount++;
+    if (callCount === 1) {
+      return { content: 'I will list the files in this directory first.' };
+    }
+    return { content: 'Task completed!' };
+  });
+
+  const result = await agent.run('Hello');
+
+  assert.equal(callCount, 2);
+  const hasSelfHeal = result.some(m => m.role === 'user' && m.content.includes('SELF-HEAL'));
+  assert.ok(hasSelfHeal, 'Should have injected SELF-HEAL nudge');
+
+  mockChatCompletion.mockRestore();
 });
