@@ -17,10 +17,17 @@ export async function listProfiles(): Promise<void> {
   console.log();
 }
 
-export async function addProfile(name?: string): Promise<void> {
+export async function addProfile(
+  name?: string,
+  options?: { apiUrl?: string; model?: string; apiKey?: string }
+): Promise<void> {
   const config = await loadConfig();
 
   if (!name) {
+    if (options?.model || options?.apiUrl || options?.apiKey) {
+      console.log(chalk.red('Profile name is required when specifying non-interactive options'));
+      return;
+    }
     const response = await prompts({
       type: 'text',
       name: 'name',
@@ -34,33 +41,53 @@ export async function addProfile(name?: string): Promise<void> {
     return;
   }
 
-  const response = await prompts([
-    {
-      type: 'text',
-      name: 'baseUrl',
-      message: 'Base URL:',
-      initial: 'http://localhost:11434/v1',
-    },
-    {
-      type: 'text',
-      name: 'model',
-      message: 'Model name:',
-      initial: 'llama3.2',
-    },
-    {
-      type: 'text',
-      name: 'apiKey',
-      message: 'API Key (leave empty for local models):',
-    },
-  ]);
+  let baseUrl = options?.apiUrl;
+  let model = options?.model;
+  let apiKey = options?.apiKey;
+
+  const isNonInteractive = !!(options?.apiUrl || options?.model || options?.apiKey);
+
+  if (isNonInteractive) {
+    if (!model) {
+      console.log(chalk.yellow('⚠ No model specified, defaulting to "llama3.2"'));
+      model = 'llama3.2';
+    }
+    if (!baseUrl) {
+      console.log(chalk.yellow('⚠ No api-url specified, defaulting to "http://localhost:11434/v1"'));
+      baseUrl = 'http://localhost:11434/v1';
+    }
+  } else {
+    const response = await prompts([
+      {
+        type: 'text',
+        name: 'baseUrl',
+        message: 'Base URL:',
+        initial: 'http://localhost:11434/v1',
+      },
+      {
+        type: 'text',
+        name: 'model',
+        message: 'Model name:',
+        initial: 'llama3.2',
+      },
+      {
+        type: 'text',
+        name: 'apiKey',
+        message: 'API Key (leave empty for local models):',
+      },
+    ]);
+    baseUrl = response.baseUrl;
+    model = response.model;
+    apiKey = response.apiKey;
+  }
 
   const profile: Partial<ModelConfig> = {
-    baseUrl: response.baseUrl,
-    model: response.model,
+    baseUrl,
+    model,
   };
 
-  if (response.apiKey) {
-    profile.apiKey = response.apiKey;
+  if (apiKey) {
+    profile.apiKey = apiKey;
   }
 
   config.profiles = config.profiles || {};

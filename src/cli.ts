@@ -56,6 +56,9 @@ profileCommand
 profileCommand
   .command('add [name]')
   .description('Add a new profile')
+  .option('--api-url <url>', 'Base API URL for the provider')
+  .option('--model <model>', 'Model identifier')
+  .option('--api-key <key>', 'API key for the provider')
   .action(addProfile);
 
 profileCommand
