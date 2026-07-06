@@ -593,7 +593,7 @@ export function pruneMessageHistory(messages: Message[], keepCount: number = 10,
   });
 }
 
-export function limitMessageHistory(messages: Message[], maxMessages: number = 25): Message[] {
+export function limitMessageHistory(messages: Message[], maxMessages: number = 100): Message[] {
   if (messages.length <= maxMessages) return messages;
 
   const systemMessage = messages.find((m) => m.role === 'system');
@@ -801,7 +801,7 @@ export class Agent {
       // Pruning old large tool outputs and limiting history keeps the context window and request size within limits.
       try {
         messages = pruneMessageHistory(messages);
-        messages = limitMessageHistory(messages);
+        messages = limitMessageHistory(messages, 100);
         messages = autoCorrectMessageSequence(messages);
       } catch (error) {
         console.error(chalk.red('Message sequence validation failed:'), error);
