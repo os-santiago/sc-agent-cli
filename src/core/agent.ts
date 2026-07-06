@@ -1045,12 +1045,12 @@ export class Agent {
     // Classify blocking errors (task-crippling vs recoverable)
     const blockingErrors = failedTools.filter(t => {
       const errorMsg = (t.error || '').toLowerCase();
-      // Blocking errors: permission denied, syntax errors, unauthorized access
+      // Blocking errors: permission denied, syntax errors, unauthorized access in core file tools
       const isBlocking =
-        errorMsg.includes('permission denied') ||
+        (errorMsg.includes('permission denied') && t.name !== 'run_shell') ||
         errorMsg.includes('syntax error') ||
-        errorMsg.includes('cannot read') ||
-        errorMsg.includes('access denied');
+        (errorMsg.includes('cannot read') && t.name !== 'run_shell') ||
+        (errorMsg.includes('access denied') && t.name !== 'run_shell');
       return isBlocking;
     });
 
@@ -1070,7 +1070,9 @@ export class Agent {
       if (t.args && typeof t.args === 'object') {
         const args = t.args as Record<string, unknown>;
         if (t.name === 'run_shell' && typeof args.command === 'string') {
-          const cmd = args.command.toLowerCase().trim();
+          let cmd = args.command.toLowerCase().trim();
+          // Strip leading cd commands to avoid clustering all commands under 'cd'
+          cmd = cmd.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s&;]+)\s*(?:&&|;|;)\s*/i, '');
           const baseCmd = cmd.split(/[\s|]/)[0];
           commandKey = `${t.name}:${baseCmd}`;
         } else {
