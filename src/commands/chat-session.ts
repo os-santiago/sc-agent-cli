@@ -204,6 +204,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
 
     input.setRawMode(true);
+    input.resume();
     emitKeypressEvents(input);
 
     // Safety net: if anything throws while in raw mode, restore it
