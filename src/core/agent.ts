@@ -88,7 +88,7 @@ A proper PR review has 5 MANDATORY steps:
 Get complete PR information:
   gh pr view <number> --repo owner/repo --json \
     title,body,state,mergeable,mergeStateStatus,statusCheckRollup,\
-    reviews,reviewDecision,files,commits,author
+    reviews,reviewDecision,files,commits,author,headRefName,baseRefName
 
 Check EACH of these:
   ❌ STOP if state != "OPEN" (already merged/closed)
@@ -566,7 +566,7 @@ Common use cases:
      wsl gh pr merge 170 --merge --repo owner/repo
      wsl gh pr merge 147 --merge --repo owner/repo`;
 
-export function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 1000): Message[] {
+export function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 600): Message[] {
   let toolMessageCount = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'tool') {
@@ -593,7 +593,7 @@ export function pruneMessageHistory(messages: Message[], keepCount: number = 10,
   });
 }
 
-export function limitMessageHistory(messages: Message[], maxMessages: number = 100): Message[] {
+export function limitMessageHistory(messages: Message[], maxMessages: number = 60): Message[] {
   if (messages.length <= maxMessages) return messages;
 
   const systemMessage = messages.find((m) => m.role === 'system');
@@ -801,7 +801,7 @@ export class Agent {
       // Pruning old large tool outputs and limiting history keeps the context window and request size within limits.
       try {
         messages = pruneMessageHistory(messages);
-        messages = limitMessageHistory(messages, 100);
+        messages = limitMessageHistory(messages, 60);
         messages = autoCorrectMessageSequence(messages);
       } catch (error) {
         console.error(chalk.red('Message sequence validation failed:'), error);
