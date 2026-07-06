@@ -201,6 +201,16 @@ function getExpectableSuggestions(toolName: string, errorMsg: string): string[] 
     suggestions.push('Use "dir" (CMD) or "Get-ChildItem" (PowerShell) to list directory contents.');
   }
 
+  if (errorMsg.includes('Could not resolve to PullRequestReviewThread node') || errorMsg.includes('PRRC_')) {
+    suggestions.push('To resolve a review thread in GitHub, you must use the thread ID (starts with "PRRT_") instead of the comment ID (starts with "PRRC_").');
+    suggestions.push('Run a GraphQL query to retrieve the reviewThreads and their IDs for the PR, then call resolveReviewThread with the "PRRT_" ID.');
+  }
+
+  if (errorMsg.includes('resolved is not a permitted key') || errorMsg.includes('Update a review comment for a pull request')) {
+    suggestions.push('The GitHub REST API does not support resolving threads directly via PATCH /pulls/comments.');
+    suggestions.push('You must use the GitHub GraphQL API mutation "resolveReviewThread" with the thread ID (starts with "PRRT_").');
+  }
+
   if (suggestions.length === 0) {
     suggestions.push('This is an expected error. Try a different approach or retry with adjusted parameters.');
   }
