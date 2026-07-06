@@ -765,6 +765,15 @@ export class Agent {
       const contextParts = [this.systemPrompt, shellContext, shellPromptGuide];
       if (projectContext) contextParts.push(`\n# Project Context\n${projectContext}`);
       if (memoryContext) contextParts.push(memoryContext);
+      if (this.options.autoApprove) {
+        contextParts.push(`
+# Non-Interactive Mode (Auto-Approve Active)
+- **YOU HAVE UNLIMITED PERMISSION**: The user has run the tool with auto-approval enabled (-y / -yq).
+- **DO NOT ASK FOR PERMISSION**: Do not ask the user "Would you like me to...", "Should I...", "Do you want me to...", or wait for instructions.
+- **TAKE ACTION IMMEDIATELY**: Modify files, run shell commands, write patches, push commits, and complete the tasks autonomously.
+- **DO NOT PROPOSE AND STOP**: If you know how to fix it, do it right now using the tools.
+`);
+      }
 
       const fullSystemPrompt = contextParts.join('\n');
       messages.unshift({ role: 'system', content: fullSystemPrompt });
@@ -999,9 +1008,12 @@ export class Agent {
 
         if (shouldSelfHeal) {
           selfHealCount++;
-          const urgency = selfHealCount > 3
+          let urgency = selfHealCount > 3
             ? `This is attempt ${selfHealCount}. You MUST resolve these issues now. Do not repeat what you already said.`
             : `You identified issues above but must take action to fix them.`;
+          if (this.options.autoApprove) {
+            urgency += ` You are in non-interactive auto-approve mode, so you have full permission. Execute the tools to apply your proposal immediately.`;
+          }
           messages.push({
             role: 'user',
             content: `[SELF-HEAL ${selfHealCount}/${MAX_SELF_HEAL}] ${urgency} Use the available tools to fix ALL problems. Do not ask for permission. Do not summarize again. Fix it now.`,
