@@ -39,42 +39,65 @@ export const webFetchTool: Tool = {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const MAX_REDIRECTS = 10;
 
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'sc-agent-cli/1.0',
-          'Accept': 'text/html,application/json,text/plain,*/*',
-        },
-      });
+      let currentUrl = url;
+      let redirectCount = 0;
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      while (redirectCount <= MAX_REDIRECTS) {
+        const response = await fetch(currentUrl, {
+          signal: controller.signal,
+          redirect: 'manual',
+          headers: {
+            'User-Agent': 'sc-agent-cli/1.0',
+            'Accept': 'text/html,application/json,text/plain,*/*',
+          },
+        });
 
-      const contentType = response.headers.get('content-type') || '';
-      const text = await response.text();
-
-      if (contentType.includes('application/json')) {
-        try {
-          const parsed = JSON.parse(text);
-          return JSON.stringify(parsed, null, 2);
-        } catch {
-          return text;
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location');
+          if (!location) {
+            throw new Error(`Redirect ${response.status} with no Location header`);
+          }
+          redirectCount++;
+          currentUrl = new URL(location, currentUrl).href;
+          continue;
         }
+
+        if (redirectCount > MAX_REDIRECTS) {
+          throw new Error(`Exceeded maximum redirects (${MAX_REDIRECTS})`);
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        const text = await response.text();
+
+        if (contentType.includes('application/json')) {
+          try {
+            const parsed = JSON.parse(text);
+            return JSON.stringify(parsed, null, 2);
+          } catch {
+            return text;
+          }
+        }
+
+        if (contentType.includes('text/html')) {
+          const cleaned = htmlToText(text);
+          return cleaned.length > 30000
+            ? cleaned.substring(0, 30000) + '\n\n[Truncated at 30000 characters]'
+            : cleaned;
+        }
+
+        return text.length > 30000
+          ? text.substring(0, 30000) + '\n\n[Truncated at 30000 characters]'
+          : text;
       }
 
-      if (contentType.includes('text/html')) {
-        const cleaned = htmlToText(text);
-        return cleaned.length > 30000
-          ? cleaned.substring(0, 30000) + '\n\n[Truncated at 30000 characters]'
-          : cleaned;
-      }
-
-      return text.length > 30000
-        ? text.substring(0, 30000) + '\n\n[Truncated at 30000 characters]'
-        : text;
+      throw new Error(`Exceeded maximum redirects (${MAX_REDIRECTS})`);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new Error(`Request timed out after ${timeout}ms`, { cause: err });

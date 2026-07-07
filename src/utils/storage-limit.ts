@@ -85,8 +85,13 @@ export function cleanupOldestFiles(dirPath: string, targetSizeBytes: number): nu
 
   // Get all files with timestamps
   const files: Array<{ path: string; mtime: Date; size: number }> = [];
+  const MAX_COLLECT_DEPTH = 20;
 
-  function collectFiles(currentPath: string) {
+  function collectFiles(currentPath: string, depth = 0) {
+    if (depth > MAX_COLLECT_DEPTH) {
+      console.warn(chalk.yellow(`⚠️  Directory depth limit (${MAX_COLLECT_DEPTH}) exceeded at: ${currentPath}`));
+      return;
+    }
     try {
       const items = readdirSync(currentPath, { withFileTypes: true });
 
@@ -94,7 +99,7 @@ export function cleanupOldestFiles(dirPath: string, targetSizeBytes: number): nu
         const itemPath = join(currentPath, item.name);
 
         if (item.isDirectory()) {
-          collectFiles(itemPath);
+          collectFiles(itemPath, depth + 1);
         } else if (item.isFile()) {
           const stats = statSync(itemPath);
           files.push({
@@ -126,8 +131,9 @@ export function cleanupOldestFiles(dirPath: string, targetSizeBytes: number): nu
     try {
       unlinkSync(file.path);
       deletedSize += file.size;
-    } catch {
-      // Ignore errors
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(chalk.yellow(`⚠️  Could not delete ${file.path}: ${msg}`));
     }
   }
 

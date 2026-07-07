@@ -117,6 +117,13 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
     config.model.model = envModel;
   }
 
+  // Override policy file from environment variable
+  const envPolicyFile = process.env.SC_POLICY_FILE;
+  if (envPolicyFile) {
+    if (!config.settings) config.settings = {};
+    config.settings.policyFile = envPolicyFile;
+  }
+
   // Validate required fields
   validateConfig(config);
 
@@ -126,6 +133,12 @@ export async function loadConfig(projectRoot?: string): Promise<ProjectConfig> {
 export function validateConfig(config: ProjectConfig): void {
   if (!config.model.baseUrl) {
     throw new Error('Missing model.baseUrl in config');
+  }
+
+  try {
+    new URL(config.model.baseUrl);
+  } catch {
+    throw new Error(`Invalid model.baseUrl: "${config.model.baseUrl}" is not a valid URL`);
   }
 
   if (!config.model.model) {
@@ -176,7 +189,12 @@ export async function initConfig(force = false): Promise<void> {
   await saveConfig(DEFAULT_CONFIG, true);
 }
 
-function deepMerge<T extends object>(base: T, override: Partial<T>): T {
+function deepMerge<T extends object>(base: T, override: Partial<T>, visited?: WeakSet<object>): T {
+  if (visited?.has(override)) {
+    throw new Error('Circular reference detected in config merge');
+  }
+  const seen = visited || new WeakSet<object>();
+  seen.add(override);
   const result = { ...base };
   for (const key in override) {
     const val = override[key];
@@ -184,7 +202,8 @@ function deepMerge<T extends object>(base: T, override: Partial<T>): T {
       if (typeof val === 'object' && !Array.isArray(val) && val !== null) {
         result[key] = deepMerge(
           (result[key] as Record<string, unknown>) || {},
-          val as Record<string, unknown>
+          val as Record<string, unknown>,
+          seen
         ) as T[Extract<keyof T, string>];
       } else {
         result[key] = val as T[Extract<keyof T, string>];

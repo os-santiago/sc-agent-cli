@@ -80,7 +80,17 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
   }
 
   // Ask user with helpful context (redact sensitive fields)
-  const SENSITIVE_KEYS = new Set(['apiKey', 'api_key', 'password', 'token', 'secret', 'auth', 'key']);
+  const SENSITIVE_KEYS = new Set([
+    'apiKey', 'api_key', 'api-key',
+    'password', 'passwd', 'pass',
+    'token', 'accessToken', 'access_token', 'refreshToken', 'refresh_token',
+    'secret', 'secretKey', 'secret_key', 'clientSecret', 'client_secret',
+    'auth', 'authorization', 'authToken', 'auth_token',
+    'key', 'privateKey', 'private_key', 'publicKey', 'public_key',
+    'credential', 'credentials',
+    'jwt', 'jwt_token', 'sessionKey', 'session_key',
+    'sshKey', 'ssh_key', 'sshPrivateKey',
+  ]);
   const redactedArgs: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(ctx.args)) {
     redactedArgs[k] = SENSITIVE_KEYS.has(k) ? '***' : v;

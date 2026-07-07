@@ -51,7 +51,18 @@ export const editFileTool: Tool = {
     const patched = applyPatch(content, patch);
 
     if (patched === false) {
-      throw new Error('Failed to apply patch (does not match file content)');
+      // Try to determine if the patch format itself is invalid vs content mismatch
+      const hasValidHeaders = /^@@\s+-\d+,\d+\s+\+\d+,\d+\s+@@/m.test(patch);
+      if (!hasValidHeaders) {
+        throw new Error(`Failed to apply patch: invalid unified diff format. Expected @@ -line,col +line,col @@ headers`);
+      }
+      // Extract a snippet from the patch to show what was being matched
+      const contextLines = patch.split('\n').slice(0, 10).join('\n');
+      throw new Error(
+        `Patch does not match file content in ${filePath}. ` +
+        `The file may have been modified since the patch was generated. ` +
+        `First lines of patch:\n${contextLines}`
+      );
     }
 
     await writeFile(safePath, patched, 'utf-8');
