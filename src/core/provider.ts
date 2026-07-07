@@ -7,6 +7,8 @@ import type {
   ToolCall,
 } from './types.js';
 import { verboseApiRequest, verboseApiResponse, verbose } from '../utils/verbose-logger.js';
+import type { ThrottleConfig } from './types.js';
+import { sleep } from '../utils/throttle.js';
 
 export interface ChatCompletionOptions {
   messages: Message[];
@@ -26,7 +28,26 @@ const MAX_RETRIES = 2;
 const CONNECTION_TIMEOUT = 60000; // 60s default
 
 export class OpenAICompatibleProvider {
+  private throttleConfig: ThrottleConfig = {
+    enabled: false, minDelayMs: 0, afterEmptyResponse: 0, afterError: 0, maxDelayMs: 30000, mode: 'fixed',
+  };
+  private lastApiCallTime = 0;
+  private consecutiveEmpty = 0;
+  private lastCallWasError = false;
+
   constructor(private config: ModelConfig) {}
+
+  setThrottleConfig(config: ThrottleConfig): void {
+    this.throttleConfig = config;
+  }
+
+  setConsecutiveEmpty(count: number): void {
+    this.consecutiveEmpty = count;
+  }
+
+  setLastCallWasError(err: boolean): void {
+    this.lastCallWasError = err;
+  }
 
   async chatCompletion(
     options: ChatCompletionOptions,
@@ -84,6 +105,23 @@ export class OpenAICompatibleProvider {
           options.signal.addEventListener('abort', onAbort, { once: true });
         }
 
+        // Apply throttling delay before API call
+        if (this.throttleConfig.enabled) {
+          const elapsed = Date.now() - this.lastApiCallTime;
+          let delay = this.throttleConfig.minDelayMs - elapsed;
+          if (delay < 0) delay = 0;
+          if (this.consecutiveEmpty > 0) {
+            delay = Math.max(delay, this.throttleConfig.afterEmptyResponse);
+          }
+          if (this.lastCallWasError) {
+            delay = Math.max(delay, this.throttleConfig.afterError);
+          }
+          if (delay > 0) {
+            verbose(`Throttling: waiting ${delay}ms before API call (minDelay: ${this.throttleConfig.minDelayMs}ms, consecutiveEmpty: ${this.consecutiveEmpty})`, 1);
+            await sleep(delay);
+          }
+        }
+
         verboseApiRequest(url, body);
 
         const requestStart = Date.now();
@@ -94,6 +132,7 @@ export class OpenAICompatibleProvider {
           signal: abortController.signal,
         });
         const responseDuration = Date.now() - requestStart;
+        this.lastApiCallTime = Date.now();
 
         clearTimeout(timeoutTimer);
         if (onAbort && options.signal) options.signal.removeEventListener('abort', onAbort);

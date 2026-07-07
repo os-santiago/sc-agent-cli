@@ -14,6 +14,7 @@ import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 import { TokenTracker, estimateMessageTokens } from '../utils/token-tracker.js';
 import { saveCheckpoint } from '../utils/checkpoint.js';
 import { verbose, verboseApiRequest, verboseApiResponse, verboseToolCall, verboseSession, verboseError } from '../utils/verbose-logger.js';
+import { resolveThrottleConfig } from '../utils/throttle.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
@@ -714,6 +715,12 @@ export class Agent {
   constructor(private options: AgentOptions) {
     this.callbacks = options.callbacks;
     this.provider = new OpenAICompatibleProvider(options.config.model);
+    const throttle = resolveThrottleConfig(
+      options.config.settings?.throttling,
+      options.config.model.model,
+      options.config.model.baseUrl
+    );
+    this.provider.setThrottleConfig(throttle);
     this.toolContext = {
       workspaceRoot: options.workspaceRoot,
       config: options.config,
@@ -964,6 +971,7 @@ export class Agent {
         }
         messages.pop(); // Remove empty assistant message to prevent role sequence violations
         emptyResponseCount++;
+        this.provider.setConsecutiveEmpty(emptyResponseCount);
         if (emptyResponseCount < 3) {
           // Push a NEW user message for re-prompting — never modify existing messages
           messages.push({
@@ -989,6 +997,8 @@ export class Agent {
         }
       } else {
         emptyResponseCount = 0; // Reset consecutive empty responses counter
+        this.provider.setConsecutiveEmpty(0);
+        this.provider.setLastCallWasError(false);
       }
 
       // Handle tool calls if any - PARALLEL EXECUTION

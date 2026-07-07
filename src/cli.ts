@@ -34,6 +34,7 @@ program
   .option('--permissions <mode>', 'Permissions mode: ask_once, always_ask, or unlimited')
   .option('-v, --verbose', 'Verbose debug logging (use -v, -vv, -vvv for level)')
   .option('--max-tokens <tokens>', 'Max response tokens (number or "unlimited"). Overrides config.')
+  .option('--throttle <delay>', 'Enable throttling with min delay in ms (e.g. --throttle 2000) or "auto"')
   .action(async (prompt: string | undefined, options) => {
     try {
       // Count -v flags from raw argv
@@ -88,6 +89,28 @@ program
             process.exit(1);
           }
           config.model.maxTokens = parsed;
+        }
+      }
+
+      // Apply --throttle override
+      if (options.throttle !== undefined) {
+        if (!config.settings) config.settings = {};
+        if (!config.settings.throttling) {
+          config.settings.throttling = { enabled: true, minDelayMs: 1000, afterEmptyResponse: 3000, afterError: 8000, maxDelayMs: 30000, mode: 'exponential' };
+        }
+        const val = options.throttle.toLowerCase();
+        if (val === 'auto') {
+          config.settings.throttling.enabled = true;
+          config.settings.throttling.mode = 'auto';
+        } else {
+          const parsed = parseInt(val, 10);
+          if (isNaN(parsed) || parsed < 0) {
+            console.error(chalk.red('Error: --throttle must be a positive number (ms) or "auto"'));
+            process.exit(1);
+          }
+          config.settings.throttling.enabled = true;
+          config.settings.throttling.minDelayMs = parsed;
+          config.settings.throttling.mode = 'fixed';
         }
       }
 
