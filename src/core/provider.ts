@@ -115,7 +115,7 @@ export class OpenAICompatibleProvider {
           );
           if (delay > 0) {
             verbose(`Throttling: waiting ${delay}ms before API call (minDelay: ${this.throttleConfig.minDelayMs}ms, consecutiveEmpty: ${this.consecutiveEmpty}, lastError: ${this.lastCallWasError})`, 1);
-            await sleep(delay);
+            await sleep(delay, options.signal);
           }
         }
 

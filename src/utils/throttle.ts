@@ -1,7 +1,20 @@
 import type { ThrottleConfig } from '../core/types.js';
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || new Error('Aborted'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal.reason || new Error('Aborted'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
 }
 
 const PROVIDER_THROTTLE_DEFAULTS: Record<string, Partial<ThrottleConfig>> = {
