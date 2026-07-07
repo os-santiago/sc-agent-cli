@@ -44,11 +44,29 @@ export function resolveThrottleConfig(
   const providerDefaults = PROVIDER_THROTTLE_DEFAULTS[provider] || {};
 
   if (config?.enabled === true) {
+    // Separate user-explicit fields from auto-populated ones
+    const userFields: Record<string, unknown> = {};
+    if (config.minDelayMs !== undefined) userFields.minDelayMs = config.minDelayMs;
+    if (config.afterEmptyResponse !== undefined) userFields.afterEmptyResponse = config.afterEmptyResponse;
+    if (config.afterError !== undefined) userFields.afterError = config.afterError;
+    if (config.maxDelayMs !== undefined) userFields.maxDelayMs = config.maxDelayMs;
+
+    if (config.mode === 'auto') {
+      // In auto mode, only override provider defaults with what user explicitly set
+      return {
+        ...DEFAULT_THROTTLE,
+        ...providerDefaults,
+        ...userFields,
+        enabled: true,
+        mode: 'exponential',
+      } as ThrottleConfig;
+    }
+
     return {
       ...DEFAULT_THROTTLE,
       ...providerDefaults,
       ...config,
-    };
+    } as ThrottleConfig;
   }
 
   return { ...DEFAULT_THROTTLE, enabled: false };

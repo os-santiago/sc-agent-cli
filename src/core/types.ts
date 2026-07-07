@@ -68,7 +68,7 @@ export interface ProjectConfig {
     maxReadFileBytes?: number; // Max bytes for read_file (default: 1MB)
     maxWriteFileBytes?: number; // Max bytes for write_file (default: 10MB)
     policyFile?: string; // Path to an external policy/doctrine file (e.g. ADEV.md) to inject as system context
-    throttling?: ThrottleConfig;
+    throttling?: Partial<ThrottleConfig>;
   };
 }
 

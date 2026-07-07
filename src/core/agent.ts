@@ -860,6 +860,8 @@ export class Agent {
 
     // Reset first chunk flag for new run
     this.isFirstChunk = true;
+    this.provider.setConsecutiveEmpty(0);
+    this.provider.setLastCallWasError(false);
 
     // Warn if the combined prompt (system + context + user) is very large
     const estimatedPromptTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
@@ -914,15 +916,22 @@ export class Agent {
         this._thinkingShown = true;
       }
 
-      const response = await this.provider.chatCompletion(
-        {
-          messages,
-          tools: ALL_TOOLS.map((t) => t.definition),
-          stream: true,
-          signal,
-        },
-        this.onStreamChunk.bind(this)
-      );
+      let response: Awaited<ReturnType<typeof this.provider.chatCompletion>>;
+      try {
+        response = await this.provider.chatCompletion(
+          {
+            messages,
+            tools: ALL_TOOLS.map((t) => t.definition),
+            stream: true,
+            signal,
+          },
+          this.onStreamChunk.bind(this)
+        );
+        this.provider.setLastCallWasError(false);
+      } catch (err) {
+        this.provider.setLastCallWasError(true);
+        throw err;
+      }
 
       // Track output tokens
       if (response.content) {

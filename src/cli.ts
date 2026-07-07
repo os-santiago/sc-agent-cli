@@ -95,22 +95,20 @@ program
       // Apply --throttle override
       if (options.throttle !== undefined) {
         if (!config.settings) config.settings = {};
-        if (!config.settings.throttling) {
-          config.settings.throttling = { enabled: true, minDelayMs: 1000, afterEmptyResponse: 3000, afterError: 8000, maxDelayMs: 30000, mode: 'exponential' };
-        }
         const val = options.throttle.toLowerCase();
         if (val === 'auto') {
-          config.settings.throttling.enabled = true;
-          config.settings.throttling.mode = 'auto';
+          config.settings.throttling = { enabled: true, mode: 'auto' };
         } else {
-          const parsed = parseInt(val, 10);
-          if (isNaN(parsed) || parsed < 0) {
-            console.error(chalk.red('Error: --throttle must be a positive number (ms) or "auto"'));
+          if (!/^\d+$/.test(val)) {
+            console.error(chalk.red('Error: --throttle must be a positive integer (ms) or "auto"'));
             process.exit(1);
           }
-          config.settings.throttling.enabled = true;
-          config.settings.throttling.minDelayMs = parsed;
-          config.settings.throttling.mode = 'fixed';
+          const parsed = parseInt(val, 10);
+          if (isNaN(parsed) || parsed < 0) {
+            console.error(chalk.red('Error: --throttle must be a positive integer (ms) or "auto"'));
+            process.exit(1);
+          }
+          config.settings.throttling = { enabled: true, minDelayMs: parsed, mode: 'fixed' };
         }
       }
 

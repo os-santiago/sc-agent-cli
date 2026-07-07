@@ -8,7 +8,7 @@ import type {
 } from './types.js';
 import { verboseApiRequest, verboseApiResponse, verbose } from '../utils/verbose-logger.js';
 import type { ThrottleConfig } from './types.js';
-import { sleep } from '../utils/throttle.js';
+import { sleep, calculateDelay } from '../utils/throttle.js';
 
 export interface ChatCompletionOptions {
   messages: Message[];
@@ -107,17 +107,14 @@ export class OpenAICompatibleProvider {
 
         // Apply throttling delay before API call
         if (this.throttleConfig.enabled) {
-          const elapsed = Date.now() - this.lastApiCallTime;
-          let delay = this.throttleConfig.minDelayMs - elapsed;
-          if (delay < 0) delay = 0;
-          if (this.consecutiveEmpty > 0) {
-            delay = Math.max(delay, this.throttleConfig.afterEmptyResponse);
-          }
-          if (this.lastCallWasError) {
-            delay = Math.max(delay, this.throttleConfig.afterError);
-          }
+          const delay = calculateDelay(
+            this.throttleConfig,
+            this.lastApiCallTime,
+            this.consecutiveEmpty,
+            this.lastCallWasError
+          );
           if (delay > 0) {
-            verbose(`Throttling: waiting ${delay}ms before API call (minDelay: ${this.throttleConfig.minDelayMs}ms, consecutiveEmpty: ${this.consecutiveEmpty})`, 1);
+            verbose(`Throttling: waiting ${delay}ms before API call (minDelay: ${this.throttleConfig.minDelayMs}ms, consecutiveEmpty: ${this.consecutiveEmpty}, lastError: ${this.lastCallWasError})`, 1);
             await sleep(delay);
           }
         }
