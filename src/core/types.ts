@@ -44,6 +44,15 @@ export interface ModelConfig {
 
 export type PermissionProfile = 'traditional' | 'blacklist';
 
+export interface ThrottleConfig {
+  enabled: boolean;
+  minDelayMs: number;          // Minimum delay between API calls
+  afterEmptyResponse: number;   // Extra delay after empty response
+  afterError: number;           // Extra delay after API error
+  maxDelayMs: number;           // Cap for exponential backoff
+  mode: 'auto' | 'fixed' | 'exponential';
+}
+
 export interface ProjectConfig {
   model: ModelConfig;
   permissions?: {
@@ -59,6 +68,7 @@ export interface ProjectConfig {
     maxReadFileBytes?: number; // Max bytes for read_file (default: 1MB)
     maxWriteFileBytes?: number; // Max bytes for write_file (default: 10MB)
     policyFile?: string; // Path to an external policy/doctrine file (e.g. ADEV.md) to inject as system context
+    throttling?: Partial<ThrottleConfig>;
   };
 }
 
