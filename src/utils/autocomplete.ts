@@ -7,6 +7,7 @@ const SLASH_COMMANDS = [
   '/undo',
     '/rollback',
     '/session',
+  '/checkpoint',
   '/config',
   '/hud',
   '/model',

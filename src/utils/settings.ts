@@ -5,7 +5,7 @@ export interface ResolvedSettings {
   hudFields: string[];
 }
 
-const ALL_HUD_FIELDS = ['model', 'profile', 'memories', 'messages', 'storage', 'permissions'];
+const ALL_HUD_FIELDS = ['model', 'profile', 'memories', 'messages', 'storage', 'permissions', 'tokens', 'iterations', 'cost'];
 
 export function resolveSettings(config: ProjectConfig): ResolvedSettings {
   const configHud = config.settings?.hud;

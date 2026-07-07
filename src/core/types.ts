@@ -34,7 +34,7 @@ export interface ModelConfig {
   apiKey?: string; // Optional for local models (Ollama, LM Studio)
   model: string;
   temperature?: number;
-  maxTokens?: number;
+  maxTokens?: number | null; // null = no limit (let provider decide)
   stream?: boolean;
   top_p?: number;
   topP?: number;
@@ -53,9 +53,10 @@ export interface ProjectConfig {
   activeProfile?: string;
   settings?: {
     hud?: boolean; // Show HUD status line after responses (default: true)
-    hudFields?: string[]; // Fields to show in HUD: model, profile, memories, messages, storage, permissions
+    hudFields?: string[]; // Fields to show in HUD: model, profile, memories, messages, storage, permissions, tokens, iterations, cost
     maxReadFileBytes?: number; // Max bytes for read_file (default: 1MB)
     maxWriteFileBytes?: number; // Max bytes for write_file (default: 10MB)
+    policyFile?: string; // Path to an external policy/doctrine file (e.g. ADEV.md) to inject as system context
   };
 }
 
