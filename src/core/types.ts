@@ -8,6 +8,8 @@ export interface Message {
   tool_calls?: ToolCall[];
   tool_call_id?: string; // for tool responses
   name?: string; // for tool responses
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ToolCall {
