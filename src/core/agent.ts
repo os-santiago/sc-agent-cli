@@ -13,6 +13,7 @@ import { enhanceError, formatEnhancedError } from '../utils/error-enhancer.js';
 import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 import { TokenTracker, estimateMessageTokens } from '../utils/token-tracker.js';
 import { saveCheckpoint } from '../utils/checkpoint.js';
+import { verbose, verboseApiRequest, verboseApiResponse, verboseToolCall, verboseSession, verboseError } from '../utils/verbose-logger.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
@@ -805,10 +806,15 @@ export class Agent {
   async run(userMessage: string, history: Message[] = [], signal?: AbortSignal): Promise<Message[]> {
     let messages: Message[] = [...history];
 
+    verbose(`Prompt received: ${userMessage.length} chars, ~${estimateMessageTokens({ role: 'user', content: userMessage })} tokens (estimated)`);
+    verbose(`Auto-approve: ${!!this.options.autoApprove}, Quiet: ${!!this.options.quiet}`);
+    verbose(`Model: ${this.options.config.model.model}, Provider: ${this.options.config.model.baseUrl}`);
+
     // Inject system prompt if not already present
     const hasSystemMessage = messages.some((m) => m.role === 'system');
     if (!hasSystemMessage) {
-      const projectContext = await loadProjectContext(this.options.workspaceRoot);
+      const policyFile = this.options.config.settings?.policyFile || process.env.SC_POLICY_FILE;
+      const projectContext = await loadProjectContext(this.options.workspaceRoot, policyFile);
       const memoryContext = await persistentMemory.getContextString();
 
       // Detect shell environment for cross-platform adaptation
@@ -842,10 +848,23 @@ export class Agent {
     let selfHealCount = 0;
     const MAX_SELF_HEAL = 10;
     let emptyResponseCount = 0;
+    let forceToolChoice = false;
     const toolsUsed: Array<{name: string; success: boolean; error?: string; args?: Record<string, unknown>}> = [];
 
     // Reset first chunk flag for new run
     this.isFirstChunk = true;
+
+    // Warn if the combined prompt (system + context + user) is very large
+    const estimatedPromptTokens = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+    const configuredMax = this.options.config.model.maxTokens;
+    const threshold = configuredMax != null ? configuredMax * 4 : 32000;
+    if (estimatedPromptTokens > threshold) {
+      this.log(chalk.yellow(
+        `\n  ⚠️  Estimated prompt size: ~${estimatedPromptTokens} tokens. ` +
+        `This may exceed the model's effective context window. ` +
+        `Consider simplifying the prompt or increasing model context.\n`
+      ));
+    }
 
     while (continueLoop && iterations < MAX_ITERATIONS) {
       if (signal?.aborted) {
@@ -937,39 +956,33 @@ export class Agent {
         (!response.tool_calls || response.tool_calls.length === 0);
 
       if (isEmptyResponse) {
+        // Clear thinking indicator if shown
+        if (this._thinkingShown) {
+          process.stdout.write('\x1b[2K\r');
+          this._thinkingShown = false;
+          this.isFirstChunk = true;
+        }
         messages.pop(); // Remove empty assistant message to prevent role sequence violations
         emptyResponseCount++;
         if (emptyResponseCount < 3) {
-          // Re-prompt: nudge the model to generate text by appending the instruction to the last message
-          const lastMessage = messages[messages.length - 1];
-          if (lastMessage) {
-            lastMessage.content = (lastMessage.content || '') + 
-              '\n\n[It looks like you returned an empty response. Please continue the task and output your response or call the next tools. DO NOT respond with an empty message.]';
-          } else {
-            messages.push({
-              role: 'user',
-              content: 'Please provide a helpful text response. Do not call any tools.',
-            });
-          }
+          // Push a NEW user message for re-prompting — never modify existing messages
+          messages.push({
+            role: 'user',
+            content: `[The assistant returned an empty response. Respond to the user's request: output something helpful or call a tool. Do NOT return an empty message.]`,
+          });
           if (!this.options.quiet) {
-            this.log(chalk.gray('\n  │ 🔄 Re-prompting for response...'));
+            this.log(chalk.yellow('\n  │ 🔄 Re-prompting for response...'));
           }
           continue;
         } else {
-          // Multiple empty responses – show fallback
+          // Multiple empty responses – push a fallback assistant message so the user gets SOMETHING
+          const fallbackContent = 'Hello! I am SC-Agent CLI. I had trouble generating a response. Please try again or rephrase your question.';
+          messages.push({
+            role: 'assistant',
+            content: fallbackContent,
+          });
           if (!this.options.quiet) {
-            this.log(chalk.yellow('\n  ⚠️  I encountered an issue generating a response.'));
-            if (toolsUsed.length > 0) {
-              this.log(chalk.gray('\n  Here is a summary of the tools executed in this session:'));
-              for (const tool of toolsUsed) {
-                if (tool.success) {
-                  this.log(chalk.green(`    ✓ ${tool.name} completed successfully.`));
-                } else {
-                  this.log(chalk.red(`    ✗ ${tool.name} failed: ${tool.error || 'Unknown error'}`));
-                }
-              }
-            }
-            this.log(chalk.yellow('\n  Please try rephrasing your question.\n'));
+            this.log(chalk.yellow(`\n  ⚠️  I encountered an issue generating a response.\n\n  ${fallbackContent}\n`));
           }
           continueLoop = false;
           continue;
@@ -1017,6 +1030,8 @@ export class Agent {
           try {
             const args = JSON.parse(toolCall.function.arguments);
             const toolStartTime = Date.now();
+
+            verboseToolCall(toolName, args);
 
             // Emit tool start event
             this.emitToolStart(toolName, args);
@@ -1243,6 +1258,8 @@ export class Agent {
       const plural = toolsUsed.length !== 1 ? 's' : '';
       this.log(chalk.gray(`\n  ✓ Done (${toolsUsed.length} tool operation${plural}: ${toolNames})`));
     }
+
+    verboseSession(this._sessionId || 'none', messages.length);
 
     // Emit completion event
     this.callbacks?.onComplete?.({

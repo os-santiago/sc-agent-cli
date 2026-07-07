@@ -6,12 +6,14 @@ import type {
   ToolCallDelta,
   ToolCall,
 } from './types.js';
+import { verboseApiRequest, verboseApiResponse, verbose } from '../utils/verbose-logger.js';
 
 export interface ChatCompletionOptions {
   messages: Message[];
   tools?: ToolDefinition[];
   stream?: boolean;
   signal?: AbortSignal;
+  tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
 }
 
 export interface ChatCompletionResponse {
@@ -30,7 +32,13 @@ export class OpenAICompatibleProvider {
     options: ChatCompletionOptions,
     onChunk?: (delta: StreamDelta) => void
   ): Promise<ChatCompletionResponse> {
-    const baseUrl = this.config.baseUrl.replace(/\/+$/, '');
+    const rawBase = this.config.baseUrl.replace(/\/+$/, '');
+    let baseUrl: string;
+    try {
+      baseUrl = new URL(rawBase).href.replace(/\/+$/, '');
+    } catch {
+      throw new Error(`Invalid baseUrl: "${this.config.baseUrl}" is not a valid URL`);
+    }
     const url = `${baseUrl}/chat/completions`;
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -40,14 +48,22 @@ export class OpenAICompatibleProvider {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.config.model,
       messages: options.messages,
       temperature: this.config.temperature ?? 0.7,
-      max_tokens: this.config.maxTokens ?? 4096,
       stream: options.stream ?? this.config.stream ?? true,
       tools: options.tools,
     };
+
+    // Only send max_tokens if explicitly set (null/undefined = no limit, let provider decide)
+    if (this.config.maxTokens !== null && this.config.maxTokens !== undefined) {
+      body.max_tokens = this.config.maxTokens;
+    }
+
+    if (options.tool_choice) {
+      body.tool_choice = options.tool_choice;
+    }
 
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -68,15 +84,21 @@ export class OpenAICompatibleProvider {
           options.signal.addEventListener('abort', onAbort, { once: true });
         }
 
+        verboseApiRequest(url, body);
+
+        const requestStart = Date.now();
         const response = await fetch(url, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
           signal: abortController.signal,
         });
+        const responseDuration = Date.now() - requestStart;
 
         clearTimeout(timeoutTimer);
         if (onAbort && options.signal) options.signal.removeEventListener('abort', onAbort);
+
+        verboseApiResponse(response.status, responseDuration);
 
         if (!response.ok) {
           const errorText = await response.text();
