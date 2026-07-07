@@ -10,6 +10,7 @@ import { startChatSession } from './commands/chat-session.js';
 import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
 import { showConfig } from './utils/config-display.js';
+import { setVerboseLevel } from './utils/verbose-logger.js';
 
 const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../package.json') as { version: string };
@@ -31,8 +32,21 @@ program
   .option('--clear', 'Clear conversation history for this workspace before starting')
   .option('-m, --profile <profile>', 'Model profile to use for this session')
   .option('--permissions <mode>', 'Permissions mode: ask_once, always_ask, or unlimited')
+  .option('-v, --verbose', 'Verbose debug logging (use -v, -vv, -vvv for level)')
+  .option('--max-tokens <tokens>', 'Max response tokens (number or "unlimited"). Overrides config.')
   .action(async (prompt: string | undefined, options) => {
     try {
+      // Count -v flags from raw argv
+      const verboseCount = (() => {
+        let count = 0;
+        for (const arg of process.argv) {
+          if (arg === '-v' || arg === '--verbose') count++;
+          else if (/^-v{2,}$/.test(arg)) count += arg.length - 1;
+        }
+        return Math.min(count, 3);
+      })();
+      setVerboseLevel(verboseCount as any);
+
       let config = await loadConfig(process.cwd());
 
       // If a profile option is provided, override the active profile in config
@@ -60,6 +74,20 @@ program
           || process.env.NVIDIA_API_KEY;
         if (envApiKey) {
           config.model.apiKey = envApiKey;
+        }
+      }
+
+      // Apply --max-tokens override
+      if (options.maxTokens !== undefined) {
+        if (options.maxTokens === 'unlimited' || options.maxTokens === 'null') {
+          config.model.maxTokens = null;
+        } else {
+          const parsed = parseInt(options.maxTokens, 10);
+          if (isNaN(parsed) || parsed < 1) {
+            console.error(chalk.red('Error: --max-tokens must be a positive number or "unlimited"'));
+            process.exit(1);
+          }
+          config.model.maxTokens = parsed;
         }
       }
 

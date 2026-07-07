@@ -343,7 +343,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   });
 }
 
-export async function startChatSession(options: AgentOptions): Promise<void> {
+  export async function startChatSession(options: AgentOptions): Promise<void> {
   let agent = new Agent(options);
   let history: Message[] = [];
   let historyCheckpoints: Message[][] = [];
@@ -379,6 +379,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
   const sessionId = `${safeWsPath}-${timestamp}`;
+  options = { ...options, sessionId };
 
   // Helper to persist session trace to the unique instance directory
   function saveSessionTrace(msgs: Message[]) {
@@ -554,14 +555,67 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.blue(boxFooter()));
     }
 
+    // Save user message to session BEFORE API call
+    const userMsg: Message = { role: 'user', content: userInput, timestamp: new Date().toISOString() };
+    const preRunHistory = [...history, userMsg];
+    saveSessionTrace(preRunHistory);
+
     // Process the prompt
     if (!isQuiet) {
       console.log(chalk.gray(`\n${boxHeader('Assistant')}`));
     }
-    await agent.run(userInput, history);
+
+    let agentError: Error | undefined;
+    try {
+      history = await agent.run(userInput, history);
+    } catch (err: any) {
+      agentError = err;
+      // Build minimal history with user message + error entry
+      history = [
+        ...history,
+        userMsg,
+        {
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          metadata: {
+            error: err instanceof Error ? err.message : String(err),
+            error_code: 'agent_run_error',
+            prompt_tokens_estimated: Math.ceil(userInput.length / 4),
+          },
+        },
+      ];
+    }
+
     if (!isQuiet) {
       console.log(chalk.gray(`${boxFooter()}\n`));
       console.log(chalk.gray(`  🆔 ${sessionId}\n`));
+    }
+
+    // Save session trace (always, even on error)
+    saveSessionTrace(history);
+
+    // If agent errored, rethrow so caller sees non-zero exit
+    if (agentError) {
+      throw agentError;
+    }
+
+    // Check for meaningful response
+    const hasMeaningfulResponse = history.some(
+      m => m.role === 'assistant' && m.content && m.content.trim().length > 0
+    ) || history.some(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0);
+
+    if (!hasMeaningfulResponse) {
+      // Save again with explicit empty-response entry
+      const emptyResponseMsg: Message = {
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        metadata: { warning: 'Model returned empty response', tokens_received: 0 },
+      };
+      history = [...history, emptyResponseMsg];
+      saveSessionTrace(history);
+      throw new Error('No meaningful response generated. The model may not support this prompt length or format.');
     }
 
     // Exit after processing
@@ -617,6 +671,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
       console.log(chalk.white('  /undo                          ') + chalk.gray('- Undo last exchange (stack-based)'));
       console.log(chalk.white('  /rollback <n>                  ') + chalk.gray('- Rollback to message index <n>'));
       console.log(chalk.white('  /session                       ') + chalk.gray('- Export/import session context'));
+      console.log(chalk.white('  /checkpoint                    ') + chalk.gray('- Save/list execution checkpoints'));
       console.log(chalk.white('  /clear                         ') + chalk.gray('- Clear conversation history'));
       console.log(chalk.white('  /memory                        ') + chalk.gray('- View/manage persistent memory'));
       console.log(chalk.white('  /config                        ') + chalk.gray('- Show full configuration details'));
@@ -661,7 +716,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
-      } catch { /* silent */ }
+      } catch {
+        console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
+      }
       console.log(chalk.green(`\n✓ Undone (${historyCheckpoints.length} checkpoint(s) remaining)\n`));
       continue;
     }
@@ -687,7 +744,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
-      } catch { /* silent */ }
+      } catch {
+        console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
+      }
       console.log(chalk.green(`\n✓ Rolled back to message ${idx} (${history.length} messages remaining)\n`));
       continue;
     }
@@ -746,7 +805,9 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
             writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
             writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
             saveSessionTrace(history);
-          } catch { /* silent */ }
+          } catch {
+            console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
+          }
           const importedFrom = data.model ? ` (model: ${data.model})` : '';
           console.log(chalk.green(`\n✓ Session imported${importedFrom} — ${history.length} messages restored\n`));
         } catch (err: unknown) {
@@ -776,6 +837,53 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         console.log(chalk.gray('  /session export [path]   - Export session to file'));
         console.log(chalk.gray('  /session import <path>   - Import session from file'));
         console.log(chalk.gray('  /session info            - Show session details\n'));
+      }
+      continue;
+    }
+
+    // Handle /checkpoint command (save/resume long-running sessions)
+    if (userInput.toLowerCase().startsWith('/checkpoint')) {
+      const cpArgs = userInput.trim().split(/\s+/);
+      const cpSub = cpArgs[1]?.toLowerCase();
+
+      if (cpSub === 'save') {
+        try {
+          const { saveCheckpoint } = await import('../utils/checkpoint.js');
+          const path = saveCheckpoint({
+            sessionId,
+            workspaceRoot: options.workspaceRoot,
+            history,
+            inputHistory,
+            iterations: agent.getStats().iterations,
+            toolRunCount: agent.getStats().toolRunCount,
+          });
+          console.log(chalk.green(`\n✓ Checkpoint saved (${history.length} messages, ${agent.getStats().iterations} iterations)\n`));
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.log(chalk.red(`\n✗ Checkpoint failed: ${errorMsg}\n`));
+        }
+      } else if (cpSub === 'list') {
+        try {
+          const { listCheckpoints, printCheckpointInfo } = await import('../utils/checkpoint.js');
+          const all = listCheckpoints().filter(c => c.workspaceRoot === options.workspaceRoot);
+          if (all.length === 0) {
+            console.log(chalk.gray('\n  No checkpoints for this workspace\n'));
+          } else {
+            console.log(chalk.cyan(`\n📦 Checkpoints (${all.length}):\n`));
+            for (const cp of all) {
+              printCheckpointInfo(cp);
+              console.log();
+            }
+          }
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.log(chalk.red(`\n✗ Error: ${errorMsg}\n`));
+        }
+      } else {
+        console.log(chalk.cyan('\n📦 Checkpoint Commands\n'));
+        console.log(chalk.gray('  /checkpoint save          - Save execution checkpoint'));
+        console.log(chalk.gray('  /checkpoint list          - Show saved checkpoints'));
+        console.log(chalk.gray('\n  Checkpoints auto-save every 5 iterations.\n'));
       }
       continue;
     }
@@ -1508,7 +1616,7 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
       } catch {
-        // Silent: persistence is optional
+        console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist conversation history\n'));
       }
       if (!isQuiet) {
         console.log(chalk.green(`\n${boxFooter()}`));
@@ -1523,18 +1631,22 @@ export async function startChatSession(options: AgentOptions): Promise<void> {
         const modelShort = currentConfig.model.model.length > 16
           ? currentConfig.model.model.substring(0, 14) + '..'
           : currentConfig.model.model;
-        const tokens = history.filter(m => m.role === 'assistant').length;
+        const msgCount = history.filter(m => m.role === 'assistant').length;
+        const stats = agent.getStats();
+        const tokenUsage = agent.tokenTracker.formatShort();
 
         const fieldParts: Record<string, string> = {
           model: chalk.cyan(modelShort),
           profile: chalk.gray(`@${currentConfig.activeProfile || 'default'}`),
           memories: chalk.gray(`🧠${mem.length}`),
-          messages: chalk.gray(`💬${tokens}`),
+          messages: chalk.gray(`💬${msgCount}`),
           storage: chalk.gray(`💾${formatBytes(storage.currentSize)}`),
           permissions: `${profileIcon}${permIcon}`,
+          tokens: chalk.magenta(tokenUsage),
+          iterations: chalk.cyan(`🔄${stats.iterations}`),
+          cost: chalk.yellow(`💰${agent.tokenTracker.getEstimatedCost().toFixed(4)}`),
         };
         const parts = hudFields.filter(f => f in fieldParts).map(f => fieldParts[f]);
-        // Append unique session ID to the end of HUD status bar
         parts.push(chalk.yellow(`🆔 ${sessionId}`));
 
         if (parts.length > 0) {

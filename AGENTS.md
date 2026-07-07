@@ -50,6 +50,8 @@
 - **`src/utils/storage-limit.ts`**: Configurable storage limits and auto-cleanup
 - **`src/utils/status-bar.ts`**: Real-time status bar with keyboard shortcuts
 - **`src/utils/storage-guidance.ts`**: Storage usage tips
+- **`src/utils/token-tracker.ts`**: Token usage estimation and cost tracking
+- **`src/utils/checkpoint.ts`**: Execution state checkpointing for crash recovery
 
 ### Commands
 
@@ -118,6 +120,42 @@
 - Loop detection: detects repeated errors to prevent infinite loops
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
+
+### Long-Running Execution (100+ iterations)
+
+- **Token tracking**: `TokenTracker` class estimates input/output tokens via chars/4 heuristic; tracks per-session totals; configurable model cost map
+- **Message compression**: `compressOldMessages()` compresses old tool outputs to structured summaries (keeps `keepRecentCount=30` intact) before pruning, enabling far more iterations within the context window
+- **Checkpoint auto-save**: Agent state saved every 5 iterations to `~/.sc-agent/checkpoints/` for crash recovery; supports `/checkpoint save` + `/checkpoint list`
+- **HUD fields**: `tokens` (est. tokens + cost), `iterations` (counter), `cost` (dollar estimate) available via `/hud fields`
+- **`limitMessageHistory`**: Max increased from 60 → 80 to accommodate longer runs
+- **Auto-compress tool results**: Tool outputs >10KB auto-compressed before entering history
+- **Memory monitoring**: Heap usage checked every 10 iterations; warning at 80% usage
+- **Smart re-prompting**: Self-heal prompts include list of failed tools and "try a DIFFERENT approach" instructions
+- **Pagination**: `read_file` supports `offset` + `limit` for partial file reads
+
+### Phase 3 — Robusteza (Edge Cases & Hardening)
+
+- **`deepMerge` cycle detection**: Uses `WeakSet` to track visited objects; throws on circular references in config
+- **URL validation**: `validateConfig` + `provider.ts` validate `baseUrl` with `new URL()` before use
+- **`collectFiles` depth limit**: Max 20 directory depth to prevent stack overflow on deeply nested trees
+- **`unlinkSync` error propagation**: Logs warning with error message instead of silent catch during cleanup
+- **`web-fetch` redirect limit**: `redirect: 'manual'` with counter (max 10), prevents infinite redirect loops
+- **`edit-file` error distinction**: Distinguishes malformed patch (missing `@@` headers) from content mismatch; shows first 10 lines of patch on failure
+- **Sensitive key redaction**: Expanded key patterns (25+ keys: `passwd`, `accessToken`, `refreshToken`, `jwt`, `sshKey`, `credentials`, etc.)
+- **History persistence warnings**: All silent catch blocks for history/input persistence now show yellow warning on failure
+
+### Phase 4 — Long-Running Execution (Token Tracking, Compression, Checkpointing)
+
+- **Token tracker** (`src/utils/token-tracker.ts`): Estimates input/output tokens using chars/4 heuristic; tracks per-run totals; configurable per-model cost mapping for cost estimation (`gpt-4o`, `claude-sonnet-4-6`, etc.)
+- **Message compression** (`compressOldMessages` in `agent.ts`): Replaces old tool outputs with structured summaries (first N chars + compression notice) instead of dropping them; keeps `keepRecentCount=30` pairs intact; far more token-efficient than the old truncation approach
+- **Execution checkpointing** (`src/utils/checkpoint.ts`): Saves full agent state (history, iterations, toolRunCount) every 5 iterations to `~/.sc-agent/checkpoints/`; supports `/checkpoint save` and `/checkpoint list` commands; crash recovery via `findLatestCheckpoint()` matching workspace root
+- **Improved message pruning**: `limitMessageHistory` max increased from 60 → 80; `compressOldMessages` runs before `pruneMessageHistory` to compress before potentially dropping messages
+- **HUD fields**: Added `tokens` (estimated token usage + cost), `iterations` (iteration counter), `cost` (estimated dollar cost); all configurable via `/hud fields`
+- **`/checkpoint` command**: Manual save/list checkpoints alongside auto-save every 5 iterations
+- **Auto-compress tool results**: Tool outputs >10KB auto-compressed to structured summary (first 5K + last 3K) before entering message history, preventing context window saturation
+- **Memory monitoring**: Heap usage checked every 10 iterations; yellow warning when >80% of available heap used
+- **Smart re-prompting**: Self-heal prompts include list of failed tools, recent error summaries, and explicit instruction to "try a DIFFERENT approach" — breaking retry loops
+- **Pagination support**: `read_file` now accepts `offset` (line number) and `limit` (max lines) for partial reads of large files; auto-appends line count context with hint to read next chunk
 
 ## Competitive Advantages
 
