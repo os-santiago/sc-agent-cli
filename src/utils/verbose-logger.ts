@@ -26,23 +26,9 @@ export function verbose(msg: string, level: VerboseLevel = 1): void {
   }
 }
 
-export function verboseApi(msg: string, level: VerboseLevel = 2): void {
-  if (_level >= level) {
-    process.stderr.write(chalk.cyan(`[${timestamp()}] ${msg}\n`));
-  }
-}
-
 export function verboseError(msg: string): void {
   if (_level >= 1) {
     process.stderr.write(chalk.red(`[${timestamp()}] ERROR: ${msg}\n`));
-  }
-}
-
-export function verboseTool(name: string, args: Record<string, unknown>, result: string, duration: number, level: VerboseLevel = 1): void {
-  if (_level >= level) {
-    const argStr = JSON.stringify(args).substring(0, 200);
-    const resultLen = result.length;
-    process.stderr.write(chalk.magenta(`[${timestamp()}] TOOL: ${name}(${argStr}) → ${resultLen} chars in ${duration}ms\n`));
   }
 }
 

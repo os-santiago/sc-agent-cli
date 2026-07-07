@@ -48,7 +48,7 @@ export class OpenAICompatibleProvider {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
 
-    const body: any = {
+    const body: Record<string, unknown> = {
       model: this.config.model,
       messages: options.messages,
       temperature: this.config.temperature ?? 0.7,

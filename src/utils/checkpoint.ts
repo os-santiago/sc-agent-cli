@@ -32,6 +32,8 @@ export function saveCheckpoint(data: Omit<CheckpointData, 'version' | 'timestamp
   };
   const filePath = join(CHECKPOINT_DIR, `${data.sessionId}.json`);
   writeFileSync(filePath, JSON.stringify(checkpoint, null, 2));
+  // Auto-clean old checkpoints on each save
+  cleanOldCheckpoints();
   return filePath;
 }
 
@@ -77,6 +79,43 @@ export function findLatestCheckpoint(workspaceRoot: string): CheckpointData | nu
   if (all.length === 0) return null;
   all.sort((a, b) => b.timestamp - a.timestamp);
   return all[0];
+}
+
+const MAX_CHECKPOINT_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_CHECKPOINT_COUNT = 20;
+
+/**
+ * Auto-clean old checkpoints: removes any older than 7 days,
+ * and if still over 20, removes the oldest ones.
+ */
+export function cleanOldCheckpoints(): void {
+  ensureDir();
+  const now = Date.now();
+  const files = readdirSync(CHECKPOINT_DIR).filter(f => f.endsWith('.json'));
+  const checkpoints: Array<{ path: string; timestamp: number }> = [];
+
+  for (const file of files) {
+    try {
+      const data = readFileSync(join(CHECKPOINT_DIR, file), 'utf-8');
+      const parsed = JSON.parse(data) as CheckpointData;
+      if (now - parsed.timestamp > MAX_CHECKPOINT_AGE_MS) {
+        unlinkSync(join(CHECKPOINT_DIR, file));
+      } else {
+        checkpoints.push({ path: join(CHECKPOINT_DIR, file), timestamp: parsed.timestamp });
+      }
+    } catch {
+      // Corrupt or unparseable — delete it
+      try { unlinkSync(join(CHECKPOINT_DIR, file)); } catch { /* ignore */ }
+    }
+  }
+
+  // If still over the count limit, remove oldest
+  if (checkpoints.length > MAX_CHECKPOINT_COUNT) {
+    checkpoints.sort((a, b) => b.timestamp - a.timestamp); // newest first
+    for (let i = MAX_CHECKPOINT_COUNT; i < checkpoints.length; i++) {
+      try { unlinkSync(checkpoints[i].path); } catch { /* ignore */ }
+    }
+  }
 }
 
 export function printCheckpointInfo(cp: CheckpointData): void {
