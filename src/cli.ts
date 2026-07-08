@@ -35,6 +35,7 @@ program
   .option('-v, --verbose', 'Verbose debug logging (use -v, -vv, -vvv for level)')
   .option('--max-tokens <tokens>', 'Max response tokens (number or "unlimited"). Overrides config.')
   .option('--throttle <delay>', 'Enable throttling with min delay in ms (e.g. --throttle 2000) or "auto"')
+  .option('--timeout <ms>', 'Connection timeout in ms (e.g. --timeout 180000 for 3 min). Overrides config and provider default.')
   .action(async (prompt: string | undefined, options) => {
     try {
       // Count -v flags from raw argv
@@ -110,6 +111,20 @@ program
           }
           config.settings.throttling = { enabled: true, minDelayMs: parsed, mode: 'fixed' };
         }
+      }
+
+      // Apply --timeout override
+      if (options.timeout !== undefined) {
+        if (!/^\d+$/.test(options.timeout)) {
+          console.error(chalk.red('Error: --timeout must be a positive integer (ms)'));
+          process.exit(1);
+        }
+        const parsed = parseInt(options.timeout, 10);
+        if (isNaN(parsed) || parsed < 1000) {
+          console.error(chalk.red('Error: --timeout must be at least 1000 (1 second)'));
+          process.exit(1);
+        }
+        config.model.timeout = parsed;
       }
 
       // Permissions mode mapping

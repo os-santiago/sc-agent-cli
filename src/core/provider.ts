@@ -25,7 +25,25 @@ export interface ChatCompletionResponse {
 
 const RETRY_DELAYS = [1000, 2000]; // ms between retry attempts
 const MAX_RETRIES = 2;
-const CONNECTION_TIMEOUT = 60000; // 60s default
+
+const PROVIDER_TIMEOUT_DEFAULTS: Record<string, number> = {
+  nvidia: 180000,    // 3 min — NVIDIA API is slow
+  anthropic: 60000,  // 1 min
+  openai: 60000,     // 1 min
+  ollama: 300000,    // 5 min — local models can be very slow
+  groq: 30000,       // 30s — Groq is fast
+  together: 60000,   // 1 min
+  lmstudio: 120000,  // 2 min
+};
+
+function getTimeout(baseUrl: string, configTimeout?: number): number {
+  if (configTimeout !== undefined) return configTimeout;
+  const url = baseUrl.toLowerCase();
+  for (const [key, ms] of Object.entries(PROVIDER_TIMEOUT_DEFAULTS)) {
+    if (url.includes(key)) return ms;
+  }
+  return 60000; // default 60s
+}
 
 export class OpenAICompatibleProvider {
   private throttleConfig: ThrottleConfig = {
@@ -86,10 +104,12 @@ export class OpenAICompatibleProvider {
       body.tool_choice = options.tool_choice;
     }
 
+    const timeout = getTimeout(this.config.baseUrl, this.config.timeout);
+
     let lastError: Error | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const abortController = new AbortController();
-      const timeoutTimer = setTimeout(() => abortController.abort(new Error('Connection timed out')), CONNECTION_TIMEOUT);
+      const timeoutTimer = setTimeout(() => abortController.abort(new Error('Connection timed out')), timeout);
       let onAbort: (() => void) | null = null;
 
       try {
@@ -104,6 +124,8 @@ export class OpenAICompatibleProvider {
           };
           options.signal.addEventListener('abort', onAbort, { once: true });
         }
+
+        verbose(`Timeout: ${timeout}ms (config: ${this.config.timeout ?? 'auto-detect'}, provider: ${this.config.baseUrl})`, 2);
 
         // Apply throttling delay before API call
         if (this.throttleConfig.enabled) {

@@ -40,6 +40,7 @@ export interface ModelConfig {
   stream?: boolean;
   top_p?: number;
   topP?: number;
+  timeout?: number; // Connection timeout in ms (overrides provider default)
 }
 
 export type PermissionProfile = 'traditional' | 'blacklist';
