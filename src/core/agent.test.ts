@@ -88,12 +88,13 @@ test('Agent.run self-heals when model outputs future intention in autoApprove mo
   const mockChatCompletion = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async (params) => {
     callCount++;
     if (callCount === 1) {
-      return { content: 'I will list the files in this directory first.' };
+      // Long response with future intention (not conversational) should trigger self-heal
+      return { content: 'I need to investigate the build errors in your project. I will list the files in this directory first and then check the configuration to diagnose the compilation issues.' };
     }
     return { content: 'Task completed!' };
   });
 
-  const result = await agent.run('Hello');
+  const result = await agent.run('Fix the build errors');
 
   assert.equal(callCount, 2);
   const hasSelfHeal = result.some(m => m.role === 'user' && m.content.includes('SELF-HEAL'));

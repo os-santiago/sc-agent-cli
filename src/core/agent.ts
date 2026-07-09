@@ -821,7 +821,14 @@ export class Agent {
     const hasSystemMessage = messages.some((m) => m.role === 'system');
     if (!hasSystemMessage) {
       const policyFile = this.options.config.settings?.policyFile || process.env.SC_POLICY_FILE;
-      const projectContext = await loadProjectContext(this.options.workspaceRoot, policyFile);
+
+      // Only load project context for project-related queries (not for casual conversation)
+      const userQuery = messages[messages.length - 1]?.content || '';
+      const isProjectQuery = /\b(file|code|test|build|install|run|debug|fix|error|implement|refactor|check|verify|review|analyze|src\/|\.ts|\.js|\.json|package|config|git|npm|pnpm|yarn|create|write|edit|read|search|grep|find|directory|folder)\b/i.test(userQuery);
+      const projectContext = isProjectQuery
+        ? await loadProjectContext(this.options.workspaceRoot, policyFile)
+        : null;
+
       const memoryContext = await persistentMemory.getContextString();
 
       // Detect shell environment for cross-platform adaptation
@@ -1151,11 +1158,22 @@ export class Agent {
         // No tool calls — check if LLM is reporting errors without fixing them
         const content = response.content || '';
         const hasToolRun = toolsUsed.length > 0;
+
+        // Skip self-heal for purely conversational responses (greetings, clarifications, etc.)
+        // But NOT if they also include concrete future actions
+        const hasConversationalGreeting = /\b(hello|hi|hey|how are you|doing well|ready to help|what would you like|how can i help|nice to meet|greetings)\b/i.test(content);
+        const hasFutureAction = /\b(i will|i'll|i am going to|let's|let me|i need to|i should|i plan to|first, I|first, let)\b/i.test(content);
+        const isConversational = hasConversationalGreeting && !hasFutureAction;
+        const isShortResponse = content.length < 200 && !hasToolRun && !hasFutureAction;
+
         const isDeferring = /\b(would you like|do you want|shall I|¿quieres|recommend|suggest|you (should|could|need to))\b/i.test(content);
         const isFutureIntention = this.options.autoApprove && /\b(i will|i'll|i am going to|let's|let me|i need to|i should|i plan to|first, I|first, let|we will|we'll|voy a|comenzaré|primero|debo|tengo que|procederé)\b/i.test(content);
         const hasErrorIndicators = /[❌✗⚠️]/.test(content) || /\b(error|failed|fall[óo]|fail(ure)?)\b/i.test(content);
         const hasFailurePhrase = /\b(does not compil|compilation err|syntax err|cannot find|unable to|not compile|build fail)\b/i.test(content);
+
         const shouldSelfHeal = (
+          !isConversational &&
+          !isShortResponse &&
           (isDeferring || isFutureIntention || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
           && selfHealCount < MAX_SELF_HEAL
         );
