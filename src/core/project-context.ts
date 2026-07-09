@@ -4,10 +4,28 @@ import { existsSync } from 'node:fs';
 
 const CONTEXT_FILES = ['AGENTS.md', 'SC-AGENT.md', 'CLAUDE.md'];
 
+// Cache to avoid re-reading context files in the same session
+interface ContextCache {
+  workspaceRoot: string;
+  policyFile?: string;
+  content: string | null;
+}
+
+let contextCache: ContextCache | null = null;
+
 export async function loadProjectContext(
   workspaceRoot: string,
   policyFile?: string
 ): Promise<string | null> {
+  // Return cached content if same workspace and policy
+  if (
+    contextCache &&
+    contextCache.workspaceRoot === workspaceRoot &&
+    contextCache.policyFile === policyFile
+  ) {
+    return contextCache.content;
+  }
+
   const parts: string[] = [];
 
   // Load project-level context files (AGENTS.md, CLAUDE.md, etc.)
@@ -34,5 +52,15 @@ export async function loadProjectContext(
     }
   }
 
-  return parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+  const result = parts.length > 0 ? parts.join('\n\n---\n\n') : null;
+
+  // Cache the result
+  contextCache = { workspaceRoot, policyFile, content: result };
+
+  return result;
+}
+
+// Clear cache (useful for testing or when workspace changes)
+export function clearProjectContextCache(): void {
+  contextCache = null;
 }

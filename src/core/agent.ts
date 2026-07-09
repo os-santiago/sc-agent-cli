@@ -824,10 +824,15 @@ export class Agent {
 
       // Only load project context for project-related queries (not for casual conversation)
       const userQuery = messages[messages.length - 1]?.content || '';
-      const isProjectQuery = /\b(file|code|test|build|install|run|debug|fix|error|implement|refactor|check|verify|review|analyze|src\/|\.ts|\.js|\.json|package|config|git|npm|pnpm|yarn|create|write|edit|read|search|grep|find|directory|folder)\b/i.test(userQuery);
+      const isProjectQuery = /\b(file|code|test|build|install|run|debug|fix|error|implement|refactor|check|verify|review|analyze|src\/|\.ts|\.js|\.json|\.yaml|\.yml|\.md|\.sh|\.py|\.java|\.go|\.rb|\.c|\.cpp|\.h|package|config|git|npm|pnpm|yarn|mvn|gradle|cargo|pip|docker|create|write|edit|read|search|grep|find|directory|folder|function|class|method|variable|import|export|module|component|service|controller|repository|endpoint|api|route|database|query|schema|migration|deploy|lint|format|commit|push|pull|merge|branch|tag|release|version|dependency|dependencies|bug|issue|feature|docs|documentation|README|LICENSE|Makefile|Dockerfile|workflow|action|pipeline|ci|cd|devops|kubernetes|helm|terraform|ansible)\b/i.test(userQuery);
       const projectContext = isProjectQuery
         ? await loadProjectContext(this.options.workspaceRoot, policyFile)
         : null;
+
+      // Metrics: log context loading decision (optional - only if SC_DEBUG_METRICS is set)
+      if (process.env.SC_DEBUG_METRICS) {
+        verbose(`[METRICS] Context loading: ${isProjectQuery ? 'LOADED' : 'SKIPPED'} | Query length: ${userQuery.length} | Context size: ${projectContext?.length || 0}B`);
+      }
 
       const memoryContext = await persistentMemory.getContextString();
 
@@ -1177,6 +1182,11 @@ export class Agent {
           (isDeferring || isFutureIntention || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
           && selfHealCount < MAX_SELF_HEAL
         );
+
+        // Metrics: log self-heal decision
+        if (process.env.SC_DEBUG_METRICS) {
+          verbose(`[METRICS] Self-heal: ${shouldSelfHeal ? 'ACTIVATED' : 'SKIPPED'} | Conversational: ${isConversational} | Short: ${isShortResponse} | Count: ${selfHealCount}/${MAX_SELF_HEAL}`);
+        }
 
         if (shouldSelfHeal) {
           selfHealCount++;
