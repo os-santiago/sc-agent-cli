@@ -26,6 +26,25 @@ import { resolveSettings } from '../utils/settings.js';
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve) => {
+    // Check if stdin is a TTY - if not, use simple line reading
+    if (!input.isTTY) {
+      // Non-TTY mode: read entire input from stdin (batch mode)
+      let inputData = '';
+      input.setEncoding('utf8');
+      input.on('data', (chunk) => {
+        inputData += chunk;
+      });
+      input.on('end', () => {
+        resolve(inputData.trim());
+      });
+      // If stdin is already ended (piped input), resolve immediately
+      if (input.readableEnded) {
+        resolve('');
+      }
+      return;
+    }
+
+    // TTY mode: interactive multi-line editor
     const buf: string[] = [''];
     let cursorLine = 0;
     let cursorCol = 0;
@@ -76,7 +95,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
 
     function submit(): void {
-      input.setRawMode(false);
+      if (input.isTTY && input.setRawMode) {
+        input.setRawMode(false);
+      }
       input.removeAllListeners('keypress');
       // Erase the input area
       for (let i = 0; i < prevPhysicalRows; i++) {
@@ -203,13 +224,19 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       }
     }
 
-    input.setRawMode(true);
+    if (input.isTTY && input.setRawMode) {
+      input.setRawMode(true);
+    }
     input.resume();
     emitKeypressEvents(input);
 
     // Safety net: if anything throws while in raw mode, restore it
     function restoreRawMode(): void {
-      try { input.setRawMode(false); } catch { /* already restored */ }
+      try {
+        if (input.isTTY && input.setRawMode) {
+          input.setRawMode(false);
+        }
+      } catch { /* already restored */ }
       input.removeAllListeners('keypress');
     }
 
