@@ -6,7 +6,7 @@ import type {
   ToolCallDelta,
   ToolCall,
 } from './types.js';
-import { verboseApiRequest, verboseApiResponse, verbose } from '../utils/verbose-logger.js';
+import { verboseApiRequest, verboseApiResponse, verbose, verboseError } from '../utils/verbose-logger.js';
 import type { ThrottleConfig } from './types.js';
 import { sleep, calculateDelay } from '../utils/throttle.js';
 
@@ -181,6 +181,7 @@ export class OpenAICompatibleProvider {
 
         if (err instanceof Error) {
           if (options.signal?.aborted) throw err;
+          verboseError(`API call failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}`);
           if (attempt >= MAX_RETRIES || this.isNonRetryable(err)) throw err;
           lastError = err;
           await this.delay(RETRY_DELAYS[attempt]);

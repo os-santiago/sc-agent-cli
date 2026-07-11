@@ -22,6 +22,7 @@ import { persistentMemory } from '../utils/memory.js';
 import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
+import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -423,6 +424,10 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   const sessionId = `${safeWsPath}-${timestamp}`;
   options = { ...options, sessionId };
 
+  verbose(`Session initialized: ${sessionId}`);
+  verbose(`Profile: ${currentConfig.activeProfile || 'default'} (${currentConfig.model.model})`);
+  verbose(`Mode: ${options.initialPrompt ? 'batch' : 'interactive'}, Permissions: ${currentPermissionMode}`);
+
   // Helper to persist session trace to the unique instance directory
   function saveSessionTrace(msgs: Message[]) {
     try {
@@ -599,6 +604,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       console.log(chalk.blue(boxFooter()));
     }
 
+    verbose(`Prompt received: ${userInput.length} chars, ~${Math.ceil(userInput.length / 4)} tokens (estimated)`);
+    verbose(`Batch mode: autoApprove=${!!options.autoApprove}, quiet=${!!isQuiet}`);
+
     // Save user message to session BEFORE API call
     const userMsg: Message = { role: 'user', content: userInput, timestamp: new Date().toISOString() };
     const preRunHistory = [...history, userMsg];
@@ -648,9 +656,11 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
     // Save session trace (always, even on error)
     saveSessionTrace(history);
+    verboseSession(sessionId, history.length);
 
     // If agent errored, rethrow so caller sees non-zero exit
     if (agentError) {
+      verboseError(`Agent run failed: ${agentError.message}`);
       throw agentError;
     }
 
@@ -669,7 +679,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       };
       history = [...history, emptyResponseMsg];
       saveSessionTrace(history);
-      throw new Error('No meaningful response generated. The model may not support this prompt length or format.');
+      const noMeaningfulMsg = 'No meaningful response generated. The model may not support this prompt length or format.';
+      verboseError(noMeaningfulMsg);
+      throw new Error(noMeaningfulMsg);
     }
 
     // Exit after processing
