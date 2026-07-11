@@ -35,9 +35,14 @@ function checkTool(cmd: string, args: string = '--version'): boolean {
   }
 }
 
+// Cache tool detection results — tools don't change mid-process and execSync is
+// expensive on Windows (~1s per check). Avoids 11 execSync calls per Agent instance.
+let toolsCache: ToolsAvailable | null = null;
+
 function detectTools(): ToolsAvailable {
+  if (toolsCache) return toolsCache;
   const isWindows = process.platform === 'win32';
-  return {
+  toolsCache = {
     git: checkTool('git'),
     gh: checkTool('gh'),
     node: checkTool('node'),
@@ -50,6 +55,7 @@ function detectTools(): ToolsAvailable {
     winget: isWindows && checkTool('winget'),
     choco: isWindows && checkTool('choco', '--version 2>nul'),
   };
+  return toolsCache;
 }
 
 export function detectShell(): ShellInfo {
