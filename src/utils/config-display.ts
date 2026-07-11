@@ -48,7 +48,7 @@ export async function showConfig(
   field('Model', config.model.model, chalk.cyan);
   field('Provider', config.model.baseUrl);
   field('Temperature', `${config.model.temperature ?? 0.7}`);
-  field('Max tokens', `${config.model.maxTokens ?? 4096}`);
+  field('Max tokens', config.model.maxTokens === null ? 'unlimited' : `${config.model.maxTokens ?? 4096}`);
   field('Streaming', config.model.stream !== false ? 'enabled' : 'disabled', chalk.green);
   field('API key', config.model.apiKey ? 'configured' : 'not set',
     config.model.apiKey ? chalk.green : chalk.yellow);

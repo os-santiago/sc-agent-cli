@@ -10,7 +10,7 @@ import { startChatSession } from './commands/chat-session.js';
 import { listProfiles, addProfile, useProfile, removeProfile } from './commands/profile.js';
 import { initProject } from './commands/init-command.js';
 import { showConfig } from './utils/config-display.js';
-import { setVerboseLevel } from './utils/verbose-logger.js';
+import { setVerboseLevel, verbose } from './utils/verbose-logger.js';
 
 const require = createRequire(import.meta.url);
 const { version: packageVersion } = require('../package.json') as { version: string };
@@ -83,6 +83,7 @@ program
       if (options.maxTokens !== undefined) {
         if (options.maxTokens === 'unlimited' || options.maxTokens === 'null') {
           config.model.maxTokens = null;
+          verbose('Max tokens set to UNLIMITED (null). Provider/model will determine response length.');
         } else {
           const parsed = parseInt(options.maxTokens, 10);
           if (isNaN(parsed) || parsed < 1) {
@@ -90,6 +91,7 @@ program
             process.exit(1);
           }
           config.model.maxTokens = parsed;
+          verbose(`Max tokens set to ${parsed}`);
         }
       }
 
