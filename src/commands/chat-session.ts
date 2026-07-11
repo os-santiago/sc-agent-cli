@@ -25,7 +25,41 @@ import { resolveSettings } from '../utils/settings.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    // Check if stdin is a TTY - if not, use simple line reading
+    if (!input.isTTY) {
+      // Non-TTY mode: read entire input from stdin (batch mode)
+      let inputData = '';
+      let settled = false;
+      input.setEncoding('utf8');
+      const onData = (chunk: string) => { inputData += chunk; };
+      const onEnd = () => {
+        if (!settled) { settled = true; }
+        cleanup();
+        resolve(inputData.trim());
+      };
+      const onError = (err: Error) => {
+        if (!settled) { settled = true; }
+        cleanup();
+        reject(err);
+      };
+      function cleanup() {
+        input.removeListener('data', onData);
+        input.removeListener('end', onEnd);
+        input.removeListener('error', onError);
+      }
+      input.on('data', onData);
+      input.on('end', onEnd);
+      input.on('error', onError);
+      // If stdin is already ended (piped input), resolve immediately
+      if (input.readableEnded) {
+        cleanup();
+        resolve('');
+      }
+      return;
+    }
+
+    // TTY mode: interactive multi-line editor
     const buf: string[] = [''];
     let cursorLine = 0;
     let cursorCol = 0;
@@ -76,7 +110,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
 
     function submit(): void {
-      input.setRawMode(false);
+      if (input.isTTY && input.setRawMode) {
+        input.setRawMode(false);
+      }
       input.removeAllListeners('keypress');
       // Erase the input area
       for (let i = 0; i < prevPhysicalRows; i++) {
@@ -203,13 +239,19 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       }
     }
 
-    input.setRawMode(true);
+    if (input.isTTY && input.setRawMode) {
+      input.setRawMode(true);
+    }
     input.resume();
     emitKeypressEvents(input);
 
     // Safety net: if anything throws while in raw mode, restore it
     function restoreRawMode(): void {
-      try { input.setRawMode(false); } catch { /* already restored */ }
+      try {
+        if (input.isTTY && input.setRawMode) {
+          input.setRawMode(false);
+        }
+      } catch { /* already restored */ }
       input.removeAllListeners('keypress');
     }
 

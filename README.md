@@ -178,6 +178,8 @@ Create one of these files in your project root to provide:
 - Build/test instructions
 - Any other relevant context
 
+**Performance optimization**: Context files are only loaded when queries contain project-related keywords (e.g., `file`, `code`, `test`, `build`, `function`, `class`, `api`, etc.). Conversational queries like "Hello" or "How are you?" skip context loading entirely. Context is cached in memory after first load to eliminate repeated file I/O.
+
 ## Available Tools
 
 The agent has access to:
@@ -276,6 +278,17 @@ NVIDIA_API_KEY="nvapi-your-key-here" sc
   
   # Or inline
   SC_MAX_ITERATIONS=50 scc chat
+  ```
+
+- **`SC_DEBUG_METRICS`**: Enable performance metrics logging (default: off)
+  ```bash
+  # Enable metrics to analyze context loading and self-heal behavior
+  export SC_DEBUG_METRICS=1
+  scc chat "fix the bug"
+  
+  # Output includes:
+  # [METRICS] Context loading: LOADED/SKIPPED | Query length: 50 | Context size: 12044B
+  # [METRICS] Self-heal: ACTIVATED/SKIPPED | Conversational: false | Short: false | Count: 1/10
   ```
 
 ## Examples
