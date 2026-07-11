@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import type { ProjectConfig } from './types.js';
+import { resolveSafePath } from '../utils/path-security.js';
 
 const CONTEXT_FILES = ['AGENTS.md', 'SC-AGENT.md', 'CLAUDE.md'];
 
@@ -12,6 +13,11 @@ interface ContextCache {
 }
 
 let contextCache: ContextCache | null = null;
+
+const MINIMAL_CONFIG: ProjectConfig = {
+  model: { provider: 'openai-compatible', baseUrl: '', model: '' },
+  permissions: { denyPaths: ['.env', '.env.*', '**/*.key', '**/*.pem'] },
+};
 
 export async function loadProjectContext(
   workspaceRoot: string,
@@ -30,25 +36,23 @@ export async function loadProjectContext(
 
   // Load project-level context files (AGENTS.md, CLAUDE.md, etc.)
   for (const filename of CONTEXT_FILES) {
-    const filePath = path.join(workspaceRoot, filename);
     try {
-      const content = await readFile(filePath, 'utf-8');
+      const safePath = resolveSafePath(filename, workspaceRoot, MINIMAL_CONFIG);
+      const content = await readFile(safePath, 'utf-8');
       parts.push(`# ${filename}\n${content}`);
     } catch {
-      // File doesn't exist — skip
+      // File doesn't exist or path denied — skip
     }
   }
 
   // Load external policy file if configured (e.g. ADEV.md as base doctrine)
   if (policyFile) {
-    const resolvedPolicyPath = path.resolve(policyFile);
-    if (existsSync(resolvedPolicyPath)) {
-      try {
-        const content = await readFile(resolvedPolicyPath, 'utf-8');
-        parts.push(`# Policy: ${path.basename(resolvedPolicyPath)}\n${content}`);
-      } catch {
-        // Fail silently — policy is best-effort
-      }
+    try {
+      const safePath = resolveSafePath(policyFile, workspaceRoot, MINIMAL_CONFIG);
+      const content = await readFile(safePath, 'utf-8');
+      parts.push(`# Policy: ${path.basename(safePath)}\n${content}`);
+    } catch {
+      // Fail silently — policy is best-effort
     }
   }
 

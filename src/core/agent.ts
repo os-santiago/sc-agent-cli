@@ -823,7 +823,7 @@ export class Agent {
       const policyFile = this.options.config.settings?.policyFile || process.env.SC_POLICY_FILE;
 
       // Only load project context for project-related queries (not for casual conversation)
-      const userQuery = messages[messages.length - 1]?.content || '';
+      const userQuery = userMessage;
       const isProjectQuery = /\b(file|code|test|build|install|run|debug|fix|error|implement|refactor|check|verify|review|analyze|src\/|\.ts|\.js|\.json|\.yaml|\.yml|\.md|\.sh|\.py|\.java|\.go|\.rb|\.c|\.cpp|\.h|package|config|git|npm|pnpm|yarn|mvn|gradle|cargo|pip|docker|create|write|edit|read|search|grep|find|directory|folder|function|class|method|variable|import|export|module|component|service|controller|repository|endpoint|api|route|database|query|schema|migration|deploy|lint|format|commit|push|pull|merge|branch|tag|release|version|dependency|dependencies|bug|issue|feature|docs|documentation|README|LICENSE|Makefile|Dockerfile|workflow|action|pipeline|ci|cd|devops|kubernetes|helm|terraform|ansible)\b/i.test(userQuery);
       const projectContext = isProjectQuery
         ? await loadProjectContext(this.options.workspaceRoot, policyFile)
@@ -1173,8 +1173,8 @@ export class Agent {
 
         const isDeferring = /\b(would you like|do you want|shall I|¿quieres|recommend|suggest|you (should|could|need to))\b/i.test(content);
         const isFutureIntention = this.options.autoApprove && /\b(i will|i'll|i am going to|let's|let me|i need to|i should|i plan to|first, I|first, let|we will|we'll|voy a|comenzaré|primero|debo|tengo que|procederé)\b/i.test(content);
-        const hasErrorIndicators = /[❌✗⚠️]/.test(content) || /\b(error|failed|fall[óo]|fail(ure)?)\b/i.test(content);
-        const hasFailurePhrase = /\b(does not compil|compilation err|syntax err|cannot find|unable to|not compile|build fail)\b/i.test(content);
+        const hasErrorIndicators = /[❌✗⚠]/.test(content) || /\b(error|failed|fall[óo]|fail(ure)?)\b/i.test(content);
+        const hasFailurePhrase = /\b(does not compile|compilation error|syntax error|cannot find|unable to|not compile|build fail)/i.test(content);
 
         const shouldSelfHeal = (
           !isConversational &&

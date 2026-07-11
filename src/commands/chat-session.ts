@@ -25,20 +25,35 @@ import { resolveSettings } from '../utils/settings.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // Check if stdin is a TTY - if not, use simple line reading
     if (!input.isTTY) {
       // Non-TTY mode: read entire input from stdin (batch mode)
       let inputData = '';
+      let settled = false;
       input.setEncoding('utf8');
-      input.on('data', (chunk) => {
-        inputData += chunk;
-      });
-      input.on('end', () => {
+      const onData = (chunk: string) => { inputData += chunk; };
+      const onEnd = () => {
+        if (!settled) { settled = true; }
+        cleanup();
         resolve(inputData.trim());
-      });
+      };
+      const onError = (err: Error) => {
+        if (!settled) { settled = true; }
+        cleanup();
+        reject(err);
+      };
+      function cleanup() {
+        input.removeListener('data', onData);
+        input.removeListener('end', onEnd);
+        input.removeListener('error', onError);
+      }
+      input.on('data', onData);
+      input.on('end', onEnd);
+      input.on('error', onError);
       // If stdin is already ended (piped input), resolve immediately
       if (input.readableEnded) {
+        cleanup();
         resolve('');
       }
       return;
