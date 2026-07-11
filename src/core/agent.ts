@@ -867,6 +867,7 @@ export class Agent {
     let selfHealCount = 0;
     const MAX_SELF_HEAL = 10;
     let emptyResponseCount = 0;
+    let totalEmptyResponses = 0;
     let forceToolChoice = false;
     const toolsUsed: Array<{name: string; success: boolean; error?: string; args?: Record<string, unknown>}> = [];
 
@@ -992,30 +993,34 @@ export class Agent {
         }
         messages.pop(); // Remove empty assistant message to prevent role sequence violations
         emptyResponseCount++;
+        totalEmptyResponses++;
         this.provider.setConsecutiveEmpty(emptyResponseCount);
-        if (emptyResponseCount < 3) {
-          // Push a NEW user message for re-prompting — never modify existing messages
-          messages.push({
-            role: 'user',
-            content: `[The assistant returned an empty response. Respond to the user's request: output something helpful or call a tool. Do NOT return an empty message.]`,
-          });
+
+        // MAX_TOTAL_EMPTY: Catches oscillation pattern where model alternates
+        // between tool calls and empty responses (resets consecutive counter each time).
+        // 3 consecutive empties also aborts immediately.
+        const MAX_TOTAL_EMPTY = 5;
+        if (totalEmptyResponses >= MAX_TOTAL_EMPTY || emptyResponseCount >= 3) {
           if (!this.options.quiet) {
-            this.log(chalk.yellow('\n  │ 🔄 Re-prompting for response...'));
+            this.log(chalk.red(`\n  ⚠️  Model returned ${totalEmptyResponses} empty responses in ${iterations} iterations. Aborting.\n`));
           }
-          continue;
-        } else {
-          // Multiple empty responses – push a fallback assistant message so the user gets SOMETHING
-          const fallbackContent = 'Hello! I am SC-Agent CLI. I had trouble generating a response. Please try again or rephrase your question.';
-          messages.push({
-            role: 'assistant',
-            content: fallbackContent,
-          });
-          if (!this.options.quiet) {
-            this.log(chalk.yellow(`\n  ⚠️  I encountered an issue generating a response.\n\n  ${fallbackContent}\n`));
-          }
-          continueLoop = false;
-          continue;
+          throw new Error(
+            `Model returned empty response ${totalEmptyResponses} times in ${iterations} iterations. ` +
+            `This likely indicates a model compatibility issue with the current provider/model. ` +
+            `Try: (1) a different model, (2) lower temperature (0.2-0.3), ` +
+            `(3) disabling streaming (stream: false).`
+          );
         }
+
+        // Push a NEW user message for re-prompting — never modify existing messages
+        messages.push({
+          role: 'user',
+          content: `[The assistant returned an empty response. Respond to the user's request: output something helpful or call a tool. Do NOT return an empty message.]`,
+        });
+        if (!this.options.quiet) {
+          this.log(chalk.yellow('\n  │ 🔄 Re-prompting for response...'));
+        }
+        continue;
       } else {
         emptyResponseCount = 0; // Reset consecutive empty responses counter
         this.provider.setConsecutiveEmpty(0);

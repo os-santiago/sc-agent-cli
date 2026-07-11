@@ -102,3 +102,105 @@ test('Agent.run self-heals when model outputs future intention in autoApprove mo
 
   mockChatCompletion.mockRestore();
 });
+
+test('Agent.run throws after 3 consecutive empty responses', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    return { content: '' };
+  });
+
+  await assert.rejects(
+    () => agent.run('test'),
+    /Model returned empty response 3 times in 3 iterations/
+  );
+
+  assert.equal(callCount, 3);
+  mock.mockRestore();
+});
+
+test('Agent.run throws after 5 total empty responses across tool call resets (oscillation pattern)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount % 2 === 0) {
+      // Even calls: return tool call to reset consecutive counter (simulating tool→empty oscillation)
+      return {
+        content: '',
+        tool_calls: [{
+          id: `call_${callCount}`,
+          type: 'function' as const,
+          function: { name: '_oscillation_test_tool_', arguments: '{}' }
+        }]
+      };
+    }
+    // Odd calls: empty response
+    return { content: '' };
+  });
+
+  // 9 iterations: 5 empty (odd: 1,3,5,7,9) + 4 tool calls (even: 2,4,6,8)
+  // Total empties = 5 → threshold exceeded ≈ catches oscillation where consecutive resets
+  await assert.rejects(
+    () => agent.run('test'),
+    /Model returned empty response 5 times in 9 iterations/
+  );
+
+  assert.equal(callCount, 9);
+  mock.mockRestore();
+});
+
+test('Agent.run recovers after a single empty response', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      return { content: '' };
+    }
+    return { content: 'Task completed successfully!' };
+  });
+
+  const result = await agent.run('test');
+
+  assert.equal(callCount, 2);
+  assert.ok(result.some(m => m.role === 'assistant' && m.content === 'Task completed successfully!'));
+  mock.mockRestore();
+});
