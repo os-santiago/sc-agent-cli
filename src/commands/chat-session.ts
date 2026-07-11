@@ -441,6 +441,33 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
   }
 
+  // Helper to write machine-readable status for automation
+  function saveSessionStatus(status: string, error?: string, historyMsgs?: Message[]) {
+    try {
+      const sessionDir = join(homedir(), '.sc-agent', 'sessions', sessionId);
+      if (!existsSync(sessionDir)) {
+        mkdirSync(sessionDir, { recursive: true });
+      }
+      const changedTools = ['write_file', 'edit_file', 'git'];
+      const hasChanges = historyMsgs?.some(m =>
+        m.role === 'assistant' &&
+        m.tool_calls?.some(tc => changedTools.includes(tc.function.name))
+      ) ?? false;
+      const statusData: Record<string, unknown> = {
+        status,
+        timestamp: new Date().toISOString(),
+        session_id: sessionId,
+        changes: hasChanges,
+        model: currentConfig.model.model,
+        provider: currentConfig.model.provider,
+      };
+      if (error) statusData.error = error;
+      writeFileSync(join(sessionDir, 'status.json'), JSON.stringify(statusData, null, 2));
+    } catch {
+      // Silent: best-effort
+    }
+  }
+
   // Load persisted conversation + input history for this workspace
   try {
     if (options.clearHistory) {
@@ -660,7 +687,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
     // If agent errored, rethrow so caller sees non-zero exit
     if (agentError) {
-      verboseError(`Agent run failed: ${agentError.message}`);
+      const errorMsg = agentError instanceof Error ? agentError.message : String(agentError);
+      saveSessionStatus('error', errorMsg, history);
+      verboseError(`Agent run failed: ${errorMsg}`);
       throw agentError;
     }
 
@@ -679,12 +708,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       };
       history = [...history, emptyResponseMsg];
       saveSessionTrace(history);
+      saveSessionStatus('no_changes', undefined, history);
       const noMeaningfulMsg = 'No meaningful response generated. The model may not support this prompt length or format.';
       verboseError(noMeaningfulMsg);
       throw new Error(noMeaningfulMsg);
     }
 
-    // Exit after processing
+    // Success — write status and exit
+    saveSessionStatus('success', undefined, history);
     return;
   }
 
