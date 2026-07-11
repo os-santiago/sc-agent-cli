@@ -451,8 +451,10 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       const data = readFileSync(historyPaths.input, 'utf-8');
       inputHistory = JSON.parse(data);
     }
-    // Save initial session trace
-    saveSessionTrace(history);
+    // Save initial session trace (skip if empty — prevents session.json = [])
+    if (history.length > 0) {
+      saveSessionTrace(history);
+    }
   } catch {
     // Start fresh
   }
@@ -612,6 +614,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       history = await agent.run(userInput, history);
     } catch (err: any) {
       agentError = err;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      // Categorize error code based on message content
+      let errorCode = 'agent_run_error';
+      if (/empty response/i.test(errorMsg)) {
+        errorCode = 'empty_response';
+      } else if (/fetch|network|timeout|abort|econnrefused|econnreset|api_error|5\d{2}/i.test(errorMsg)) {
+        errorCode = 'api_error';
+      }
       // Build minimal history with user message + error entry
       history = [
         ...history,
@@ -621,8 +631,10 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           content: '',
           timestamp: new Date().toISOString(),
           metadata: {
-            error: err instanceof Error ? err.message : String(err),
-            error_code: 'agent_run_error',
+            error: errorMsg,
+            error_code: errorCode,
+            model: currentConfig.model.model,
+            provider: currentConfig.model.provider,
             prompt_tokens_estimated: Math.ceil(userInput.length / 4),
           },
         },
