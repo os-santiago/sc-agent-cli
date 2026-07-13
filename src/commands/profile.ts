@@ -3,6 +3,15 @@ import prompts from 'prompts';
 import { loadConfig, saveConfig } from '../core/config.js';
 import type { ModelConfig } from '../core/types.js';
 
+export function isPromptCancelled(value: string | undefined): value is undefined {
+  return value === undefined;
+}
+
+export function normalizeProfileName(name: string | undefined): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export async function listProfiles(): Promise<void> {
   const config = await loadConfig();
   const profiles = config.profiles || {};
@@ -33,8 +42,14 @@ export async function addProfile(
       name: 'name',
       message: 'Profile name:',
     });
-    name = response.name;
+    if (isPromptCancelled(response.name)) {
+      console.log(chalk.gray('Cancelled'));
+      return;
+    }
+    name = normalizeProfileName(response.name);
   }
+
+  name = normalizeProfileName(name);
 
   if (!name) {
     console.log(chalk.red('Profile name is required'));
@@ -113,8 +128,14 @@ export async function useProfile(name?: string): Promise<void> {
       message: 'Select a profile:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+    if (isPromptCancelled(response.profile)) {
+      console.log(chalk.gray('Cancelled'));
+      return;
+    }
     name = response.profile;
   }
+
+  name = normalizeProfileName(name);
 
   if (!name) {
     console.log(chalk.red('Profile name is required'));
@@ -147,8 +168,14 @@ export async function removeProfile(name?: string): Promise<void> {
       message: 'Select a profile to remove:',
       choices: profiles.map((p) => ({ title: p, value: p })),
     });
+    if (isPromptCancelled(response.profile)) {
+      console.log(chalk.gray('Cancelled'));
+      return;
+    }
     name = response.profile;
   }
+
+  name = normalizeProfileName(name);
 
   if (!name) {
     console.log(chalk.red('Profile name is required'));
