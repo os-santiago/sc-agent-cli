@@ -8,6 +8,8 @@ import { runShellTool } from './run-shell.js';
 import { webFetchTool } from './web-fetch.js';
 import { memoryReadTool, memoryWriteTool } from './memory-tools.js';
 import { gitTool } from './git-tool.js';
+import { codeQueryTool } from './code-query.js';
+import { mcpValidateTool } from './mcp-validate-tool.js';
 
 export const ALL_TOOLS: Tool[] = [
   readFileTool,
@@ -20,6 +22,8 @@ export const ALL_TOOLS: Tool[] = [
   memoryReadTool,
   memoryWriteTool,
   gitTool,
+  codeQueryTool,
+  mcpValidateTool,
 ];
 
 export function getToolByName(name: string): Tool | undefined {

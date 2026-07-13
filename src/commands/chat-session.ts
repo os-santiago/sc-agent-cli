@@ -769,7 +769,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       console.log(chalk.white('  /undo                          ') + chalk.gray('- Undo last exchange (stack-based)'));
       console.log(chalk.white('  /rollback <n>                  ') + chalk.gray('- Rollback to message index <n>'));
       console.log(chalk.white('  /session                       ') + chalk.gray('- Export/import session context'));
-      console.log(chalk.white('  /checkpoint                    ') + chalk.gray('- Save/list execution checkpoints'));
+      console.log(chalk.white('  /checkpoint                    ') + chalk.gray('- Save/list/resume execution checkpoints'));
       console.log(chalk.white('  /clear                         ') + chalk.gray('- Clear conversation history'));
       console.log(chalk.white('  /memory                        ') + chalk.gray('- View/manage persistent memory'));
       console.log(chalk.white('  /config                        ') + chalk.gray('- Show full configuration details'));
@@ -960,6 +960,22 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           const errorMsg = err instanceof Error ? err.message : String(err);
           console.log(chalk.red(`\n✗ Checkpoint failed: ${errorMsg}\n`));
         }
+      } else if (cpSub === 'resume') {
+        try {
+          const { findResumeCheckpoint, formatResumeContext } = await import('./resume-command.js');
+          const cp = await findResumeCheckpoint(options.workspaceRoot);
+          if (!cp) {
+            console.log(chalk.yellow('\n⚠ No checkpoint found for this workspace.\n'));
+          } else {
+            history = JSON.parse(JSON.stringify(cp.history));
+            const resumeMsg = formatResumeContext(cp);
+            history.push({ role: 'system', content: resumeMsg });
+            console.log(chalk.green(`\n✓ Resumed session from ${new Date(cp.timestamp).toLocaleString()} (${cp.history.length} messages restored)\n`));
+          }
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.log(chalk.red(`\n✗ Resume failed: ${errorMsg}\n`));
+        }
       } else if (cpSub === 'list') {
         try {
           const { listCheckpoints, printCheckpointInfo } = await import('../utils/checkpoint.js');
@@ -981,6 +997,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         console.log(chalk.cyan('\n📦 Checkpoint Commands\n'));
         console.log(chalk.gray('  /checkpoint save          - Save execution checkpoint'));
         console.log(chalk.gray('  /checkpoint list          - Show saved checkpoints'));
+        console.log(chalk.gray('  /checkpoint resume        - Restore last checkpoint for this workspace'));
         console.log(chalk.gray('\n  Checkpoints auto-save every 5 iterations.\n'));
       }
       continue;
