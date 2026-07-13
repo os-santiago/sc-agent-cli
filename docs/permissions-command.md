@@ -10,7 +10,7 @@ The `/permissions` command allows you to switch between three permission modes o
 You: /permissions
 
 ? Select permission mode: › - Use arrow-keys. Return to submit.
-❯   Ask once per command (recommended)
+❯   Ask once per tool (recommended)
     Always ask (safer)
     Unlimited (dangerous)
 ```
@@ -19,7 +19,7 @@ You: /permissions
 
 ## Permission Modes
 
-### 1. Ask once per command (recommended) ✅
+### 1. Ask once per tool (recommended) ✅
 
 **Default mode** - Balance between convenience and safety.
 
@@ -127,10 +127,10 @@ You can change permission modes at any time during a chat session:
 You: /permissions
 
 ? Select permission mode:
-❯   Ask once per command (recommended)
+❯   Ask once per tool (recommended)
 
-✓ Permission mode: Ask once per command (recommended)
-   First use prompts, then auto-approves for session
+✓ Permission mode: Ask once per tool (recommended)
+   First use of each tool prompts, then auto-approves for session
 
 You: list all files
 
@@ -158,12 +158,13 @@ You: /info
 
 📊 Current Configuration:
 
-  Profile:     nvidia
+  Profile:            nvidia
   Model:       meta/llama-3.3-70b-instruct
   Provider:    https://integrate.api.nvidia.com/v1
   Temperature: 0.7
   Max Tokens:  4096
-  Permissions: Ask once per command    ← Current mode
+  Permissions:        Ask once per tool    ← Current mode
+  Permission profile: Traditional
   History:     12 messages
 ```
 
@@ -188,7 +189,7 @@ You: /info
 scc chat
 
 You: /permissions
-[Select: Ask once per command]
+[Select: Ask once per tool]
 
 You: create a new feature
 
@@ -232,7 +233,7 @@ You: build a complete CRUD API
 The `/permissions` command sets the **overall behavior**, but individual tool permissions within "Ask once" mode still give you fine-grained control:
 
 **Overall mode** (via `/permissions`):
-- Ask once per command (recommended)
+- Ask once per tool (recommended)
 - Always ask (safer)
 - Unlimited (dangerous)
 
@@ -245,7 +246,7 @@ The `/permissions` command sets the **overall behavior**, but individual tool pe
 **Example:**
 
 ```
-Permission mode: Ask once per command
+Permission mode: Ask once per tool
 
 Agent wants to run: read_file
 ? Allow this action?
@@ -276,7 +277,7 @@ Begin with "Ask once" or "Always ask", then switch to "Unlimited" only if needed
 
 ```
 You: /permissions
-[Select: Ask once per command]
+[Select: Ask once per tool]
 
 [Work for a while...]
 
@@ -336,7 +337,7 @@ You: /info
 
 ### Session permissions not working
 
-"Always ask" mode clears session permissions. Switch to "Ask once per command" to use session memory.
+"Always ask" mode clears session permissions. Switch to "Ask once per tool" to use session memory.
 
 ### Want to reset everything
 
@@ -347,7 +348,7 @@ You: /permissions
 [Clears all session permissions]
 
 You: /permissions
-[Select: Ask once per command]
+[Select: Ask once per tool]
 
 [Fresh start with no session memory]
 ```
