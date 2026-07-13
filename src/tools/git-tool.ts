@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import type { Tool, ToolContext } from './tool.js';
 import { requestPermission } from '../utils/permissions.js';
+import { detectFormatters, runFormatters } from '../utils/formatters.js';
 
 function runGit(args: string[], cwd: string): string {
   const result = spawnSync('git', args, {
@@ -34,7 +35,7 @@ export const gitTool: Tool = {
         properties: {
           operation: {
             type: 'string',
-            enum: ['status', 'diff', 'log', 'show', 'branch', 'add', 'commit'],
+            enum: ['status', 'diff', 'log', 'show', 'branch', 'add', 'commit', 'format'],
             description: 'Git operation to perform',
           },
           paths: {
@@ -124,8 +125,63 @@ export const gitTool: Tool = {
         return `✓ Staged: ${target}\n${status}`;
       }
 
+      case 'format': {
+        const configuredFormatters = ctx.config.settings?.formatters;
+        const formatterCommands = configuredFormatters?.length
+          ? configuredFormatters
+          : await detectFormatters(ctx.workspaceRoot);
+
+        if (formatterCommands.length === 0) {
+          return 'No formatters configured or detected.';
+        }
+
+        const results = runFormatters(formatterCommands, ctx.workspaceRoot);
+        const modified = results.filter((r) => r.modified);
+        const failures = results.filter((r) => !r.ran);
+
+        if (failures.length > 0) {
+          return [
+            '⚠ Some formatters failed:',
+            ...failures.map((f) => `  • ${f.command}: ${f.output}`),
+          ].join('\n');
+        }
+
+        if (modified.length === 0) {
+          return '✓ All files already formatted.';
+        }
+
+        const formatted = modified.map((f) => `  ✓ ${f.command}`).join('\n');
+        return `✓ Formatted:\n${formatted}`;
+      }
+
       case 'commit': {
         if (!message) throw new Error('Commit message is required for commit operation');
+
+        const configuredFormatters = ctx.config.settings?.formatters;
+        const formatterCommands = configuredFormatters?.length
+          ? configuredFormatters
+          : await detectFormatters(ctx.workspaceRoot);
+
+        if (formatterCommands.length > 0) {
+          const results = runFormatters(formatterCommands, ctx.workspaceRoot);
+          const modified = results.filter((r) => r.modified);
+          const failures = results.filter((r) => !r.ran);
+
+          if (failures.length > 0) {
+            return [
+              '⚠ Some formatters failed to run:',
+              ...failures.map((f) => `  • ${f.command}: ${f.output}`),
+              'Commit aborted.',
+            ].join('\n');
+          }
+
+          if (modified.length > 0) {
+            const formatted = modified.map((f) => f.command).join(', ');
+            const staged = runGit(['add', '-A'], ctx.workspaceRoot);
+            return `✓ Formatted (${formatted}) and committed: ${runGit(['commit', '-m', message], ctx.workspaceRoot)}`;
+          }
+        }
+
         const result = runGit(['commit', '-m', message], ctx.workspaceRoot);
         return `✓ ${result}`;
       }

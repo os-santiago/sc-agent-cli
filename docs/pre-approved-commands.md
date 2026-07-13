@@ -308,7 +308,7 @@ You: /info
   Provider:    https://integrate.api.nvidia.com/v1
   Temperature: 0.7
   Max Tokens:  4096
-  Permissions: Ask once per command
+  Permissions: Ask once per tool
   Auto-approve: read_file, list_dir, search_text, run_shell
   History:     5 messages
 ```
@@ -368,7 +368,7 @@ The `/permissions` command configures **when** to ask.
 Configuration:
   autoApprove: [read_file, list_dir, run_shell]
 
-Permission mode: Ask once per command
+Permission mode: Ask once per tool
 
 Result:
 - read_file, list_dir, run_shell → auto-approve immediately

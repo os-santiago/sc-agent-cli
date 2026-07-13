@@ -1156,7 +1156,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
         const permChoices = [
           {
-            title: 'Ask once per command (recommended)',
+            title: 'Ask once per tool (recommended)',
             value: 'ask_once',
             description: 'Prompt once per unique tool, then auto-approve for session'
           },
@@ -1244,8 +1244,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
             config: currentConfig,
             autoApprove: false,
           });
-          console.log(chalk.cyan('\n✓ Permission mode: Ask once per command (recommended)'));
-          console.log(chalk.gray('   First use prompts, then auto-approves for session\n'));
+          console.log(chalk.cyan('\n✓ Permission mode: Ask once per tool (recommended)'));
+          console.log(chalk.gray('   First use of each tool prompts, then auto-approves for session\n'));
         }
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
