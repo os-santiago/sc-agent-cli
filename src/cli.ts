@@ -191,6 +191,42 @@ program
     await initProject(process.cwd(), options.force);
   });
 
+// Resume command
+program
+  .command('resume')
+  .description('Resume the last interrupted session from a checkpoint')
+  .action(async () => {
+    const { resumeSession } = await import('./commands/resume-command.js');
+    await resumeSession(process.cwd());
+  });
+
+// Task management
+const taskCommand = program.command('task').description('Manage task templates and checklists');
+
+taskCommand
+  .command('create <template> <description>')
+  .description('Create a task from a template with description')
+  .action(async (template, description) => {
+    const { taskCommand } = await import('./commands/task-command.js');
+    await taskCommand.create(template, description, process.cwd());
+  });
+
+taskCommand
+  .command('list')
+  .description('List all tasks in the current project')
+  .action(async () => {
+    const { taskCommand } = await import('./commands/task-command.js');
+    await taskCommand.list(process.cwd());
+  });
+
+taskCommand
+  .command('templates')
+  .description('List available task templates')
+  .action(async () => {
+    const { taskCommand } = await import('./commands/task-command.js');
+    await taskCommand.templates();
+  });
+
 // Show current configuration
 program
   .command('config')
