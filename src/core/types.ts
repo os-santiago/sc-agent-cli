@@ -70,6 +70,7 @@ export interface ProjectConfig {
     maxWriteFileBytes?: number; // Max bytes for write_file (default: 10MB)
     policyFile?: string; // Path to an external policy/doctrine file (e.g. ADEV.md) to inject as system context
     throttling?: Partial<ThrottleConfig>;
+    formatters?: string[]; // Shell commands to run before git commit (auto-format)
   };
 }
 
