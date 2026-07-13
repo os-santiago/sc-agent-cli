@@ -15,6 +15,7 @@ import type { Message } from '../core/types.js';
 import { loadConfig } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
+import { getModelProfileEmptyStateGuidance } from './chat-session-guidance.js';
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
 import { createCompleter } from '../utils/autocomplete.js';
@@ -1612,7 +1613,12 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         const profileNames = Object.keys(profiles);
 
         if (profileNames.length === 0) {
-          console.log(chalk.yellow('\nNo profiles available\n'));
+          console.log();
+          getModelProfileEmptyStateGuidance().forEach((line, index) => {
+            const color = index === 0 ? chalk.yellow : chalk.gray;
+            console.log(color(line));
+          });
+          console.log();
           continue;
         }
 
