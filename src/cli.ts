@@ -186,8 +186,9 @@ profileCommand
 program
   .command('init')
   .description('Initialize a new project with AGENTS.md')
-  .action(async () => {
-    await initProject(process.cwd());
+  .option('-f, --force', 'Overwrite an existing AGENTS.md file')
+  .action(async (options) => {
+    await initProject(process.cwd(), options.force);
   });
 
 // Show current configuration

@@ -158,6 +158,8 @@ See [docs/available-models.md](docs/available-models.md) for detailed comparison
 
 Initialize a project with a default `AGENTS.md` file for providing context to the agent.
 
+Use `sc init --force` to overwrite an existing `AGENTS.md`.
+
 ### `sc config-init`
 
 Create the global config file with default profiles.
