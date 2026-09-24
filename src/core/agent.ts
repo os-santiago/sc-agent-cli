@@ -879,8 +879,8 @@ export class Agent {
       const shellContext = `\n# Shell Environment\n- Type: ${shellInfo.type}\n- Platform: ${process.platform}\n- Tips:\n${shellInfo.tips.map(t => `  • ${t}`).join('\n')}`;
       const shellPromptGuide = getShellPromptSections(shellInfo);
 
-      if (repoProfileContext) contextParts.push(repoProfileContext);
       const contextParts = [this.systemPrompt, shellContext, shellPromptGuide];
+      if (repoProfileContext) contextParts.push(repoProfileContext);
       if (projectContext) contextParts.push(`\n# Project Context\n${projectContext}`);
       if (memoryContext) contextParts.push(memoryContext);
       if (this.options.autoApprove) {

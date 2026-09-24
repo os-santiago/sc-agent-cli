@@ -33,7 +33,7 @@ export const repoProbeTool: Tool = {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const rawPath = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : '.';
-    const safePath = resolveSafePath(ctx.workspaceRoot, rawPath);
+    const safePath = resolveSafePath(rawPath, ctx.workspaceRoot, ctx.config);
     const forceRefresh = Boolean(args.refresh);
     const format = args.format === 'summary' ? 'summary' : 'json';
 
