@@ -140,7 +140,7 @@ export function isMutatingShellCommand(cmd: string): boolean {
   if (/\b(mvn|gradle)\b/.test(trimmed)) return true;
   if (/\bdotnet\s+(add|build|publish|new)\b/.test(trimmed)) return true;
   if (/\b(make|cmake|gcc|g\+\+|clang|clang\+\+|rustc)\b/.test(trimmed)) return true;
-  if (/\btsc\b/.test(trimmed) && !/\b--noEmit\b/.test(trimmed)) return true;
+  if (/\btsc\b/.test(trimmed) && !/--noEmit\b/.test(trimmed)) return true;
   if (/\beslint\s+.*--fix\b/.test(trimmed)) return true;
   if (/\bprettier\s+.*--write\b/.test(trimmed)) return true;
 
