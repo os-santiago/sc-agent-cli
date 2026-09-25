@@ -25,6 +25,7 @@ import { boxHeader, boxFooter } from '../utils/box-drawing.js';
 import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
 import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.js';
+import { getWorkspaceGitState, detectSessionMutations, countMutatingToolCalls } from '../utils/mutation-detector.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -443,9 +444,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
   }
 
-  // Tools that mutate the workspace. A run that never calls one of these
-  // produced zero filesystem changes (pure read/plan/refusal).
-  const MUTATING_TOOLS = ['write_file', 'edit_file', 'git'];
+  // Mutation detection is delegated to mutation-detector.ts: per-tool-call
+  // classification (incl. run_shell command analysis) plus a post-run git
+  // worktree diff that catches writes made through unclassified paths.
 
   // Helper to write machine-readable status for automation
   function saveSessionStatus(status: string, error?: string, historyMsgs?: Message[]) {
@@ -454,10 +455,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       if (!existsSync(sessionDir)) {
         mkdirSync(sessionDir, { recursive: true });
       }
-      const hasChanges = historyMsgs?.some(m =>
-        m.role === 'assistant' &&
-        m.tool_calls?.some(tc => MUTATING_TOOLS.includes(tc.function.name))
-      ) ?? false;
+      const hasChanges = historyMsgs ? countMutatingToolCalls(historyMsgs) > 0 : false;
       const statusData: Record<string, unknown> = {
         status,
         timestamp: new Date().toISOString(),
@@ -664,6 +662,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     }
 
     const batchStart = Date.now();
+    // Snapshot git state before the agent runs — mutations made via run_shell
+    // or unclassified tools are caught by comparing status/HEAD afterwards.
+    const batchGitStateBefore = getWorkspaceGitState(options.workspaceRoot);
     let agentError: Error | undefined;
     try {
       history = await agent.run(userInput, history);
@@ -788,11 +789,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     // (model refused, answered read-only, or only ran inspections). Emit a
     // machine-greppable marker as the last stdout line and exit with the
     // documented no-changes code (10) — still a clean exit, caller decides.
-    const hasMutations = history.some(m =>
-      m.role === 'assistant' &&
-      m.tool_calls?.some(tc => MUTATING_TOOLS.includes(tc.function.name))
-    );
-    if (!hasMutations) {
+    const mutations = detectSessionMutations(history, batchGitStateBefore, getWorkspaceGitState(options.workspaceRoot));
+    if (!mutations.hasMutations) {
       saveSessionStatus('no_changes', undefined, history);
       console.log('SCC_NO_CHANGES');
       process.exitCode = 10;
