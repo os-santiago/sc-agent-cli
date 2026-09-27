@@ -8,6 +8,7 @@
 //   21 auth error                     (401/403, invalid or missing API key)
 //   22 budget exhausted               (SC_BUDGET_EXCEEDED,  #408)
 //   23 agent-loop abort               (tool livelock, malformed-args storm)
+//   24 completed but not actionable   (SCC_NOT_ACTIONABLE,  #446)
 //
 // Reserved ranges: 2-9 other clean terminals, 11-19 run outcomes, 24+ fatal.
 
@@ -19,6 +20,7 @@ export const EXIT_CODES = {
   AUTH_ERROR: 21,
   BUDGET_EXCEEDED: 22,
   LOOP_ABORT: 23,
+  NOT_ACTIONABLE: 24,
 } as const;
 
 // Map an error (message) to a documented exit code. Order matters: auth
