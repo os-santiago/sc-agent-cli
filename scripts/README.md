@@ -147,6 +147,16 @@ cd D:\git\sc-agent-cli\scripts
 - Uses `MultipleInstances IgnoreNew` to avoid overlapping runs
 - Starts the first run about one minute after registration, then repeats every 15 minutes
 
+### `ensure-deps.mjs`
+
+Internal lifecycle hook used by the `prebuild`, `predev`, and `pretest` npm
+scripts. In a fresh checkout where `npm ci`/`npm install` has not run yet,
+scripts that rely on devDependencies fail with `sh: tsc: command not found`
+(or the vitest equivalent). This hook detects missing `node_modules/.bin`
+shims and runs `npm ci` once, then lets the real script proceed. It is a
+no-op when dependencies are already installed, and it requires only Node —
+no dependencies of its own.
+
 ## Verification
 
 After running setup, verify the configuration:
