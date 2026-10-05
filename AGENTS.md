@@ -54,6 +54,7 @@
 - **`src/utils/storage-guidance.ts`**: Storage usage tips
 - **`src/utils/token-tracker.ts`**: Token usage estimation and cost tracking
 - **`src/utils/checkpoint.ts`**: Execution state checkpointing for crash recovery
+- **`src/utils/run-manifest.ts`**: Machine-readable run manifest builder/emitter for headless batch runs (`--output-format json`, `--summary-file`, `--output-file`)
 
 ### Commands
 
@@ -106,7 +107,7 @@
 2. Global config (`~/.sc-agent/config.json`)
 3. Project config (`.sc-agent.json`)
 4. Active profile overrides
-5. Environment variables (SC_API_KEY, SC_MODEL, SC_PROFILE)
+5. Environment variables (SC_API_KEY, SC_MODEL, SC_BASE_URL, SC_PROFILE)
 
 ### Permission System
 
@@ -122,6 +123,7 @@
 - Loop detection: detects repeated errors to prevent infinite loops
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
+- **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
 
 ### Long-Running Execution (100+ iterations)
 
