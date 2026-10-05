@@ -26,6 +26,17 @@ import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
 import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.js';
 import { getWorkspaceGitState, detectSessionMutations, countMutatingToolCalls } from '../utils/mutation-detector.js';
+import { ProviderFailoverError } from '../core/failover.js';
+import { EXIT_CODES, classifyError } from '../utils/exit-codes.js';
+
+// Maps the exit-code taxonomy (#409) to the manifest's terminalResolution
+// field (#425 failover contract).
+const TERMINAL_RESOLUTIONS: Record<number, string> = {
+  [EXIT_CODES.PROVIDER_ERROR]: 'provider_error',
+  [EXIT_CODES.PROVIDER_EXHAUSTED]: 'provider_error',
+  [EXIT_CODES.AUTH_ERROR]: 'auth_error',
+  [EXIT_CODES.LOOP_ABORT]: 'loop_abort',
+};
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -712,10 +723,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         m => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0
       );
       const checkpointPath = join(homedir(), '.sc-agent', 'checkpoints', `${sessionId}.json`);
-      const summary = {
+      const summary: Record<string, unknown> = {
         v: 1,
         success: exitReason === 'success',
         model: currentConfig.model.model,
+        // Failover contract (#425): which provider/model candidate actually
+        // served the run, and the terminal resolution for machine consumers.
+        provider: agent.getProviderUsed() ?? null,
+        resolution: exitReason === 'success' ? 'completed' : exitReason,
         tokens_in: usage.inputTokens,
         tokens_out: usage.outputTokens,
         estimated_cost_usd: estimateCost(currentConfig.model.model, usage.inputTokens, usage.outputTokens),
@@ -727,6 +742,15 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         final_message: lastAssistant ? String(lastAssistant.content).slice(0, 4000) : null,
         checkpoint: existsSync(checkpointPath) ? checkpointPath : null,
       };
+      if (agentError) {
+        summary.terminalResolution = agentError instanceof ProviderFailoverError
+          ? 'provider_error'
+          : TERMINAL_RESOLUTIONS[classifyError(agentError)] ?? 'error';
+        if (agentError instanceof ProviderFailoverError) {
+          summary.errorClass = agentError.errorClass;
+          summary.attempts = agentError.attempts;
+        }
+      }
       for (const outPath of [options.summaryFile, options.outputFile]) {
         if (!outPath) continue;
         try {
