@@ -22,6 +22,8 @@
 - **`src/core/agent.ts`**: Main agent loop with parallel tool execution & memory injection
 - **`src/core/project-context.ts`**: Loads project-specific context from `AGENTS.md|CLAUDE.md`
 - **`src/core/message-validator.ts`**: Auto-corrects message sequence errors
+- **`src/core/devcontainer.ts`**: Optional `--devcontainer` execution — `devcontainer up` + `devcontainer exec` with `devcontainer_unavailable` host fallback
+- **`src/core/repo-probe/`**: Repo toolchain/command detection (`sc probe`); reports `devcontainer` + `devcontainerPath` when `.devcontainer.json`/`.devcontainer/devcontainer.json` exists
 
 ### Tools System (10 tools)
 
@@ -53,6 +55,7 @@
 - **`src/utils/storage-guidance.ts`**: Storage usage tips
 - **`src/utils/token-tracker.ts`**: Token usage estimation and cost tracking
 - **`src/utils/checkpoint.ts`**: Execution state checkpointing for crash recovery
+- **`src/utils/run-manifest.ts`**: Machine-readable run manifest builder/emitter for headless batch runs (`--output-format json`, `--summary-file`, `--output-file`)
 
 ### Commands
 

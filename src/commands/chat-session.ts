@@ -7,7 +7,7 @@ const { version: packageVersion } = require('../../package.json') as { version: 
 import { stdin as input, stdout as output } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname } from 'node:path';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
@@ -26,17 +26,7 @@ import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
 import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.js';
 import { getWorkspaceGitState, detectSessionMutations, countMutatingToolCalls } from '../utils/mutation-detector.js';
-import { ProviderFailoverError } from '../core/failover.js';
-import { EXIT_CODES, classifyError } from '../utils/exit-codes.js';
-
-// Maps the exit-code taxonomy (#409) to the manifest's terminalResolution
-// field (#425 failover contract).
-const TERMINAL_RESOLUTIONS: Record<number, string> = {
-  [EXIT_CODES.PROVIDER_ERROR]: 'provider_error',
-  [EXIT_CODES.PROVIDER_EXHAUSTED]: 'provider_error',
-  [EXIT_CODES.AUTH_ERROR]: 'auth_error',
-  [EXIT_CODES.LOOP_ABORT]: 'loop_abort',
-};
+import { buildRunManifest, emitRunManifest, type RunExitReason } from '../utils/run-manifest.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -630,7 +620,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
   // Auto-cleanup if over limit
   if (storageInfo.needsCleanup) {
-    enforceStorageLimit(configDir, true);
+    enforceStorageLimit(configDir, true, isQuiet);
   }
 
   // Show status bar at bottom (only in interactive mode)
@@ -638,8 +628,56 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     statusBar.show(getShortcutsBar());
   }
 
+  let batchStart = Date.now();
+
+  // #415/#399: machine-readable run manifest — emitted as the LAST stdout
+  // write in batch mode so `sc chat -q ... | tail -1 | jq` stays parseable.
+  // With `--output-format json` it is the ONLY stdout write.
+  const emitUsageSummary = (exitReason: RunExitReason, error?: string, onStdoutFlushed?: () => void) => {
+    const usage = agent.tokenTracker.getUsage();
+    const stats = agent.getStats();
+    const checkpointPath = join(homedir(), '.sc-agent', 'checkpoints', `${sessionId}.json`);
+    const manifest = buildRunManifest({
+      exitReason,
+      error,
+      version: packageVersion,
+      model: currentConfig.model.model,
+      sessionId,
+      history,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: estimateCost(currentConfig.model.model, usage.inputTokens, usage.outputTokens),
+      toolCalls: agent.getToolCallCounts(),
+      toolRunCount: stats.toolRunCount,
+      iterations: stats.iterations,
+      durationMs: Date.now() - batchStart,
+      checkpointPath: existsSync(checkpointPath) ? checkpointPath : null,
+      devcontainer: options.devcontainer,
+    });
+    emitRunManifest(manifest, {
+      files: [options.summaryFile, options.outputFile],
+      onStdoutFlushed,
+    });
+  };
+
+  // Batch runs must still emit the manifest when killed by a signal (#399):
+  // CI `timeout` sends SIGTERM, Ctrl+C sends SIGINT. stdout is flushed via
+  // the write callback before exiting so the JSON line survives on a pipe;
+  // the unref'd timer is a fallback if the callback never fires.
+  const exitOnSignal = (signal: 'SIGINT' | 'SIGTERM', code: number) => {
+    process.exitCode = code;
+    try {
+      emitUsageSummary('interrupted', `Interrupted by ${signal}`, () => process.exit(code));
+    } catch { /* stdout may already be gone — exit non-zero regardless */ }
+    setTimeout(() => process.exit(code), 250).unref();
+  };
+
   // Handle Ctrl+C gracefully
   process.on('SIGINT', () => {
+    if (isNonInteractive) {
+      exitOnSignal('SIGINT', 130);
+      return;
+    }
     if (!isQuiet) {
       statusBar.hide();
       console.log(chalk.gray('\n\n╔════════════════════════════════════════════════════════════╗'));
@@ -647,6 +685,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       console.log(chalk.gray('╚════════════════════════════════════════════════════════════╝\n'));
     }
     process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    if (isNonInteractive) {
+      exitOnSignal('SIGTERM', 143);
+      return;
+    }
+    process.exit(143);
   });
 
   // Non-interactive mode: process single prompt and exit
@@ -672,7 +718,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       console.log(chalk.gray(`\n${boxHeader('Assistant')}`));
     }
 
-    const batchStart = Date.now();
+    // duration_ms measures the run itself — reset the clock just before it.
+    batchStart = Date.now();
     // Snapshot git state before the agent runs — mutations made via run_shell
     // or unclassified tools are caught by comparing status/HEAD afterwards.
     const batchGitStateBefore = getWorkspaceGitState(options.workspaceRoot);
@@ -713,54 +760,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       console.log(chalk.gray(`  🆔 ${sessionId}\n`));
     }
 
-    // #415/#399: machine-readable run manifest — emitted as the LAST stdout
-    // write in batch mode so `sc chat -q ... | tail -1 | jq` stays parseable.
-    // With `--output-format json` it is the ONLY stdout write.
-    const emitUsageSummary = (exitReason: 'success' | 'error' | 'no_changes' | 'budget_exceeded') => {
-      const usage = agent.tokenTracker.getUsage();
-      const stats = agent.getStats();
-      const lastAssistant = [...history].reverse().find(
-        m => m.role === 'assistant' && typeof m.content === 'string' && m.content.trim().length > 0
-      );
-      const checkpointPath = join(homedir(), '.sc-agent', 'checkpoints', `${sessionId}.json`);
-      const summary: Record<string, unknown> = {
-        v: 1,
-        success: exitReason === 'success',
-        model: currentConfig.model.model,
-        // Failover contract (#425): which provider/model candidate actually
-        // served the run, and the terminal resolution for machine consumers.
-        provider: agent.getProviderUsed() ?? null,
-        resolution: exitReason === 'success' ? 'completed' : exitReason,
-        tokens_in: usage.inputTokens,
-        tokens_out: usage.outputTokens,
-        estimated_cost_usd: estimateCost(currentConfig.model.model, usage.inputTokens, usage.outputTokens),
-        tool_calls: agent.getToolCallCounts(),
-        tool_calls_total: stats.toolRunCount,
-        iterations: stats.iterations,
-        duration_ms: Date.now() - batchStart,
-        exit_reason: exitReason,
-        final_message: lastAssistant ? String(lastAssistant.content).slice(0, 4000) : null,
-        checkpoint: existsSync(checkpointPath) ? checkpointPath : null,
-      };
-      if (agentError) {
-        summary.terminalResolution = agentError instanceof ProviderFailoverError
-          ? 'provider_error'
-          : TERMINAL_RESOLUTIONS[classifyError(agentError)] ?? 'error';
-        if (agentError instanceof ProviderFailoverError) {
-          summary.errorClass = agentError.errorClass;
-          summary.attempts = agentError.attempts;
-        }
-      }
-      for (const outPath of [options.summaryFile, options.outputFile]) {
-        if (!outPath) continue;
-        try {
-          writeFileSync(resolve(outPath), JSON.stringify(summary, null, 2));
-        } catch (e) {
-          verboseError(`manifest write failed (${outPath}): ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-      console.log(JSON.stringify(summary));
-    };
+    // Status markers stay greppable, but under --output-format json they go
+    // to stderr so stdout carries the manifest only (#399).
+    const markerOut = options.outputFormat === 'json' ? console.error : console.log;
 
     // Save session trace (always, even on error)
     saveSessionTrace(history);
@@ -771,7 +773,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       const errorMsg = agentError instanceof Error ? agentError.message : String(agentError);
       saveSessionStatus('error', errorMsg, history);
       verboseError(`Agent run failed: ${errorMsg}`);
-      emitUsageSummary('error');
+      emitUsageSummary('error', errorMsg);
       throw agentError;
     }
 
@@ -793,7 +795,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       saveSessionStatus('no_changes', undefined, history);
       const noMeaningfulMsg = 'No meaningful response generated. The model may not support this prompt length or format.';
       verboseError(noMeaningfulMsg);
-      emitUsageSummary('no_changes');
+      emitUsageSummary('no_changes', noMeaningfulMsg);
       throw new Error(noMeaningfulMsg);
     }
 
@@ -803,9 +805,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     const budgetExceeded = agent.getStats().budgetExceeded;
     if (budgetExceeded) {
       saveSessionStatus('budget_exceeded', `budget:${budgetExceeded}`, history);
-      console.log(`SC_BUDGET_EXCEEDED ${budgetExceeded}`);
+      markerOut(`SC_BUDGET_EXCEEDED ${budgetExceeded}`);
       process.exitCode = 22;
-      emitUsageSummary('budget_exceeded');
+      emitUsageSummary('budget_exceeded', `budget exceeded (${budgetExceeded})`);
       return;
     }
 
@@ -816,7 +818,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     const mutations = detectSessionMutations(history, batchGitStateBefore, getWorkspaceGitState(options.workspaceRoot));
     if (!mutations.hasMutations) {
       saveSessionStatus('no_changes', undefined, history);
-      console.log('SCC_NO_CHANGES');
+      markerOut('SCC_NO_CHANGES');
       process.exitCode = 10;
       emitUsageSummary('no_changes');
       return;
