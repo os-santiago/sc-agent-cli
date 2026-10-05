@@ -10,12 +10,18 @@
   },
   "scripts": {
     "prepare": "husky",
+    "ensure-deps": "node scripts/ensure-deps.mjs",
+    "prebuild": "node scripts/ensure-deps.mjs",
     "build": "tsc",
+    "predev": "node scripts/ensure-deps.mjs",
     "dev": "tsc --watch",
     "start": "node bin/sc.js",
     "clean": "rm -rf dist",
+    "pretest": "node scripts/ensure-deps.mjs",
     "test": "vitest run",
+    "pretest:watch": "node scripts/ensure-deps.mjs",
     "test:watch": "vitest",
+    "pretest:coverage": "node scripts/ensure-deps.mjs",
     "test:coverage": "vitest run --coverage"
   },
   "lint-staged": {

@@ -726,6 +726,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         exit_reason: exitReason,
         final_message: lastAssistant ? String(lastAssistant.content).slice(0, 4000) : null,
         checkpoint: existsSync(checkpointPath) ? checkpointPath : null,
+        // #421: devcontainer exec path + in-container marker (only when
+        // --devcontainer was requested).
+        ...(options.devcontainer ? { devcontainer: options.devcontainer } : {}),
       };
       for (const outPath of [options.summaryFile, options.outputFile]) {
         if (!outPath) continue;
