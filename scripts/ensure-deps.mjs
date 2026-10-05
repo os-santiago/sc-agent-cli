@@ -1,36 +1,53 @@
 #!/usr/bin/env node
-/**
- * ensure-deps.mjs — self-heal missing devDependencies before npm scripts
- * that require them (`npm run build` → tsc, `npm test` → vitest).
- *
- * Fresh checkouts and quality gates that invoke npm scripts directly fail
- * with "sh: tsc: command not found" when `npm ci`/`npm install` has not run
- * yet. This hook checks for the required node_modules/.bin shims and, when
- * any are missing, installs the locked dependency tree once before the real
- * script runs. It is a no-op when dependencies are already installed.
- *
- * Usage: node scripts/ensure-deps.mjs <required .bin name> [...]
- */
+// Ensures dependencies are installed before `npm run build` / `npm test`.
+//
+// Fresh worktrees and pre-PR quality gates can invoke npm scripts without a
+// prior `npm ci`, leaving node_modules — and the tsc/vitest shims — absent
+// ("sh: line 1: tsc: command not found", #448). When the required package is
+// missing this hook runs `npm ci` (`npm install` when no lockfile exists);
+// when present it returns immediately, so the hook is a no-op on warm
+// checkouts.
+//
+// Usage: node scripts/ensure-deps.mjs [package-name]   (default: typescript)
+
+/* global console, process */
+
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bins = process.argv.slice(2);
-const missing = bins.filter((name) => !existsSync(join(root, 'node_modules', '.bin', name)));
-if (missing.length === 0) process.exit(0);
+const pkg = process.argv[2] || 'typescript';
+const pkgJson = join(root, 'node_modules', pkg, 'package.json');
 
-console.log(`[ensure-deps] missing ${missing.join(', ')} — running npm ci`);
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const args = ['ci', '--prefer-offline', '--no-audit', '--no-fund'];
+function main() {
+  if (existsSync(pkgJson)) return;
 
-let res = spawnSync(npm, args, { cwd: root, stdio: 'inherit' });
-if (res.status !== 0) {
-  // `npm ci` runs the `prepare` lifecycle script (husky), which needs a
-  // working git dir — bare checkouts and sandboxes may not provide one.
-  // Retry without lifecycle scripts so the dependencies still land.
-  console.warn('[ensure-deps] npm ci failed — retrying with --ignore-scripts');
-  res = spawnSync(npm, [...args, '--ignore-scripts'], { cwd: root, stdio: 'inherit' });
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const args = [
+    existsSync(join(root, 'package-lock.json')) ? 'ci' : 'install',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+  ];
+
+  console.log(`[ensure-deps] ${pkg} not installed — running \`npm ${args.join(' ')}\`...`);
+  const res = spawnSync(npmCmd, args, { cwd: root, stdio: 'inherit' });
+  if (res.error || res.status !== 0) {
+    console.error(
+      `[ensure-deps] npm ${args[0]} failed${res.error ? `: ${res.error.message}` : ` (exit ${res.status})`} — run \`npm install\` manually`
+    );
+    process.exit(typeof res.status === 'number' && res.status !== 0 ? res.status : 1);
+  }
+  if (!existsSync(pkgJson)) {
+    console.error(`[ensure-deps] ${pkg} still missing after install — check the npm output above`);
+    process.exit(1);
+  }
 }
-if (res.status !== 0) process.exit(res.status ?? 1);
+
+// Only act when executed directly (`node scripts/ensure-deps.mjs [pkg]`),
+// so importing this file from tests or tooling is side-effect free.
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();

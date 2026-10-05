@@ -149,13 +149,21 @@ cd D:\git\sc-agent-cli\scripts
 
 ### `ensure-deps.mjs`
 
-Internal lifecycle hook used by the `prebuild`, `predev`, and `pretest` npm
-scripts. In a fresh checkout where `npm ci`/`npm install` has not run yet,
-scripts that rely on devDependencies fail with `sh: tsc: command not found`
-(or the vitest equivalent). This hook detects missing `node_modules/.bin`
-shims and runs `npm ci` once, then lets the real script proceed. It is a
-no-op when dependencies are already installed, and it requires only Node —
-no dependencies of its own.
+Dependency bootstrap hook wired into `npm run build` (`prebuild`) and `npm test` (`pretest`). Fresh worktrees and CI gates that invoke npm scripts without a prior `npm ci` would otherwise fail with `sh: line 1: tsc: command not found`.
+
+**What it does:**
+
+- Checks `node_modules/<package>/package.json` for the required package (argument, default `typescript`)
+- When missing, runs `npm ci --ignore-scripts --no-audit --no-fund` (or `npm install` when no `package-lock.json` exists)
+- No-ops instantly when dependencies are already installed
+- Exits non-zero with a clear error if the install fails
+
+**Usage:**
+
+```bash
+node scripts/ensure-deps.mjs          # checks typescript
+node scripts/ensure-deps.mjs vitest   # checks vitest
+```
 
 ## Verification
 
