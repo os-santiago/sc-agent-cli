@@ -7,6 +7,7 @@ import type { DevcontainerRunInfo } from '../core/devcontainer.js';
 import type { AgentRole, PhaseRecord } from '../core/roles.js';
 import type { RoleTokenUsage } from './token-tracker.js';
 import type { ResolutionResult } from './resolution-detector.js';
+import type { ContextBudgetReport } from './context-budget.js';
 import { verboseError } from './verbose-logger.js';
 
 /**
@@ -90,8 +91,13 @@ export interface RunManifest {
   attempts?: CandidateAttempt[];
   /** Human/machine reason for the terminal resolution (#446). */
   resolution_reason?: string;
-  /** Unique workspace files the run touched (git status/diff + tool calls). */
+  /** Files actually changed in the worktree: `git status --porcelain` diff plus
+   *  HEAD-diff names from commits created during the run, excluding
+   *  engine-owned artifacts. Tool-call records are only a fallback when the
+   *  workspace is not a git repo (#464). */
   files_changed?: number;
+  /** Per-source context injection spend + SC_CONTEXT_BUDGET_TOKENS enforcement (#422). */
+  context_budget?: ContextBudgetReport;
 }
 
 const FINAL_MESSAGE_MAX = 4000;
@@ -122,6 +128,8 @@ export interface RunManifestInput {
   errorObj?: unknown;
   /** Detected terminal resolution (#446) — supersedes the exitReason mapping when present. */
   resolutionInfo?: ResolutionResult;
+  /** Context-spend accounting from the injection budget guard (#422). */
+  contextBudget?: ContextBudgetReport | null;
 }
 
 export function buildRunManifest(input: RunManifestInput): RunManifest {
@@ -164,6 +172,7 @@ export function buildRunManifest(input: RunManifestInput): RunManifest {
     ...(input.resolutionInfo
       ? { resolution_reason: input.resolutionInfo.resolution_reason, files_changed: input.resolutionInfo.files_changed }
       : {}),
+    ...(input.contextBudget ? { context_budget: input.contextBudget } : {}),
   };
 }
 

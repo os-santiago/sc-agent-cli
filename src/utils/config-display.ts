@@ -44,6 +44,7 @@ export async function showConfig(
   const envMaxStorage = process.env.SC_MAX_STORAGE_GB;
   const envRole = process.env.SC_ROLE;
   const envFailover = process.env.SC_FAILOVER;
+  const envContextBudget = process.env.SC_CONTEXT_BUDGET_TOKENS;
 
   // ── Model ──
   section('Model');
@@ -66,6 +67,7 @@ export async function showConfig(
   if (envMaxStorage) overrides.push('SC_MAX_STORAGE_GB');
   if (envRole) overrides.push('SC_ROLE');
   if (envFailover) overrides.push('SC_FAILOVER');
+  if (envContextBudget) overrides.push('SC_CONTEXT_BUDGET_TOKENS');
 
   if (overrides.length > 0) {
     section('Environment Overrides');
@@ -162,6 +164,7 @@ export async function showConfig(
   console.log(` ${chalk.white('SC_MAX_STORAGE_GB'.padEnd(22))} ${chalk.gray('Storage limit in GB (default: 1)')}`);
   console.log(` ${chalk.white('SC_FAILOVER'.padEnd(22))} ${chalk.gray('Ordered provider/model cascade')}`);
   console.log(` ${chalk.white('SC_ROLE'.padEnd(22))} ${chalk.gray('Pin headless run to one phase (planner|executor|reviewer)')}`);
+  console.log(` ${chalk.white('SC_CONTEXT_BUDGET_TOKENS'.padEnd(22))} ${chalk.gray('System-prompt injection cap in est. tokens (default: uncapped)')}`);
 
   console.log();
 }

@@ -157,6 +157,20 @@ sc chat -yq --output-format json --output-file run.json "add input validation"
 
 The manifest is emitted on **every** exit path — success, error, no-changes (`SCC_NO_CHANGES`), budget exhaustion (`SC_BUDGET_EXCEEDED`), and signal interruption (`SIGINT` → exit 130, `SIGTERM` → exit 143, e.g. CI `timeout` kills) — always as the last stdout line, with `success:false` on failure exits.
 
+The manifest also carries a `context_budget` block (#422) with per-source context spend — the assembled system-prompt injection (`system`, `shell`, `repo_profile`, `project_context`, `memory`, `non_interactive`) plus a cumulative `tool_outputs` line for tool results injected during the run:
+
+```json
+"context_budget": {"budget_tokens": 8000, "requested_tokens": 12140,
+  "injected_tokens": 11440, "over_budget": true,
+  "sources": [
+    {"source":"system","tokens_requested":5400,"tokens_injected":5400,"truncated":false,"dropped":false},
+    {"source":"project_context","tokens_requested":3000,"tokens_injected":2600,"truncated":true,"dropped":false},
+    {"source":"memory","tokens_requested":300,"tokens_injected":0,"truncated":true,"dropped":true},
+    {"source":"tool_outputs","tokens_requested":3440,"tokens_injected":3440,"truncated":false,"dropped":false}]}
+```
+
+When `SC_CONTEXT_BUDGET_TOKENS` is set and the assembly exceeds it, sources are trimmed in the documented priority order (`memory` first, `system` last — never fully dropped) and `over_budget` is `true` with per-source `truncated`/`dropped` flags. Unset = no cap (`budget_tokens: null`); spend is still accounted. See `docs/environment-variables.md`.
+
 `--output-format json` requires a prompt (or `--prompt-file`); it is rejected for interactive sessions.
 
 When `--devcontainer` is used the manifest also carries a `devcontainer` block recording the resolved execution path:
@@ -526,3 +540,11 @@ In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests wo
 - **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
 - **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
+
+## Unattended Git Guard
+
+In unattended runs (`-y` / `--permissions unlimited`) the dedicated `git` tool owns repo state: `run_shell` refuses git-mutating commands (`git checkout --`, `git restore`, `git reset --hard`, `git clean -f`, `git stash`, `git commit`, `git push`, `git pull`, `git rebase`, `git merge`, `git switch`, …) with a refusal routed back to the model. This prevents the model from silently reverting its own edits — e.g. interpreting "do not commit" as `git checkout -- .` — and keeps all repo-state operations on the audited `git` tool (`status`/`diff`/`log`/`show`/`branch`/`add`/`commit`/`format`).
+
+Corollary: the manifest's `files_changed` counts the **real worktree diff** — `git status --porcelain` after the run plus files in commits created during the run — excluding engine artifacts (`--summary-file`, `--output-file`, `--audit-log` paths inside the worktree). A run that reverted all its edits, or only produced session artifacts, reports `files_changed: 0`.
+
+Interactive sessions are unaffected: commands still prompt a human supervisor. To hard-block git mutations in every mode (orchestrators that own git state externally), use `--no-commit` / `permissions.denyGitMutation`.
