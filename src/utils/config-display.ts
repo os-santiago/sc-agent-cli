@@ -42,6 +42,7 @@ export async function showConfig(
   const envProfile = process.env.SC_PROFILE;
   const envMaxIter = process.env.SC_MAX_ITERATIONS;
   const envMaxStorage = process.env.SC_MAX_STORAGE_GB;
+  const envSandbox = process.env.SC_SANDBOX;
 
   // ── Model ──
   section('Model');
@@ -62,6 +63,7 @@ export async function showConfig(
   if (envProfile) overrides.push('SC_PROFILE');
   if (envMaxIter) overrides.push('SC_MAX_ITERATIONS');
   if (envMaxStorage) overrides.push('SC_MAX_STORAGE_GB');
+  if (envSandbox) overrides.push('SC_SANDBOX');
 
   if (overrides.length > 0) {
     section('Environment Overrides');
@@ -91,6 +93,25 @@ export async function showConfig(
   list('Auto-approved', config.permissions?.autoApprove || []);
   list('Denied paths', config.permissions?.denyPaths || []);
   list('Denied commands', config.permissions?.denyCommands || []);
+
+  // ── Sandbox (#423) ──
+  section('Sandbox');
+  const sandbox = config.sandbox;
+  if (!sandbox?.enabled) {
+    field('Status', 'disabled (opt-in via sandbox.enabled or SC_SANDBOX=1)', chalk.gray);
+  } else {
+    field('Status', 'enabled', chalk.yellow);
+    const egress = sandbox.egressAllowlist ?? [];
+    field('Egress', egress.length === 0
+      ? 'block-all (loopback only)'
+      : `allowlist: ${egress.join(', ')}`);
+    list('Writable paths', sandbox.writablePaths || []);
+    list('Read-only paths', sandbox.readOnlyPaths || []);
+    field('Seccomp', sandbox.seccomp
+      ? (sandbox.seccompProfile ? `on (profile: ${sandbox.seccompProfile})` : 'on (built-in denylist, Linux only)')
+      : 'off');
+    field('Deny rules', 'permissions.denyPaths/denyCommands still apply (deny wins)', chalk.gray);
+  }
 
   // ── Tools ──
   section('Tools (10)');
@@ -143,6 +164,7 @@ export async function showConfig(
   console.log(` ${chalk.white('SC_PROFILE'.padEnd(22))} ${chalk.gray('Active profile name')}`);
   console.log(` ${chalk.white('SC_MAX_ITERATIONS'.padEnd(22))} ${chalk.gray('Max agent loop iterations (default: 100)')}`);
   console.log(` ${chalk.white('SC_MAX_STORAGE_GB'.padEnd(22))} ${chalk.gray('Storage limit in GB (default: 1)')}`);
+  console.log(` ${chalk.white('SC_SANDBOX'.padEnd(22))} ${chalk.gray('Force sandbox on/off (1/0, overrides config)')}`);
 
   console.log();
 }

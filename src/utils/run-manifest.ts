@@ -4,6 +4,7 @@ import type { Message } from '../core/types.js';
 import { ProviderFailoverError, type CandidateAttempt } from '../core/failover.js';
 import { EXIT_CODES, classifyError } from './exit-codes.js';
 import type { DevcontainerRunInfo } from '../core/devcontainer.js';
+import type { SandboxRunInfo, SandboxViolation } from './sandbox.js';
 import type { ResolutionResult } from './resolution-detector.js';
 import { verboseError } from './verbose-logger.js';
 
@@ -73,6 +74,10 @@ export interface RunManifest {
   resolution_reason?: string;
   /** Unique workspace files the run touched (git status/diff + tool calls). */
   files_changed?: number;
+  /** Resolved sandbox posture when sandbox.enabled (#423). */
+  sandbox?: SandboxRunInfo;
+  /** Structured sandbox violations {rule, target} observed during the run (#423). */
+  sandbox_violations?: SandboxViolation[];
 }
 
 const FINAL_MESSAGE_MAX = 4000;
@@ -98,6 +103,9 @@ export interface RunManifestInput {
   errorObj?: unknown;
   /** Detected terminal resolution (#446) — supersedes the exitReason mapping when present. */
   resolutionInfo?: ResolutionResult;
+  /** Sandbox posture + violation list from the agent's SandboxRuntime (#423). */
+  sandbox?: SandboxRunInfo;
+  sandboxViolations?: SandboxViolation[];
 }
 
 export function buildRunManifest(input: RunManifestInput): RunManifest {
@@ -127,6 +135,10 @@ export function buildRunManifest(input: RunManifestInput): RunManifest {
     ...(input.errorObj ? errorFields(input.errorObj) : {}),
     ...(input.resolutionInfo
       ? { resolution_reason: input.resolutionInfo.resolution_reason, files_changed: input.resolutionInfo.files_changed }
+      : {}),
+    ...(input.sandbox ? { sandbox: input.sandbox } : {}),
+    ...(input.sandboxViolations && input.sandboxViolations.length > 0
+      ? { sandbox_violations: input.sandboxViolations }
       : {}),
   };
 }

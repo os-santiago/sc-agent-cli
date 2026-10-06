@@ -247,6 +247,21 @@ Remote-env marker **set automatically** by `devcontainer exec` — it marks that
 
 ---
 
+### SC_SANDBOX
+
+Force the tool-call sandbox on or off for every `run_shell` invocation — wins over `sandbox.enabled` in config so CI runners can enforce the boundary without editing files.
+
+**Accepted values:** `1|true|on|yes` enable, `0|false|off|no` disable. Anything else fails config validation at startup.
+
+```bash
+# Full profile from .sc-agent.json (egressAllowlist, paths, seccomp) applies
+SC_SANDBOX=1 scc chat -yq 'implement issue #423'
+```
+
+See [sandboxing.md](sandboxing.md) for the `sandbox` config block.
+
+---
+
 ## Complete Examples
 
 ### Development (Local Ollama)

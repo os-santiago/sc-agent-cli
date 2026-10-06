@@ -678,6 +678,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       checkpointPath: existsSync(checkpointPath) ? checkpointPath : null,
       devcontainer: options.devcontainer,
       resolutionInfo: detectResolutionSafely(exitReason),
+      sandbox: agent.getSandboxInfo() ?? undefined,
+      sandboxViolations: agent.getSandboxViolations(),
     });
     emitRunManifest(manifest, {
       files: [options.summaryFile, options.outputFile],

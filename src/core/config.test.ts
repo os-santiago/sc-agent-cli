@@ -55,7 +55,7 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
   await writeFile(projectConfigPath, '{"model":', 'utf-8');
 
   await assert.rejects(
-    () => loadConfig(projectRoot),
+    () => loadIsolated(projectRoot),
     (err: unknown) => {
       assert.ok(err instanceof Error);
       assert.match(err.message, /Invalid JSON in project config/);
@@ -66,7 +66,7 @@ test('loadConfig surfaces invalid project config JSON with file path and recover
   );
 });
 
-const ENV_KEYS = ['SC_BASE_URL', 'SC_MODEL', 'SC_PROFILE', 'SC_API_KEY'] as const;
+const ENV_KEYS = ['SC_BASE_URL', 'SC_MODEL', 'SC_PROFILE', 'SC_API_KEY', 'SC_SANDBOX'] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -87,13 +87,19 @@ async function createProjectWithConfig(config: unknown): Promise<string> {
   return projectRoot;
 }
 
+// Isolate from the machine's real global config: on a host where sc-agent is
+// already installed, ~/.sc-agent/config.json (e.g. an activeProfile) would
+// otherwise merge in and override the values under test.
+const loadIsolated = (projectRoot?: string) =>
+  loadConfig(projectRoot, { globalConfigPath: null });
+
 test('loadConfig: SC_BASE_URL overrides config file model.baseUrl', async () => {
   const projectRoot = await createProjectWithConfig({
     model: { baseUrl: 'http://project.example/v1', model: 'project-model' },
   });
   process.env.SC_BASE_URL = 'https://models.github.ai/inference';
 
-  const config = await loadConfig(projectRoot);
+  const config = await loadIsolated(projectRoot);
 
   assert.equal(config.model.baseUrl, 'https://models.github.ai/inference');
   assert.equal(config.model.model, 'project-model');
@@ -103,14 +109,14 @@ test('loadConfig: invalid SC_BASE_URL fails with the same error as an invalid co
   const envProject = await createProjectWithConfig({});
   process.env.SC_BASE_URL = 'not a url';
   await assert.rejects(
-    () => loadConfig(envProject),
+    () => loadIsolated(envProject),
     /^Error: Invalid model\.baseUrl: "not a url" is not a valid URL$/
   );
 
   delete process.env.SC_BASE_URL;
   const fileProject = await createProjectWithConfig({ model: { baseUrl: 'not a url' } });
   await assert.rejects(
-    () => loadConfig(fileProject),
+    () => loadIsolated(fileProject),
     /^Error: Invalid model\.baseUrl: "not a url" is not a valid URL$/
   );
 });
@@ -122,7 +128,7 @@ test('loadConfig: env overrides take precedence over the active profile', async 
   process.env.SC_PROFILE = 'openai';
   process.env.SC_API_KEY = 'test-key';
 
-  const profileOnly = await loadConfig(projectRoot);
+  const profileOnly = await loadIsolated(projectRoot);
   assert.equal(profileOnly.activeProfile, 'openai');
   assert.equal(profileOnly.model.baseUrl, 'https://api.openai.com/v1');
   assert.equal(profileOnly.model.model, 'gpt-4o');
@@ -130,7 +136,7 @@ test('loadConfig: env overrides take precedence over the active profile', async 
   process.env.SC_BASE_URL = 'https://models.github.ai/inference';
   process.env.SC_MODEL = 'openai/gpt-4.1';
 
-  const withEnv = await loadConfig(projectRoot);
+  const withEnv = await loadIsolated(projectRoot);
   assert.equal(withEnv.activeProfile, 'openai');
   assert.equal(withEnv.model.baseUrl, 'https://models.github.ai/inference');
   assert.equal(withEnv.model.model, 'openai/gpt-4.1');
@@ -140,3 +146,62 @@ test('loadConfig: env overrides take precedence over the active profile', async 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+// --- sandbox config (#423) ---------------------------------------------------
+
+test('validateConfig accepts a well-formed sandbox block', () => {
+  const cfg = createConfig('http://localhost:11434/v1');
+  cfg.sandbox = {
+    enabled: true,
+    egressAllowlist: ['api.github.com:443', '*.corp.internal', '[::1]:8080', '*'],
+    writablePaths: ['/var/tmp/cache'],
+    readOnlyPaths: ['/usr/share/fixtures'],
+    seccomp: true,
+  };
+  assert.doesNotThrow(() => validateConfig(cfg));
+});
+
+test('validateConfig rejects malformed sandbox values', () => {
+  const base = () => createConfig('http://localhost:11434/v1');
+  for (const mutate of [
+    (c: ProjectConfig) => { c.sandbox = { enabled: 'yes' as unknown as boolean }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, egressAllowlist: 'api.github.com' as unknown as string[] }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, egressAllowlist: ['api.github.com:99999'] }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, egressAllowlist: ['api.github.com:notaport'] }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, egressAllowlist: ['has space.example'] }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, writablePaths: [42 as unknown as string] }; },
+    (c: ProjectConfig) => { c.sandbox = { enabled: true, seccomp: 'yes' as unknown as boolean }; },
+    (c: ProjectConfig) => { c.sandbox = [] as unknown as ProjectConfig['sandbox']; },
+  ]) {
+    const cfg = base();
+    mutate(cfg);
+    assert.throws(() => validateConfig(cfg), /sandbox/i);
+  }
+});
+
+test('loadConfig: SC_SANDBOX env overrides sandbox.enabled', async () => {
+  const projectRoot = await createProjectWithConfig({
+    sandbox: { enabled: false, egressAllowlist: ['api.github.com'] },
+  });
+  process.env.SC_SANDBOX = '1';
+  const enabled = await loadIsolated(projectRoot);
+  assert.equal(enabled.sandbox?.enabled, true);
+  assert.deepEqual(enabled.sandbox?.egressAllowlist, ['api.github.com']);
+
+  process.env.SC_SANDBOX = 'off';
+  const disabled = await loadIsolated(projectRoot);
+  assert.equal(disabled.sandbox?.enabled, false);
+
+  process.env.SC_SANDBOX = 'maybe';
+  await assert.rejects(() => loadIsolated(projectRoot), /Invalid SC_SANDBOX/);
+});
+
+test('loadConfig: project config sandbox block flows through deepMerge', async () => {
+  const projectRoot = await createProjectWithConfig({
+    sandbox: { enabled: true, egressAllowlist: ['api.github.com:443'], writablePaths: ['cache'] },
+  });
+  const config = await loadIsolated(projectRoot);
+  assert.equal(config.sandbox?.enabled, true);
+  assert.deepEqual(config.sandbox?.egressAllowlist, ['api.github.com:443']);
+  assert.deepEqual(config.sandbox?.writablePaths, ['cache']);
+});
