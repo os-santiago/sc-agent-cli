@@ -86,6 +86,53 @@ test('buildRunManifest emits a single-line JSON-serializable object', () => {
   assert.deepEqual(JSON.parse(json).exit_reason, 'success');
 });
 
+test('buildRunManifest emits #424 phase routing + per-role token fields', () => {
+  const m = buildRunManifest(baseInput({
+    phases: [
+      { role: 'planner', provider: 'openai', model: 'gpt-4o', iterations: 2 },
+      { role: 'executor', provider: 'custom', model: 'test-model', iterations: 5 },
+      { role: 'executor', provider: 'openai', model: 'gpt-4o-mini', iterations: 1 },
+      { role: 'reviewer', provider: 'anthropic', model: 'claude-x', iterations: 1 },
+    ],
+    roleFallbacks: ['reviewer'],
+    roleTokens: {
+      planner: { in: 400, out: 100 },
+      executor: { in: 500, out: 120, cached: 50 },
+    },
+    cachedTokens: 50,
+  }));
+
+  assert.equal(m.phases!.length, 4);
+  assert.deepEqual(m.phases![0], { role: 'planner', provider: 'openai', model: 'gpt-4o', iterations: 2 });
+  // Mid-phase cascades append a second segment for the same role (#424).
+  assert.deepEqual(m.phases![2], { role: 'executor', provider: 'openai', model: 'gpt-4o-mini', iterations: 1 });
+  assert.deepEqual(m.role_fallback, ['reviewer']);
+  assert.deepEqual(m.tokens, {
+    byRole: {
+      planner: { in: 400, out: 100 },
+      executor: { in: 500, out: 120, cached: 50 },
+    },
+    total: { in: 1000, out: 250, cached: 50 },
+  });
+});
+
+test('buildRunManifest omits #424 fields when no roles ran (backward compat)', () => {
+  const m = buildRunManifest(baseInput());
+  assert.equal(m.phases, undefined);
+  assert.equal(m.role_fallback, undefined);
+  assert.equal(m.tokens, undefined);
+});
+
+test('buildRunManifest omits cached token fields when the provider reports none', () => {
+  const m = buildRunManifest(baseInput({
+    phases: [{ role: 'executor', provider: 'custom', model: 'test-model', iterations: 3 }],
+    roleTokens: { executor: { in: 10, out: 5 } },
+    cachedTokens: 0,
+  }));
+  assert.deepEqual(m.tokens!.total, { in: 1000, out: 250 });
+  assert.deepEqual(m.tokens!.byRole.executor, { in: 10, out: 5 });
+});
+
 test('emitRunManifest writes the manifest file and stdout line', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sc-manifest-'));
   const outFile = join(dir, 'run.json');
@@ -138,4 +185,25 @@ test('emitRunManifest skips unwritable file paths without breaking stdout', () =
     process.stdout.write = origWrite;
   }
   assert.equal(written.length, 1);
+});
+
+test('buildRunManifest emits the context_budget block when provided (#422)', () => {
+  const contextBudget = {
+    budget_tokens: 100,
+    requested_tokens: 130,
+    injected_tokens: 100,
+    over_budget: true,
+    sources: [
+      { source: 'system', tokens_requested: 100, tokens_injected: 100, truncated: false, dropped: false },
+      { source: 'memory', tokens_requested: 30, tokens_injected: 0, truncated: true, dropped: true },
+    ],
+  };
+  const m = buildRunManifest(baseInput({ contextBudget }));
+  assert.deepEqual(m.context_budget, contextBudget);
+  assert.equal(JSON.parse(JSON.stringify(m)).context_budget.budget_tokens, 100);
+});
+
+test('buildRunManifest omits context_budget when no report exists', () => {
+  assert.ok(!('context_budget' in buildRunManifest(baseInput())));
+  assert.ok(!('context_budget' in buildRunManifest(baseInput({ contextBudget: null }))));
 });

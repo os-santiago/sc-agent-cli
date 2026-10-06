@@ -3,6 +3,8 @@ import type { Message, ProjectConfig, StreamDelta, AgentCallbacks } from './type
 import { OpenAICompatibleProvider } from './provider.js';
 import { resolveFailoverChain } from './failover.js';
 import type { CandidateAttempt } from './failover.js';
+import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS } from './roles.js';
+import type { AgentRole, PhaseRecord, RoleResolution } from './roles.js';
 import { loadProjectContext } from './project-context.js';
 import { probeRepo, formatRepoProfileForPrompt } from './repo-probe/index.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
@@ -14,7 +16,14 @@ import type { ShellInfo } from '../utils/shell-env.js';
 import { renderInline } from '../utils/markdown-renderer.js';
 import { enhanceError, formatEnhancedError } from '../utils/error-enhancer.js';
 import { boxHeader, boxFooter } from '../utils/box-drawing.js';
-import { TokenTracker, estimateMessageTokens } from '../utils/token-tracker.js';
+import { TokenTracker, estimateMessageTokens, estimateTokens } from '../utils/token-tracker.js';
+import {
+  applyContextBudget,
+  formatContextBudgetTrims,
+  resolveContextBudget,
+  type ContextBudgetReport,
+  type ContextSource,
+} from '../utils/context-budget.js';
 import { saveCheckpoint } from '../utils/checkpoint.js';
 import { AuditLogger } from '../utils/audit-log.js';
 import { verbose, verboseApiRequest, verboseApiResponse, verboseToolCall, verboseSession, verboseError } from '../utils/verbose-logger.js';
@@ -24,6 +33,7 @@ import { resolveThrottleConfig } from '../utils/throttle.js';
 import {
   getWorkspaceGitState,
   hasWorktreeChanges,
+  isMutatingToolCall,
   isWorkspaceMutatingToolCall,
   expectsWorkspaceMutation,
   declaresNoChangesNeeded,
@@ -722,6 +732,26 @@ export interface AgentOptions {
   maxSteps?: number;
   maxSeconds?: number;
   maxTotalTokens?: number;
+  /**
+   * #424 multi-model orchestration — pin this run to a single phase role
+   * (`--role`/`SC_ROLE`). When unset, a configured `roles` map expands the
+   * headless run into the full planner → executor → reviewer pipeline.
+   */
+  role?: AgentRole;
+}
+
+/**
+ * Per-phase routing options for `agent.run()` (#424). `routing` pins the
+ * provider/model for the duration of the call and scopes token accounting;
+ * `readOnly` denies mutating tool calls; `suppressCompletionGuards` skips
+ * self-heal/zero-mutation/livelock handling for phases whose correct output
+ * is prose (planner plans, reviewer verdicts).
+ */
+export interface AgentRunPhaseOptions {
+  /** Resolved role → candidate routing; presence marks this run as a phase. */
+  routing?: RoleResolution;
+  readOnly?: boolean;
+  suppressCompletionGuards?: boolean;
 }
 
 export class Agent {
@@ -734,6 +764,10 @@ export class Agent {
   private callbacks?: AgentCallbacks;
   public tokenTracker: TokenTracker;
   private _iterations: number = 0;
+  private _totalIterations: number = 0;
+  private phaseTracker = new PhaseTracker();
+  private _roleFallbacks: AgentRole[] = [];
+  private _phaseModel: string | null = null;
   private _toolRunCount: number = 0;
   private _toolCallCounts = new Map<string, number>();
   private _lastCheckpointIteration: number = 0;
@@ -741,6 +775,7 @@ export class Agent {
   private audit?: AuditLogger;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
   private sandbox?: SandboxRuntime;
+  private _contextBudgetReport: ContextBudgetReport | null = null;
 
   constructor(private options: AgentOptions) {
     this.callbacks = options.callbacks;
@@ -785,8 +820,57 @@ export class Agent {
     this._sessionId = options.sessionId || '';
   }
 
-  getStats(): { iterations: number; toolRunCount: number; sessionId: string; budgetExceeded: string | null } {
-    return { iterations: this._iterations, toolRunCount: this._toolRunCount, sessionId: this._sessionId, budgetExceeded: this._budgetExceeded };
+  getStats(): { iterations: number; totalIterations: number; toolRunCount: number; sessionId: string; budgetExceeded: string | null } {
+    return { iterations: this._iterations, totalIterations: this._totalIterations, toolRunCount: this._toolRunCount, sessionId: this._sessionId, budgetExceeded: this._budgetExceeded };
+  }
+
+  /**
+   * Enter an orchestration phase (#424): the provider's failover chain is
+   * re-rooted at the role's resolved candidate (SC_FAILOVER still cascades
+   * behind it), token accounting is scoped to the role, and a phase segment
+   * opens in the manifest log. Fallbacks record `role_fallback`.
+   */
+  beginPhase(res: RoleResolution): void {
+    if (res.fallback && !this._roleFallbacks.includes(res.role)) {
+      this._roleFallbacks.push(res.role);
+    }
+    this._phaseModel = res.candidate.model.model;
+    this.phaseTracker.begin(res.role, res.candidate);
+    this.tokenTracker.setRole(res.role, res.candidate.model.model);
+    this.provider.setFailoverChain(resolveFailoverChain(this.options.config, res.candidate));
+    this.provider.setThrottleConfig(resolveThrottleConfig(
+      this.options.config.settings?.throttling,
+      res.candidate.model.model,
+      res.candidate.model.baseUrl
+    ));
+  }
+
+  /** Close the active phase — restores the run's default failover chain. */
+  endPhase(): void {
+    this.phaseTracker.end();
+    this.tokenTracker.setRole(null);
+    this._phaseModel = null;
+    this.provider.setFailoverChain(resolveFailoverChain(this.options.config));
+    this.provider.setThrottleConfig(resolveThrottleConfig(
+      this.options.config.settings?.throttling,
+      this.options.config.model.model,
+      this.options.config.model.baseUrl
+    ));
+  }
+
+  /** Append-only phase segments for the run manifest (#424). */
+  getPhases(): PhaseRecord[] {
+    return this.phaseTracker.getPhases();
+  }
+
+  /** Roles that fell back to the run's default model (manifest `role_fallback`). */
+  getRoleFallbacks(): AgentRole[] {
+    return [...this._roleFallbacks];
+  }
+
+  /** "provider/model" label of the failover candidate that served the last call. */
+  get providerUsed(): string | null {
+    return this.provider.providerUsed;
   }
 
   /** Per-tool invocation counts for the current session (#415 usage summary). */
@@ -797,6 +881,58 @@ export class Agent {
   /** "provider/model" label of the failover candidate serving this run (#425). */
   getProviderUsed(): string | null {
     return this.provider.providerUsed;
+  }
+
+  /**
+   * Per-source context-spend accounting for the system-prompt injection
+   * of the current run (#422). Null until the first run() assembles or
+   * accounts the system message.
+   */
+  getContextBudget(): ContextBudgetReport | null {
+    return this._contextBudgetReport;
+  }
+
+  /**
+   * Oversized injections are never silent (#422): surface a visible
+   * warning, a verbose detail line, and an audit event when the
+   * SC_CONTEXT_BUDGET_TOKENS guard trimmed or dropped a source.
+   */
+  private reportContextBudget(report: ContextBudgetReport): void {
+    if (!report.over_budget) return;
+    const trims = formatContextBudgetTrims(report);
+    this.log(chalk.yellow(
+      `\n  ⚠️  Context budget ${report.budget_tokens} est. tokens exceeded ` +
+      `(${report.requested_tokens} requested → ${report.injected_tokens} injected) — trimmed: ${trims}`
+    ));
+    verbose(`[CONTEXT_BUDGET] ${JSON.stringify(report)}`, 2);
+    this.audit?.emit({
+      type: 'context_budget',
+      budget_tokens: report.budget_tokens,
+      requested_tokens: report.requested_tokens,
+      injected_tokens: report.injected_tokens,
+      trimmed: report.sources.filter(s => s.truncated).map(s => s.source),
+    });
+  }
+
+  /**
+   * Tool outputs are a context source too (#422): accumulate their spend
+   * in the report. The injection cap does not apply here — oversized
+   * results are already trimmed by the >10KB auto-compressor (and older
+   * entries by message compression/pruning) — `truncated` reflects that.
+   */
+  private recordToolOutputSpend(requestedTokens: number, injectedTokens: number): void {
+    const report = this._contextBudgetReport;
+    if (!report) return;
+    let spend = report.sources.find(s => s.source === 'tool_outputs');
+    if (!spend) {
+      spend = { source: 'tool_outputs', tokens_requested: 0, tokens_injected: 0, truncated: false, dropped: false };
+      report.sources.push(spend);
+    }
+    spend.tokens_requested += requestedTokens;
+    spend.tokens_injected += injectedTokens;
+    spend.truncated = spend.tokens_injected < spend.tokens_requested;
+    report.requested_tokens += requestedTokens;
+    report.injected_tokens += injectedTokens;
   }
 
   /** Failed-attempt records from the last provider call (failover manifest). */
@@ -888,8 +1024,23 @@ export class Agent {
     });
   }
 
-  async run(userMessage: string, history: Message[] = [], signal?: AbortSignal): Promise<Message[]> {
+  async run(userMessage: string, history: Message[] = [], signal?: AbortSignal, phase?: AgentRunPhaseOptions): Promise<Message[]> {
+    // #424: a phase-scoped run re-roots the provider at the role's candidate
+    // and opens a manifest segment; the finally guarantees the run's default
+    // chain is restored even when the phase throws.
+    const roleRes = phase?.routing ?? null;
+    if (roleRes) this.beginPhase(roleRes);
+    try {
+      return await this.runLoop(userMessage, history, signal, phase);
+    } finally {
+      if (roleRes) this.endPhase();
+    }
+  }
+
+  private async runLoop(userMessage: string, history: Message[] = [], signal?: AbortSignal, phase?: AgentRunPhaseOptions): Promise<Message[]> {
     let messages: Message[] = [...history];
+    const readOnlyPhase = phase?.readOnly ?? false;
+    const suppressGuards = phase?.suppressCompletionGuards ?? false;
 
     verbose(`Prompt received: ${userMessage.length} chars, ~${estimateMessageTokens({ role: 'user', content: userMessage })} tokens (estimated)`);
     verbose(`Auto-approve: ${!!this.options.autoApprove}, Quiet: ${!!this.options.quiet}`);
@@ -929,18 +1080,27 @@ export class Agent {
       const shellContext = `\n# Shell Environment\n- Type: ${shellInfo.type}\n- Platform: ${process.platform}\n- Tips:\n${shellInfo.tips.map(t => `  • ${t}`).join('\n')}`;
       const shellPromptGuide = getShellPromptSections(shellInfo);
 
-      const contextParts = [this.systemPrompt, shellContext, shellPromptGuide];
-      if (repoProfileContext) contextParts.push(repoProfileContext);
-      if (projectContext) contextParts.push(`\n# Project Context\n${projectContext}`);
-      if (memoryContext) contextParts.push(memoryContext);
+      // Named injection sources so context spend is accounted per source
+      // (#422). Assembly order is preserved for the final join; the
+      // budget guard trims in CONTEXT_SOURCE_PRIORITY order instead.
+      const contextSources: ContextSource[] = [
+        { source: 'system', text: this.systemPrompt },
+        { source: 'shell', text: `${shellContext}\n${shellPromptGuide}` },
+      ];
+      if (repoProfileContext) contextSources.push({ source: 'repo_profile', text: repoProfileContext });
+      if (projectContext) contextSources.push({ source: 'project_context', text: `\n# Project Context\n${projectContext}` });
+      if (memoryContext) contextSources.push({ source: 'memory', text: memoryContext });
       if (this.options.autoApprove) {
-        contextParts.push(`
+        contextSources.push({
+          source: 'non_interactive',
+          text: `
 # Non-Interactive Mode (Auto-Approve Active)
 - **YOU HAVE UNLIMITED PERMISSION**: The user has run the tool with auto-approval enabled (-y / -yq).
 - **DO NOT ASK FOR PERMISSION**: Do not ask the user "Would you like me to...", "Should I...", "Do you want me to...", or wait for instructions.
 - **TAKE ACTION IMMEDIATELY**: Modify files, run shell commands, write patches, push commits, and complete the tasks autonomously.
 - **DO NOT PROPOSE AND STOP**: If you know how to fix it, do it right now using the tools.
-`);
+`,
+        });
       }
       if (this.sandbox?.enabled) {
         const info = this.sandbox.getRunInfo();
@@ -950,17 +1110,35 @@ export class Agent {
             : `network egress is restricted to the configured allowlist (${this.sandbox.profile.egressRules
                 .map((r) => `${r.match === 'suffix' ? '*.' : ''}${r.host}${r.port !== null ? `:${r.port}` : ''}`)
                 .join(', ') || 'none'})`;
-        contextParts.push(`
+        contextSources.push({ source: 'sandbox', text: `
 # Sandboxed Execution (Active)
 - run_shell commands execute inside a sandbox boundary (${info.exec_mode} backend${info.degraded_reason ? ` — DEGRADED: ${info.degraded_reason}` : ''}).
 - Filesystem: the workspace root is writable; paths outside the workspace are read-only unless sandbox.writablePaths grants access; permissions.denyPaths remain denied.
 - Network: ${egressDesc}.
 - Sandbox denials are reported as [SANDBOX_VIOLATION] tool errors — do NOT retry the blocked operation; choose an approach that stays inside the boundary.
-`);
+` });
       }
 
-      const fullSystemPrompt = contextParts.join('\n');
+      const budgeted = applyContextBudget(contextSources, resolveContextBudget());
+      this._contextBudgetReport = budgeted.report;
+      this.reportContextBudget(budgeted.report);
+
+      const fullSystemPrompt = budgeted.texts.join('\n');
       messages.unshift({ role: 'system', content: fullSystemPrompt });
+    } else {
+      // Restored/resumed history already carries a system message — the
+      // injection guard still accounts for it (and re-trims it if the
+      // budget shrank since the original assembly).
+      const sysIndex = messages.findIndex((m) => m.role === 'system');
+      const budgeted = applyContextBudget(
+        [{ source: 'system', text: messages[sysIndex].content }],
+        resolveContextBudget(),
+      );
+      this._contextBudgetReport = budgeted.report;
+      if (budgeted.texts.length > 0 && budgeted.texts[0] !== messages[sysIndex].content) {
+        messages[sysIndex] = { ...messages[sysIndex], content: budgeted.texts[0] };
+        this.reportContextBudget(budgeted.report);
+      }
     }
 
     // Add user message
@@ -1036,6 +1214,7 @@ export class Agent {
 
       iterations++;
       this._iterations = iterations;
+      this._totalIterations++;
 
       // CRITICAL: Validate, compress, prune, and auto-correct message sequence before sending to LLM.
       // Compression+pruning keeps the context window and request size within limits for long runs.
@@ -1066,7 +1245,7 @@ export class Agent {
         reqEstTokens += est;
         this.tokenTracker.addInput(est);
       }
-      this.audit?.emit({ type: 'llm_request', iteration: iterations, model: this.options.config.model.model, messages: messages.length, est_tokens: reqEstTokens });
+      this.audit?.emit({ type: 'llm_request', iteration: iterations, model: this._phaseModel ?? this.options.config.model.model, messages: messages.length, est_tokens: reqEstTokens });
       const llmStartTime = Date.now();
 
       // Show thinking indicator on first iteration
@@ -1080,7 +1259,12 @@ export class Agent {
         response = await this.provider.chatCompletion(
           {
             messages,
-            tools: ALL_TOOLS.map((t) => t.definition),
+            // #424 read-only phases (planner/reviewer) never see mutating
+            // tools in the schema — defense in depth alongside the dispatch
+            // gate in executeTool.
+            tools: ALL_TOOLS
+              .filter((t) => !readOnlyPhase || !READ_ONLY_PHASE_DENIED_TOOLS.has(t.definition.function.name))
+              .map((t) => t.definition),
             // Respect the configured transport mode. Some OpenAI-compatible
             // providers return empty streamed tool deltas while non-streaming
             // responses contain valid tool calls.
@@ -1092,7 +1276,7 @@ export class Agent {
         this.provider.setLastCallWasError(false);
       } catch (err) {
         this.provider.setLastCallWasError(true);
-        this.audit?.emit({ type: 'llm_response', iteration: iterations, model: this.options.config.model.model, duration_ms: Date.now() - llmStartTime, status: 'error', error: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+        this.audit?.emit({ type: 'llm_response', iteration: iterations, model: this._phaseModel ?? this.options.config.model.model, duration_ms: Date.now() - llmStartTime, status: 'error', error: err instanceof Error ? err.message.slice(0, 200) : String(err) });
         throw err;
       }
 
@@ -1110,8 +1294,27 @@ export class Agent {
           this.tokenTracker.addOutput(est);
         }
       }
+      // #424: provider-reported usage supersedes the chars/4 estimates above —
+      // fold the difference into the tracker so totals and per-role buckets
+      // reflect real counts whenever the API reports them.
+      if (response.usage) {
+        const promptTok = response.usage.prompt_tokens;
+        const completionTok = response.usage.completion_tokens;
+        if (typeof promptTok === 'number' && promptTok !== reqEstTokens) {
+          this.tokenTracker.addInput(promptTok - reqEstTokens);
+        }
+        if (typeof completionTok === 'number' && completionTok !== resEstTokens) {
+          this.tokenTracker.addOutput(completionTok - resEstTokens);
+          resEstTokens = completionTok;
+        }
+        const cached = response.usage.prompt_tokens_details?.cached_tokens;
+        if (typeof cached === 'number' && cached > 0) {
+          this.tokenTracker.addCached(cached);
+        }
+      }
+      this.phaseTracker.noteServed(this.provider.providerUsed);
       this.audit?.emit({
-        type: 'llm_response', iteration: iterations, model: this.options.config.model.model,
+        type: 'llm_response', iteration: iterations, model: this._phaseModel ?? this.options.config.model.model,
         duration_ms: Date.now() - llmStartTime, status: 'ok',
         content_bytes: response.content?.length ?? 0, tool_calls: response.tool_calls?.length ?? 0,
         est_tokens: resEstTokens,
@@ -1282,6 +1485,23 @@ export class Agent {
             };
           }
 
+          // #424 read-only phase gate: the schema already hides the obvious
+          // mutating tools, but git/run_shell are dual-purpose — reject
+          // invocations classified as mutating at dispatch time.
+          if (readOnlyPhase && isMutatingToolCall(toolName, args)) {
+            const denied = `Tool call denied: ${toolName} is mutating and this phase is read-only (planner/reviewer phases may inspect but never modify the workspace).`;
+            this.emitToolError(toolName, denied);
+            this.log(chalk.gray(`  │ ${chalk.red('✗')} ${denied}`));
+            this.audit?.emit({ type: 'tool_result', iteration: iterations, name: toolName, success: false, phase: 'read_only_phase', error: denied.slice(0, 200) });
+            toolsUsed.push({name: toolName, success: false, error: denied, args});
+            return {
+              role: 'tool' as const,
+              content: `Error: ${denied}`,
+              tool_call_id: toolCall.id,
+              name: toolName,
+            };
+          }
+
           const toolStartTime = Date.now();
           try {
             verboseToolCall(toolName, args);
@@ -1359,9 +1579,13 @@ export class Agent {
           return `${start}\n\n[... Tool output compressed: ${content.length} chars → 8000 chars to prevent memory saturation ...]\n\n${end}`;
         }
 
-        // Push all results to messages
+        // Push all results to messages — and account tool-output context
+        // spend (#422): raw vs post-compression estimated tokens.
+        let toolOutRequested = 0;
+        let toolOutInjected = 0;
         for (let i = 0; i < toolResults.length; i++) {
           const result = toolResults[i];
+          toolOutRequested += estimateTokens(result.content);
           result.content = compressResult(result.content);
           if (i === toolResults.length - 1 && hasToolCallsWithoutContent) {
             // Append the nudge/instruction directly to the last tool result content.
@@ -1369,8 +1593,10 @@ export class Agent {
             // for picky API gateways (e.g. Anthropic, NVIDIA NIM) while still prompting the model for synthesis.
             result.content += '\n\n[Instruction: Analyze the tool results above. If the task is not yet complete, proceed with the next steps or tool calls to complete the task. Otherwise, summarize the results for the user in natural language. If there were errors, explain what happened and take action to fix them.]';
           }
+          toolOutInjected += estimateTokens(result.content);
           messages.push(result);
         }
+        this.recordToolOutputSpend(toolOutRequested, toolOutInjected);
 
         // Summary for multiple tools
         if (isMultiple) {
@@ -1394,7 +1620,9 @@ export class Agent {
         // text response is fine (legit final answer ends the loop at 1) —
         // only a streak reaching the threshold is a livelock.
         consecutiveNoToolResponses++;
-        if (livelockLimit > 0 && consecutiveNoToolResponses >= livelockLimit) {
+        // #424: planner/reviewer phases legitimately emit consecutive prose
+        // responses — the livelock guard does not apply to them.
+        if (!suppressGuards && livelockLimit > 0 && consecutiveNoToolResponses >= livelockLimit) {
           const lastOutput = content.trim().slice(0, 300);
           throw new Error(
             `[SC_LIVELOCK] Model produced ${consecutiveNoToolResponses} consecutive responses ` +
@@ -1416,6 +1644,7 @@ export class Agent {
         const hasFailurePhrase = /\b(does not compile|compilation error|syntax error|cannot find|unable to|not compile|build fail)/i.test(content);
 
         const shouldSelfHeal = (
+          !suppressGuards &&
           !isConversational &&
           !isShortResponse &&
           (isDeferring || isFutureIntention || hasFailurePhrase || (hasErrorIndicators && hasToolRun))
@@ -1472,6 +1701,7 @@ export class Agent {
           0
         );
         if (
+          !suppressGuards &&
           unattendedRun &&
           zeroMutationReprompts < zeroMutationRepromptBudget &&
           mutatingCalls === 0 &&

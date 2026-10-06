@@ -7,15 +7,14 @@ const { version: packageVersion } = require('../../package.json') as { version: 
 import { stdin as input, stdout as output } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, getGlobalConfigPath } from '../core/config.js';
 import { clearSessionPermissions } from '../utils/permissions.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../utils/storage-limit.js';
-import { estimateCost } from '../utils/token-tracker.js';
 import { getModelProfileEmptyStateGuidance } from './chat-session-guidance.js';
 import { getStorageGuidance } from '../utils/storage-guidance.js';
 import { statusBar, getShortcutsBar } from '../utils/status-bar.js';
@@ -28,6 +27,7 @@ import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.j
 import { getWorkspaceGitState, detectSessionMutations, countMutatingToolCalls } from '../utils/mutation-detector.js';
 import { buildRunManifest, emitRunManifest, type RunExitReason } from '../utils/run-manifest.js';
 import { detectSessionResolution } from '../utils/resolution-detector.js';
+import { resolveRolePipeline, phasePolicy, buildPhasePrompt } from '../core/roles.js';
 
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
@@ -641,6 +641,13 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   let agentError: Error | undefined;
   let budgetExceeded: string | null | undefined;
 
+  // Engine-owned artifacts (--summary-file/--output-file/--audit-log) can be
+  // written inside the worktree. They are session artifacts, not real repo
+  // diffs — exclude them from the manifest's files_changed (#464).
+  const engineArtifactPaths = [options.summaryFile, options.outputFile, options.auditLog]
+    .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    .map(p => resolve(options.workspaceRoot, p));
+
   const detectResolutionSafely = (exitReason: RunExitReason) => {
     try {
       return detectSessionResolution({
@@ -651,6 +658,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         beforeGitState: batchGitStateBefore,
         afterGitState: getWorkspaceGitState(options.workspaceRoot),
         workspaceRoot: options.workspaceRoot,
+        excludePaths: engineArtifactPaths,
       });
     } catch {
       return undefined;
@@ -670,16 +678,28 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       history,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      costUsd: estimateCost(currentConfig.model.model, usage.inputTokens, usage.outputTokens),
+      // #424: the tracker prices each role at its serving model when the
+      // run used role routing; identical to estimateCost(model, ...) for
+      // single-phase runs.
+      costUsd: agent.tokenTracker.getEstimatedCost(),
       toolCalls: agent.getToolCallCounts(),
       toolRunCount: stats.toolRunCount,
-      iterations: stats.iterations,
+      // totalIterations covers the whole phase pipeline (#424); `iterations`
+      // alone would report only the last phase's count.
+      iterations: stats.totalIterations,
       durationMs: Date.now() - batchStart,
       checkpointPath: existsSync(checkpointPath) ? checkpointPath : null,
       devcontainer: options.devcontainer,
+      provider: agent.providerUsed,
+      errorObj: agentError,
+      phases: agent.getPhases(),
+      roleFallbacks: agent.getRoleFallbacks(),
+      roleTokens: agent.tokenTracker.getRoleUsage(),
+      cachedTokens: agent.tokenTracker.getCachedTokens(),
       resolutionInfo: detectResolutionSafely(exitReason),
       sandbox: agent.getSandboxInfo() ?? undefined,
       sandboxViolations: agent.getSandboxViolations(),
+      contextBudget: agent.getContextBudget(),
     });
     emitRunManifest(manifest, {
       files: [options.summaryFile, options.outputFile],
@@ -750,8 +770,35 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
     // Snapshot git state before the agent runs — mutations made via run_shell
     // or unclassified tools are caught by comparing status/HEAD afterwards.
     batchGitStateBefore = getWorkspaceGitState(options.workspaceRoot);
+    // #424 multi-model orchestration: when `config.roles` is present (or
+    // --role/SC_ROLE pins a single phase) the headless run expands into the
+    // planner → executor → reviewer pipeline. Each phase runs on its
+    // configured provider/model; absent/invalid mappings fall back to the
+    // run's default model and surface as `role_fallback` in the manifest.
+    // Without role config the classic single-phase run is preserved.
+    const rolePipeline = (options.role || currentConfig.roles)
+      ? resolveRolePipeline(currentConfig, options.role)
+      : null;
+
     try {
-      history = await agent.run(userInput, history);
+      if (rolePipeline) {
+        for (const res of rolePipeline) {
+          const policy = phasePolicy(res.role);
+          verbose(`[roles] phase ${res.role} → ${res.candidate.id}${res.fallback ? ' (default-model fallback)' : ''}`);
+          if (!isQuiet && options.outputFormat !== 'json') {
+            console.log(chalk.gray(`  │ 🎭 Phase ${res.role} → ${res.candidate.id}${res.fallback ? ' (fallback)' : ''}`));
+          }
+          history = await agent.run(buildPhasePrompt(res.role, userInput), history, undefined, {
+            routing: res,
+            readOnly: policy.readOnly,
+            suppressCompletionGuards: policy.suppressCompletionGuards,
+          });
+          // A budget hit ends the whole run — later phases must not start.
+          if (agent.getStats().budgetExceeded) break;
+        }
+      } else {
+        history = await agent.run(userInput, history);
+      }
     } catch (err: any) {
       agentError = err;
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1165,10 +1212,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         if (sel.fields && sel.fields.length > 0) {
           hudFields = sel.fields;
           const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-          const { join } = await import('node:path');
-          const { homedir } = await import('node:os');
-          const configPath = join(homedir(), '.sc-agent', 'config.json');
-          const configDir = join(homedir(), '.sc-agent');
+          const { dirname } = await import('node:path');
+          const configPath = getGlobalConfigPath();
+          const configDir = dirname(configPath);
           if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
           let cfg: Record<string, unknown> = {};
           if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -1190,10 +1236,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         // Toggle on/off
         hudEnabled = !hudEnabled;
         const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-        const { join } = await import('node:path');
-        const { homedir } = await import('node:os');
-        const configPath = join(homedir(), '.sc-agent', 'config.json');
-        const configDir = join(homedir(), '.sc-agent');
+        const { dirname } = await import('node:path');
+        const configPath = getGlobalConfigPath();
+        const configDir = dirname(configPath);
         if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
         let cfg: Record<string, unknown> = {};
         if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -1246,7 +1291,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         console.log(chalk.gray(`  ${options.workspaceRoot}`));
 
         console.log(chalk.gray('\n🌐 Config'));
-        console.log(chalk.gray(`  ~/.sc-agent/config.json`));
+        console.log(chalk.gray(`  ${getGlobalConfigPath()}`));
         console.log(chalk.gray(`  Active profile: ${currentConfig.activeProfile || 'none'}`));
         console.log(chalk.gray(`  Model: ${currentConfig.model.model}`));
         console.log();
@@ -1467,9 +1512,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         try {
           const fs = await import('node:fs');
           const path = await import('node:path');
-          const { homedir } = await import('node:os');
 
-          const configPath = path.join(homedir(), '.sc-agent', 'config.json');
+          const configPath = getGlobalConfigPath();
           const configDir = path.dirname(configPath);
 
           if (!fs.existsSync(configDir)) {
@@ -1620,9 +1664,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           try {
             const fs = await import('node:fs');
             const path = await import('node:path');
-            const { homedir } = await import('node:os');
 
-            const configPath = path.join(homedir(), '.sc-agent', 'config.json');
+            const configPath = getGlobalConfigPath();
 
             // Ensure directory exists
             const configDir = path.dirname(configPath);
@@ -1857,10 +1900,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         if (saveDefault.value) {
           try {
             const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-            const { join } = await import('node:path');
-            const { homedir } = await import('node:os');
-            const configPath = join(homedir(), '.sc-agent', 'config.json');
-            const configDir = join(homedir(), '.sc-agent');
+            const { dirname } = await import('node:path');
+            const configPath = getGlobalConfigPath();
+            const configDir = dirname(configPath);
             if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
             let cfg: Record<string, unknown> = {};
             if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));

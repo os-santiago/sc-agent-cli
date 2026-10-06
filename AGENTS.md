@@ -19,6 +19,7 @@
 - **`src/core/config.ts`**: Configuration loading/saving with profile support
 - **`src/core/provider.ts`**: OpenAI-compatible API client with streaming + failover contract (dual timeouts, bounded retry, provider/model cascade)
 - **`src/core/failover.ts`**: Failover contract — timeout resolution, transient-error classification, backoff, SC_FAILOVER chain resolution, ProviderFailoverError
+- **`src/core/roles.ts`**: Multi-model orchestration (#424) — `planner`/`executor`/`reviewer` role routing for headless runs via `config.roles` (`provider/model` aliases), `PhaseTracker` append-only segment log, per-phase read-only policy and completion-guard suppression, `--role`/`SC_ROLE` single-phase pin
 - **`src/core/agent.ts`**: Main agent loop with parallel tool execution & memory injection
 - **`src/core/project-context.ts`**: Loads project-specific context from `AGENTS.md|CLAUDE.md`
 - **`src/core/message-validator.ts`**: Auto-corrects message sequence errors
@@ -111,7 +112,7 @@
 2. Global config (`~/.sc-agent/config.json`)
 3. Project config (`.sc-agent.json`)
 4. Active profile overrides
-5. Environment variables (SC_API_KEY, SC_MODEL, SC_BASE_URL, SC_PROFILE)
+5. Environment variables (SC_API_KEY, SC_MODEL, SC_BASE_URL, SC_PROFILE; SC_CONFIG_PATH relocates the global config file itself)
 
 ### Permission System
 
@@ -120,6 +121,7 @@
 - Blacklist profile: only dangerous commands ask (rm, sudo, del, etc.)
 - Session tracking: "Ask once" mode remembers per session
 - User can override with `-y` flag (auto-approve all)
+- **Unattended git guard**: under `-y`/`--permissions unlimited`, `run_shell` refuses git-mutating commands (`git checkout/restore/reset/clean/stash/add/commit/push/...`) — the dedicated `git` tool owns repo state; interactive mode is unaffected (#464)
 
 ### Error Recovery & Classification
 
@@ -140,6 +142,7 @@
 - **Memory monitoring**: Heap usage checked every 10 iterations; warning at 80% usage
 - **Smart re-prompting**: Self-heal prompts include list of failed tools and "try a DIFFERENT approach" instructions
 - **Pagination**: `read_file` supports `offset` + `limit` for partial file reads
+- **Context budget guard**: `SC_CONTEXT_BUDGET_TOKENS` caps the assembled system-prompt injection; over-budget sources are trimmed deterministically (memory → repo_profile → project_context → shell → non_interactive → system, which is never dropped) and per-source spend lands in the run manifest `context_budget` block
 
 ### Phase 3 — Robusteza (Edge Cases & Hardening)
 
