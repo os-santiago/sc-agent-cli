@@ -130,25 +130,87 @@ sc -yq "run npm test and report results"
 | `-yq` | Combined: auto-approve + quiet | Fully automated scripts |
 | `--output-format json` | Emit *only* the JSON run manifest on stdout | Machine consumers (CI workers, dashboards) |
 | `--summary-file <path>` / `--output-file <path>` | Also write the manifest to a file | Artifact collection, cost accounting |
+| `--devcontainer` | Run the agent inside the repo `.devcontainer` image | CI/prod parity, toolchain drift prevention |
 
 ---
 
 ## Run Manifest (JSON)
 
-In batch mode, the last stdout line is always a single-line JSON manifest — parse with `tail -1 | jq`. With `--output-format json` it is the *only* stdout output (the model's streamed answer is suppressed and carried in `final_message`).
+In batch mode, the last stdout line is always a single-line JSON manifest — parse with `tail -1 | jq`. With `--output-format json` it is the *only* stdout output: the model's streamed answer is suppressed (carried in `final_message`), and status markers (`SCC_NO_CHANGES`, `SC_BUDGET_EXCEEDED`), warnings, and errors go to **stderr** so stdout stays a single parseable JSON object.
 
 ```bash
 sc chat -yq --output-format json --output-file run.json "add input validation"
 ```
 
 ```json
-{"v":1,"success":true,"model":"gpt-4o","tokens_in":41230,"tokens_out":3180,
- "estimated_cost_usd":0.1284,"tool_calls":{"read_file":5,"edit_file":3,"run_shell":2},
- "tool_calls_total":10,"iterations":14,"duration_ms":84210,"exit_reason":"success",
- "final_message":"Added zod validation to ...","checkpoint":"/home/u/.sc-agent/checkpoints/<id>.json"}
+{"v":1,"version":"0.4.2","success":true,"model":"gpt-4o","session_id":"<id>",
+ "exit_reason":"success","iterations":14,
+ "tool_calls":{"read_file":5,"edit_file":3,"run_shell":2},"tool_calls_total":10,
+ "tokens_in":41230,"tokens_out":3180,"estimated_cost_usd":0.1284,
+ "duration_ms":84210,"final_message":"Added zod validation to ...",
+ "checkpoint":"/home/u/.sc-agent/checkpoints/<id>.json","error":null,
+ "provider":"openai/gpt-4o","resolution":"completed"}
 ```
 
-`exit_reason` is one of `success | error | no_changes | budget_exceeded`. `checkpoint` points to the resumable state file when one exists (see `--resume`). The manifest is emitted on **every** exit path — success, error, no-changes (`SCC_NO_CHANGES`), and budget exhaustion (`SC_BUDGET_EXCEEDED`) — always as the last stdout line.
+`exit_reason` is one of `success | error | no_changes | budget_exceeded | interrupted`. `checkpoint` points to the resumable state file when one exists (see `--resume`; `session_id` is also a valid resume ref). `error` carries the failure description on non-success exits, else `null`.
+
+The manifest is emitted on **every** exit path — success, error, no-changes (`SCC_NO_CHANGES`), budget exhaustion (`SC_BUDGET_EXCEEDED`), and signal interruption (`SIGINT` → exit 130, `SIGTERM` → exit 143, e.g. CI `timeout` kills) — always as the last stdout line, with `success:false` on failure exits.
+
+`--output-format json` requires a prompt (or `--prompt-file`); it is rejected for interactive sessions.
+
+When `--devcontainer` is used the manifest also carries a `devcontainer` block recording the resolved execution path:
+
+```json
+"devcontainer": {"requested": true, "exec_path": "devcontainer", "status": "devcontainer",
+  "marker": "SC_DEVCONTAINER=1", "hostname": "b3f1a2c4d5e6",
+  "config_path": ".devcontainer/devcontainer.json"}
+```
+
+or, on fallback:
+
+```json
+"devcontainer": {"requested": true, "exec_path": "host",
+  "status": "devcontainer_unavailable", "reason": "cli_missing",
+  "config_path": ".devcontainer/devcontainer.json"}
+```
+
+---
+
+## Devcontainer Execution (`--devcontainer`)
+
+Repos that declare a `.devcontainer.json` (repo root) or `.devcontainer/devcontainer.json` already pin their toolchain. `--devcontainer` runs the agent loop inside that image instead of on the host:
+
+```bash
+scc chat -yq --devcontainer --output-file run.json "implement issue #42"
+```
+
+How it works (all via the [Dev Container CLI](https://github.com/devcontainers/cli), which must be on `PATH` together with `docker`):
+
+1. Detect the devcontainer config (`sc probe` reports it as `devcontainer: true` + `devcontainerPath`).
+2. `devcontainer up --workspace-folder .` — build/start the container.
+3. `devcontainer exec --workspace-folder . --remote-env SC_DEVCONTAINER=1 scc chat <original args>` — the full argv is forwarded verbatim, and the `SC_DEVCONTAINER` remote-env marker tells the in-container run to record itself in the manifest (`marker` + container `hostname`) instead of re-orchestrating. The in-container exit code propagates to the caller.
+
+**Fallback — never hard-fails.** If the `devcontainer`/`docker` CLIs are missing, no devcontainer config exists, or `devcontainer up`/`exec` fails for any reason, the run continues on the host and is classified `devcontainer_unavailable` with a `reason` of `no_config | cli_missing | docker_missing | up_failed | exec_failed`. The decision is written to the audit log (`--audit-log`, `type: "devcontainer"` events record the exec path and command) and to the run manifest.
+
+Env knobs: `SC_DEVCONTAINER_AGENT_CMD` overrides the in-container command (default `scc`). `SC_DEVCONTAINER` is set automatically inside the container — do not set it on the host.
+
+Failover contract fields (#425):
+
+- `resolution` — `"completed"` on success; otherwise mirrors `exit_reason`
+- `provider` — `provider/model` label of the failover candidate that served the run (the configured model unless the cascade advanced; see `SC_FAILOVER`)
+- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
+- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`)
+- `attempts` — per-candidate attempt log: `[{candidate, attempt, errorClass, retryable, status, error, durationMs}]`
+
+```json
+{"v":1,"success":false,"model":"gpt-4o","provider":null,"resolution":"error",
+ "terminalResolution":"provider_error","errorClass":"rate_limit",
+ "attempts":[{"candidate":"openai/gpt-4o","attempt":4,"errorClass":"rate_limit",
+   "retryable":true,"status":429,"error":"API Error 429: rate limited","durationMs":312},
+   {"candidate":"anthropic/claude-sonnet-4-6","attempt":4,"errorClass":"rate_limit",
+   "retryable":true,"status":429,"error":"API Error 429: rate limited","durationMs":280}],
+ "exit_reason":"error", ...}
+```
 
 ---
 
@@ -383,8 +445,11 @@ Batch runs terminate with a documented exit code — wrappers branch on `$?` alo
 | `21` | Auth error — 401/403, missing or invalid API key | `Error: …` |
 | `22` | Execution budget exhausted (`--max-steps`/`--max-seconds`/`--max-total-tokens`) | `SC_BUDGET_EXCEEDED <steps\|seconds\|tokens>` |
 | `23` | Agent-loop abort — tool livelock (`--livelock-threshold`), unrecoverable loop | `[SC_LIVELOCK] …` |
+| `24` | Provider chain exhausted — every `SC_FAILOVER` candidate failed (manifest carries `errorClass` + `attempts`) | `Error: …` |
+| `130` | Interrupted by `SIGINT` (batch only) | manifest `exit_reason: "interrupted"` |
+| `143` | Interrupted by `SIGTERM` (batch only, e.g. `timeout` kills) | manifest `exit_reason: "interrupted"` |
 
-Reserved: 2-9 clean terminals, 11-19 run outcomes, 24+ fatal. Codes are stable across releases.
+Reserved: 2-9 clean terminals, 11-19 run outcomes, 25+ fatal. Codes are stable across releases.
 
 ```bash
 scc chat -yq --max-steps 50 'implement issue #42'
@@ -395,3 +460,12 @@ case $? in
   22) echo "raise the budget or split the task" ;;
 esac
 ```
+
+## Zero-Mutation Completion Guard
+
+In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests workspace changes must not end its turn having executed zero mutating tools. When the model answers with prose only — a narrated plan, a patch pasted as text, or a premature "done" — the agent blocks the turn completion and re-prompts the model to apply the change via `write_file`/`edit_file`/`git`/`run_shell`.
+
+- **Budget:** `SC_ZERO_MUTATION_REPROMPTS` (default `2`; `0` disables the guard).
+- **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
+- **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
+- **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.

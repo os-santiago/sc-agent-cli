@@ -56,6 +56,61 @@ When multiple API keys are set, the priority is:
 
 ## Behavior Configuration
 
+### SC_FAILOVER
+
+Ordered csv of `provider/model` candidates forming the provider cascade. The configured model is always tried first; each `SC_FAILOVER` entry is then tried in declared order when a candidate fails persistently.
+
+**Default:** empty (single configured model, no cascade)
+
+```bash
+# Try the configured model, then gpt-4o-mini on OpenAI, then Claude on Anthropic
+export SC_FAILOVER="openai/gpt-4o-mini,anthropic/claude-sonnet-4-6"
+```
+
+How `provider` resolves (in order):
+
+1. A matching name in `config.profiles` (uses that profile's `baseUrl`, `apiKey`, etc.)
+2. A known provider name (`openai`, `anthropic`, `nvidia`, `groq`, `together`, `ollama`, `lmstudio`) mapped to its canonical base URL
+3. Otherwise — a token with no `/` (e.g. `llama3.1`) or a prefix matching neither of the above (e.g. `meta/llama-3.3-70b-instruct`) — the whole token is treated as a model id on the configured endpoint
+
+Behavior:
+
+- **Cascade on:** retry exhaustion (4 attempts) or non-retryable errors (400/401/403, incl. unsupported model)
+- **Transient failures** (connect/attempt timeouts, `ECONNRESET`/`ETIMEDOUT`, HTTP 429, HTTP 500/502/503/504) retry first with bounded backoff (2s→4s→8s +20% jitter, capped at 8s)
+- The primary credential is never forwarded to a different host — each candidate resolves its own key (`SC_API_KEY`, host-matched env key, or its profile's `apiKey`)
+- Once the cascade advances to a working candidate, later calls in the run stick to it
+- If every candidate is exhausted, the run exits with code **24** and the manifest reports `terminalResolution: "provider_error"`, `errorClass`, and the `attempts` array per candidate
+
+---
+
+### SC_PROVIDER_CONNECT_TIMEOUT_MS
+
+Maximum time (ms) to wait for response headers on each provider attempt.
+
+**Default:** `30000` (30s). Expiry counts as a retryable transport failure.
+
+---
+
+### SC_PROVIDER_ATTEMPT_TIMEOUT_MS
+
+Maximum total time (ms) per provider attempt, including the streamed body.
+
+**Default:** `120000` (120s). Overridden by `model.timeout` in config or `--timeout`. Expiry counts as a retryable transport failure.
+
+### SC_ZERO_MUTATION_REPROMPTS
+
+Controls how many times the agent may block a turn that would complete with zero workspace mutations in unattended mode (`-y` / `--permissions unlimited`). When a prompt requests file changes but the model answers with prose only, the run is re-prompted to execute mutating tools instead of silently finishing as `SCC_NO_CHANGES`.
+
+**Default:** `2` (`0` disables the guard)
+
+```bash
+# Give a weak/routed model more chances to actually apply changes
+export SC_ZERO_MUTATION_REPROMPTS=4
+scc chat -yq 'implement issue #446'
+```
+
+---
+
 ### SC_MAX_ITERATIONS
 
 Controls the maximum number of agent iterations before stopping. Each iteration consists of:
@@ -171,6 +226,24 @@ scc chat
 ```
 
 Oldest files are automatically deleted to bring usage down to 90% of the limit.
+
+---
+
+### SC_DEVCONTAINER_AGENT_CMD
+
+Command executed inside the devcontainer when `scc chat --devcontainer` runs the agent loop via `devcontainer exec`.
+
+**Default:** `scc`
+
+```bash
+# Use a differently-named/global install inside the container
+export SC_DEVCONTAINER_AGENT_CMD="sc"
+scc chat -yq --devcontainer "run the test suite"
+```
+
+### SC_DEVCONTAINER
+
+Remote-env marker **set automatically** by `devcontainer exec` — it marks that the current process already runs inside the container (recursion guard + run-manifest evidence). Do not set it on the host.
 
 ---
 

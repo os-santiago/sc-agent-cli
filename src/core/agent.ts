@@ -1,6 +1,8 @@
 import chalk from 'chalk';
 import type { Message, ProjectConfig, StreamDelta, AgentCallbacks } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
+import { resolveFailoverChain } from './failover.js';
+import type { CandidateAttempt } from './failover.js';
 import { loadProjectContext } from './project-context.js';
 import { probeRepo, formatRepoProfileForPrompt } from './repo-probe/index.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
@@ -17,6 +19,13 @@ import { saveCheckpoint } from '../utils/checkpoint.js';
 import { AuditLogger } from '../utils/audit-log.js';
 import { verbose, verboseApiRequest, verboseApiResponse, verboseToolCall, verboseSession, verboseError } from '../utils/verbose-logger.js';
 import { resolveThrottleConfig } from '../utils/throttle.js';
+import {
+  getWorkspaceGitState,
+  hasWorktreeChanges,
+  isWorkspaceMutatingToolCall,
+  expectsWorkspaceMutation,
+  declaresNoChangesNeeded,
+} from '../utils/mutation-detector.js';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools for working with files, web, git, and executing commands.
 
@@ -703,6 +712,8 @@ export interface AgentOptions {
   livelockThreshold?: number;
   summaryFile?: string;
   outputFile?: string;
+  /** #421 devcontainer execution evidence — surfaced in the run manifest. */
+  devcontainer?: import('./devcontainer.js').DevcontainerRunInfo;
   /** 'json' suppresses all human stdout (banner, streamed answer) — the run
    *  manifest JSON line is the only stdout output. */
   outputFormat?: 'text' | 'json';
@@ -731,6 +742,7 @@ export class Agent {
   constructor(private options: AgentOptions) {
     this.callbacks = options.callbacks;
     this.provider = new OpenAICompatibleProvider(options.config.model);
+    this.provider.setFailoverChain(resolveFailoverChain(options.config));
     const throttle = resolveThrottleConfig(
       options.config.settings?.throttling,
       options.config.model.model,
@@ -762,6 +774,16 @@ export class Agent {
   /** Per-tool invocation counts for the current session (#415 usage summary). */
   getToolCallCounts(): Record<string, number> {
     return Object.fromEntries(this._toolCallCounts);
+  }
+
+  /** "provider/model" label of the failover candidate serving this run (#425). */
+  getProviderUsed(): string | null {
+    return this.provider.providerUsed;
+  }
+
+  /** Failed-attempt records from the last provider call (failover manifest). */
+  getFailoverAttempts(): CandidateAttempt[] {
+    return this.provider.failoverAttempts;
   }
 
   /**
@@ -913,7 +935,19 @@ export class Agent {
     const livelockLimit = this.options.livelockThreshold ?? (this.options.autoApprove ? 3 : 0);
     let harmonyRepromptCount = 0;
     const MAX_HARMONY_REPROMPTS = 2;
-    let forceToolChoice = false;
+    let zeroMutationReprompts = 0;
+    // Re-prompt budget for the zero-mutation completion guard (#448).
+    // Env override follows the SC_MAX_ITERATIONS convention; invalid
+    // values fall back to the default, 0 disables the guard.
+    const zeroMutationRepromptBudget = (() => {
+      const raw = parseInt(process.env.SC_ZERO_MUTATION_REPROMPTS ?? '', 10);
+      return Number.isNaN(raw) ? 2 : Math.max(0, raw);
+    })();
+    const unattendedRun = Boolean(this.options.autoApprove) || this.options.permissionMode === 'unlimited';
+    // Snapshot the worktree before the first LLM call so the guard can
+    // detect mutations made through unclassified paths (e.g. a shell
+    // heredoc write the command classifier missed).
+    const runGitStateBefore = unattendedRun ? getWorkspaceGitState(this.options.workspaceRoot) : null;
     const toolsUsed: Array<{name: string; success: boolean; error?: string; args?: Record<string, unknown>}> = [];
 
     // Reset first chunk flag for new run
@@ -1381,6 +1415,41 @@ export class Agent {
           continue;
         }
 
+        // Zero-mutation completion guard (#448): an unattended run whose
+        // prompt requests workspace changes must not end its turn having
+        // executed zero mutating tools — weak/auto-routed models narrate a
+        // plan or paste the fix as prose and the run exits SCC_NO_CHANGES
+        // with nothing applied (failure signature scc:zero-mutations:*).
+        // Re-prompt a bounded number of times; afterwards the turn ends
+        // normally and the caller still gets the documented no-changes
+        // exit contract. An explicit no-changes verdict is honored.
+        const mutatingCalls = toolsUsed.reduce(
+          (n, t) => n + (t.success && isWorkspaceMutatingToolCall(t.name, t.args) ? 1 : 0),
+          0
+        );
+        if (
+          unattendedRun &&
+          zeroMutationReprompts < zeroMutationRepromptBudget &&
+          mutatingCalls === 0 &&
+          expectsWorkspaceMutation(userMessage) &&
+          !declaresNoChangesNeeded(content) &&
+          !hasWorktreeChanges(runGitStateBefore, getWorkspaceGitState(this.options.workspaceRoot))
+        ) {
+          zeroMutationReprompts++;
+          messages.push({
+            role: 'user',
+            content:
+              `[ZERO-MUTATION ${zeroMutationReprompts}/${zeroMutationRepromptBudget} — iteration ${iterations}] ` +
+              `The turn is about to end, but this run produced ZERO workspace changes — no write_file, edit_file, mutating git operation, or mutating run_shell command was executed. ` +
+              `The task requires modifying the workspace. Do NOT describe or paste the fix in prose — apply it now using the tools. ` +
+              `If the task is genuinely read-only, or the requested change is already present, state explicitly that no changes are required and explain why.`,
+          });
+          if (!this.options.quiet) {
+            this.log(chalk.yellow(`\n  │ 🔧 Zero-mutation turn blocked (${zeroMutationReprompts}/${zeroMutationRepromptBudget}) — forcing execution...`));
+          }
+          continue;
+        }
+
         // No tool calls, finish the loop
         continueLoop = false;
       }
@@ -1441,13 +1510,13 @@ export class Agent {
     // Compact fallback warning for iteration limit
     if (hitIterationLimit) {
       this.log(chalk.gray(`\n  ⚠️  Maximum iteration limit (${MAX_ITERATIONS}) reached`));
-      if (hadErrors) console.log(chalk.gray(`  ${failedTools.length} error(s) encountered. The task may be incomplete.`));
+      if (hadErrors) this.log(chalk.gray(`  ${failedTools.length} error(s) encountered. The task may be incomplete.`));
     }
 
     // Warning for repeated errors (loop detection)
     if (hasRepeatedErrors && !taskCompleted) {
       this.log(chalk.gray('\n  ⚠️  Detected repeated errors (possible infinite loop):'));
-      repeatedErrors.forEach(([errorKey, count]) => console.log(chalk.gray(`  ${count}x: ${errorKey.substring(0, 50)}...`)));
+      repeatedErrors.forEach(([errorKey, count]) => this.log(chalk.gray(`  ${count}x: ${errorKey.substring(0, 50)}...`)));
       this.log(chalk.gray('  The agent attempted the same failing operation multiple times.'));
     }
 
