@@ -42,6 +42,8 @@ export async function showConfig(
   const envProfile = process.env.SC_PROFILE;
   const envMaxIter = process.env.SC_MAX_ITERATIONS;
   const envMaxStorage = process.env.SC_MAX_STORAGE_GB;
+  const envRole = process.env.SC_ROLE;
+  const envFailover = process.env.SC_FAILOVER;
 
   // ── Model ──
   section('Model');
@@ -62,6 +64,8 @@ export async function showConfig(
   if (envProfile) overrides.push('SC_PROFILE');
   if (envMaxIter) overrides.push('SC_MAX_ITERATIONS');
   if (envMaxStorage) overrides.push('SC_MAX_STORAGE_GB');
+  if (envRole) overrides.push('SC_ROLE');
+  if (envFailover) overrides.push('SC_FAILOVER');
 
   if (overrides.length > 0) {
     section('Environment Overrides');
@@ -79,6 +83,19 @@ export async function showConfig(
       const details = `model: ${p?.model || config.model.model}, provider: ${p?.baseUrl || config.model.baseUrl}`;
       console.log(` ${chalk.cyan(label.padEnd(22))} ${chalk.gray(details)}`);
     }
+  }
+
+  // ── Multi-model orchestration (#424) ──
+  const roles = config.roles ?? {};
+  const roleNames = Object.keys(roles);
+  if (roleNames.length > 0 || envRole || envFailover) {
+    section('Orchestration');
+    for (const role of ['planner', 'executor', 'reviewer'] as const) {
+      const mapped = roles[role];
+      field(role, mapped ?? 'default model', mapped ? chalk.cyan : chalk.gray);
+    }
+    if (envRole) field('SC_ROLE', envRole, chalk.yellow);
+    if (envFailover) field('SC_FAILOVER', envFailover, chalk.yellow);
   }
 
   // ── Permissions ──
@@ -143,6 +160,8 @@ export async function showConfig(
   console.log(` ${chalk.white('SC_PROFILE'.padEnd(22))} ${chalk.gray('Active profile name')}`);
   console.log(` ${chalk.white('SC_MAX_ITERATIONS'.padEnd(22))} ${chalk.gray('Max agent loop iterations (default: 100)')}`);
   console.log(` ${chalk.white('SC_MAX_STORAGE_GB'.padEnd(22))} ${chalk.gray('Storage limit in GB (default: 1)')}`);
+  console.log(` ${chalk.white('SC_FAILOVER'.padEnd(22))} ${chalk.gray('Ordered provider/model cascade')}`);
+  console.log(` ${chalk.white('SC_ROLE'.padEnd(22))} ${chalk.gray('Pin headless run to one phase (planner|executor|reviewer)')}`);
 
   console.log();
 }
