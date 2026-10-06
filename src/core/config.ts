@@ -169,14 +169,17 @@ export function validateConfig(config: ProjectConfig): void {
 }
 
 export function getGlobalConfigPath(): string {
-  return path.join(getGlobalConfigDir(), 'config.json');
+  // SC_CONFIG_PATH lets callers (tests, containers, CI) relocate the global
+  // config file so loadConfig never reads the host's ~/.sc-agent/config.json.
+  const override = process.env.SC_CONFIG_PATH?.trim();
+  return override || path.join(getGlobalConfigDir(), 'config.json');
 }
 
 export async function saveConfig(config: ProjectConfig, global = true): Promise<void> {
   const targetPath = global ? getGlobalConfigPath() : path.join(process.cwd(), '.sc-agent.json');
 
   if (global) {
-    await mkdir(getGlobalConfigDir(), { recursive: true });
+    await mkdir(path.dirname(targetPath), { recursive: true });
   }
 
   await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
@@ -187,8 +190,9 @@ export async function initConfig(force = false): Promise<void> {
   if (!force) {
     try {
       const fs = await import('fs');
-      if (fs.existsSync(getGlobalConfigPath())) {
-        throw new Error(`Config already exists at ${getGlobalConfigPath()}. Use --force to overwrite.`);
+      const configPath = getGlobalConfigPath();
+      if (fs.existsSync(configPath)) {
+        throw new Error(`Config already exists at ${configPath}. Use --force to overwrite.`);
       }
     } catch (err: unknown) {
       if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {

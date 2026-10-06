@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig, validateConfig } from './config.js';
+import { getGlobalConfigPath, loadConfig, validateConfig } from './config.js';
 import type { ProjectConfig } from './types.js';
 
 function createConfig(baseUrl: string, apiKey?: string): ProjectConfig {
@@ -75,6 +75,7 @@ const ENV_KEYS = [
   'SC_PROFILE',
   'SC_API_KEY',
   'SC_POLICY_FILE',
+  'SC_CONFIG_PATH',
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
   'NVIDIA_API_KEY',
@@ -89,6 +90,11 @@ beforeEach(async () => {
   const fakeHome = await mkdtemp(path.join(tmpdir(), 'sc-agent-home-'));
   process.env.HOME = fakeHome;
   process.env.USERPROFILE = fakeHome;
+  // Point the global config at a path guaranteed not to exist so loadConfig
+  // never sees the machine's real ~/.sc-agent/config.json — an activeProfile
+  // there would override merged model.* and break hermetic assertions.
+  const isolatedDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-no-global-'));
+  process.env.SC_CONFIG_PATH = path.join(isolatedDir, 'config.json');
 });
 
 afterEach(() => {
@@ -152,6 +158,19 @@ test('loadConfig: env overrides take precedence over the active profile', async 
   assert.equal(withEnv.model.baseUrl, 'https://models.github.ai/inference');
   assert.equal(withEnv.model.model, 'openai/gpt-4.1');
   assert.equal(withEnv.model.apiKey, 'test-key');
+});
+
+test('loadConfig: SC_CONFIG_PATH relocates the global config file', async () => {
+  const globalDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-global-'));
+  const globalConfigPath = path.join(globalDir, 'config.json');
+  await writeFile(globalConfigPath, JSON.stringify({ model: { model: 'global-model' } }), 'utf-8');
+  process.env.SC_CONFIG_PATH = globalConfigPath;
+
+  const projectRoot = await createProjectWithConfig({});
+  const config = await loadConfig(projectRoot);
+
+  assert.equal(getGlobalConfigPath(), globalConfigPath);
+  assert.equal(config.model.model, 'global-model');
 });
 
 function escapeRegex(value: string): string {
