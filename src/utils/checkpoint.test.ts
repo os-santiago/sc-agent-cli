@@ -220,11 +220,12 @@ test('checkpoint root falls back to ~/.sc-agent/checkpoints when SC_CHECKPOINT_D
   try {
     vi.stubEnv('SC_CHECKPOINT_DIR', '');
     vi.stubEnv('HOME', fakeHome);
-    // os.homedir() ignores HOME on win32 — USERPROFILE is the lookup there,
-    // and tmpdir may hand us a short-name path, so compare through realpath. (fix(test): Windows e2e gaps — USERPROFILE stub + realpath, linux-only case-variant makefile tests, non-hex binary fixture)
+    // os.homedir() ignores HOME on win32 — USERPROFILE is the lookup there.
+    // tmpdir may hand us a short-name (win32) or symlinked (macOS /var→/private/var)
+    // path, so compare both sides through realpath.
     vi.stubEnv('USERPROFILE', fakeHome);
     const filePath = saveCheckpoint(makeInput({ sessionId: 'home-dflt' }));
-    assert.equal(filePath, join(realpathSync(fakeHome), '.sc-agent', 'checkpoints', 'home-dflt.json'));
+    assert.equal(realpathSync(filePath), join(realpathSync(fakeHome), '.sc-agent', 'checkpoints', 'home-dflt.json'));
     assert.ok(existsSync(filePath));
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
