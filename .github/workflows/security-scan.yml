@@ -80,17 +80,24 @@ jobs:
         run: |
           echo "🔍 Scanning for malicious patterns..."
 
-          # Check for tracking/telemetry code
-          if grep -r -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/; then
+          # Check for tracking/telemetry code. A bare `track` substring match
+          # can never pass on this codebase: `token-tracker` (token/cost
+          # accounting), `untracked` (git status), `track()` socket bookkeeping
+          # and "tracking/tracker" prose are all legitimate. Match concrete
+          # telemetry/beacon indicators instead.
+          if grep -r -E "(analytics|telemetry|phone.?home|sendBeacon|tracking.?pixel|mixpanel|amplitude|posthog|matomo|gtag|google.?analytics|hotjar|fullstory|sentry)" --include="*.ts" --include="*.js" src/; then
             echo "⚠️  WARNING: Potential tracking code detected"
-            grep -r -n -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/
+            grep -r -n -E "(analytics|telemetry|phone.?home|sendBeacon|tracking.?pixel|mixpanel|amplitude|posthog|matomo|gtag|google.?analytics|hotjar|fullstory|sentry)" --include="*.ts" --include="*.js" src/
             exit 1
           fi
 
-          # Check for data exfiltration patterns
-          if grep -r -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"; then
+          # Check for data exfiltration patterns. Word boundaries keep
+          # substring false positives out (requestPermission, 'web_fetch',
+          # fetchByUrl); real fetch/axios/request/http.get/http.post calls
+          # with a URL literal still match.
+          if grep -r -E "\b(fetch|axios|request|http\.get|http\.post)\b.*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"; then
             echo "⚠️  WARNING: Suspicious HTTP requests detected"
-            grep -r -n -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"
+            grep -r -n -E "\b(fetch|axios|request|http\.get|http\.post)\b.*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"
             exit 1
           fi
 
