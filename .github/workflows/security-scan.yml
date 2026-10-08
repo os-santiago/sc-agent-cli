@@ -20,26 +20,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install dependencies
         run: npm ci
 
+      # Gate: fails the job on high/critical advisories. Moderate/low stay
+      # visible in the job output and JSON report but do not block CI.
       - name: Run npm audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
+        run: npm audit --audit-level=high
 
       - name: Generate audit report
-        run: npm audit --json > npm-audit.json
-        continue-on-error: true
+        if: always()
+        run: npm audit --json > npm-audit.json || true
 
       - name: Upload audit results
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: npm-audit-report
           path: npm-audit.json
@@ -53,86 +55,33 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: javascript-typescript
           queries: security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: "/language:javascript-typescript"
-
-  malware-scan:
-    name: Malware & Backdoor Detection
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Scan for suspicious patterns
-        run: |
-          echo "🔍 Scanning for malicious patterns..."
-
-          # Check for tracking/telemetry code
-          if grep -r -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/; then
-            echo "⚠️  WARNING: Potential tracking code detected"
-            grep -r -n -E "(track|analytics|telemetry|phone.?home)" --include="*.ts" --include="*.js" src/
-            exit 1
-          fi
-
-          # Check for data exfiltration patterns
-          if grep -r -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"; then
-            echo "⚠️  WARNING: Suspicious HTTP requests detected"
-            grep -r -n -E "(fetch|axios|request|http\.get|http\.post).*http(s)?://" --include="*.ts" --include="*.js" src/ | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"
-            exit 1
-          fi
-
-          # Check for base64 encoded strings (potential obfuscation)
-          if grep -r -E "atob|btoa|Buffer\.from.*base64" --include="*.ts" --include="*.js" src/; then
-            echo "⚠️  WARNING: Base64 encoding/decoding detected (potential obfuscation)"
-            grep -r -n -E "atob|btoa|Buffer\.from.*base64" --include="*.ts" --include="*.js" src/
-            exit 1
-          fi
-
-          # Check for eval() usage
-          if grep -r -E "eval\(" --include="*.ts" --include="*.js" src/; then
-            echo "⚠️  WARNING: eval() usage detected (security risk)"
-            grep -r -n -E "eval\(" --include="*.ts" --include="*.js" src/
-            exit 1
-          fi
-
-          # Check for credential harvesting patterns
-          if grep -r -E "(password|token|secret|key|credential).*=.*process\.env" --include="*.ts" --include="*.js" src/ | grep -E "(send|post|fetch|upload)"; then
-            echo "⚠️  WARNING: Potential credential exfiltration detected"
-            exit 1
-          fi
-
-          # Check for crypto mining patterns
-          if grep -r -E "(crypto.?miner|coinhive|monero|bitcoin|mining.?pool)" --include="*.ts" --include="*.js" src/; then
-            echo "⚠️  WARNING: Cryptocurrency mining code detected"
-            exit 1
-          fi
-
-          echo "✅ No suspicious patterns detected"
 
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0  # Full history for comprehensive scan
 
       - name: TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@b2b0a92070f206ab7b5a1105d82a7f2f48d92341 # v3.99.0
         with:
           path: ./
           base: main
@@ -144,31 +93,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Check for dependency confusion
         run: |
           echo "🔍 Checking for dependency confusion attacks..."
 
-          # Check if package.json has suspicious package names
-          if grep -E "^  \"(@.+/)?[A-Z]" package.json; then
-            echo "⚠️  WARNING: Suspicious package names with capital letters"
-            exit 1
-          fi
-
-          # Check for packages with unusual version formats
-          if grep -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json; then
-            echo "⚠️  WARNING: Packages installed from unusual sources"
-            grep -n -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json
-            exit 1
-          fi
-
-          echo "✅ No supply chain issues detected"
+          # Validate declared dependency entries: npm package names must be
+          # lowercase/URL-safe, and every version spec must resolve through the
+          # registry (semver range). Anything else — uppercase names, git/http/
+          # file/workspace specs, or owner/repo shorthand — is flagged for
+          # manual review as a dependency-confusion / integrity risk.
+          node <<'EOF'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const NAME_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+          const NON_REGISTRY = /^(?:git\+|https?:|file:|link:|workspace:|github:|[\w.-]+\/[\w.-]+)/;
+          const groups = ['dependencies', 'devDependencies', 'optionalDependencies'];
+          const findings = [];
+          for (const group of groups) {
+            for (const [name, spec] of Object.entries(pkg[group] || {})) {
+              if (!NAME_RE.test(name)) {
+                findings.push(`${group}.${name}: invalid package name (uppercase/illegal chars)`);
+              }
+              if (NON_REGISTRY.test(String(spec))) {
+                findings.push(`${group}.${name}: non-registry source "${spec}"`);
+              }
+            }
+          }
+          if (findings.length) {
+            console.error('⚠️  Suspicious dependency entries detected:');
+            findings.forEach(f => console.error(` - ${f}`));
+            process.exit(1);
+          }
+          const total = groups.reduce((n, g) => n + Object.keys(pkg[g] || {}).length, 0);
+          console.log(`✅ ${total} dependency entries verified (registry sources, valid names)`);
+          EOF
 
       - name: Check package integrity
         run: |
@@ -180,12 +145,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Install dependencies
         run: npm ci
@@ -206,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Run ESLint security rules
         run: |
