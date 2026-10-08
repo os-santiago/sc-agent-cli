@@ -40,7 +40,7 @@
 - Execution tools:
   - `run-shell.ts`: Execute shell commands (requires permission)
 - **New in v0.4.0**:
-  - `web-fetch.ts`: Fetch web content (docs, APIs, GitHub). No API key needed. (auto-approved)
+  - `web-fetch.ts`: Fetch web content (docs, APIs, GitHub). No API key needed. SSRF-guarded (#470): http(s)-only, private/loopback/link-local/reserved IPs blocked on every redirect hop via `src/utils/ssrf-guard.ts` (DNS-resolved addresses checked too), 5 MiB streamed body cap, 60s timeout clamp, optional `webFetch.allowlist`/`allowPrivateHosts`/`maxBytes` config. (auto-approved)
   - `git-tool.ts`: Native git operations (status, diff, log, branch, add, commit) (requires permission)
   - `memory-tools.ts`: Persistent cross-session memory read/write (read auto-approved, write requires permission)
 
@@ -57,6 +57,7 @@
 - **`src/utils/storage-guidance.ts`**: Storage usage tips
 - **`src/utils/token-tracker.ts`**: Token usage estimation and cost tracking
 - **`src/utils/checkpoint.ts`**: Execution state checkpointing for crash recovery
+- **`src/utils/secure-fs.ts`**: Owner-only persistence (#475) — `writeFileSecure[Sync]`/`appendFileSecureSync` write files 0600 (and tighten pre-existing loose files), `ensureSecureDir[Sync]` creates dirs 0700 and repairs the `~/.sc-agent` chain, `warnOnLoosePermissions` warns + repairs on load (used by `loadConfig` for the global `config.json`). POSIX-only; no-ops on Windows.
 - **`src/utils/run-manifest.ts`**: Machine-readable run manifest builder/emitter for headless batch runs (`--output-format json`, `--summary-file`, `--output-file`)
 - **`src/utils/sandbox.ts`**: Opt-in `run_shell` sandbox (#423) — `sandbox` config block, bwrap backend on Linux (mount/net namespaces, `--seccomp`), degraded egress-proxy mode elsewhere; violations surface as `[SANDBOX_VIOLATION]` tool errors + `sandbox_violation` audit events + manifest `sandbox`/`sandbox_violations` fields
 - **`src/utils/sandbox-proxy.ts`**: Loopback egress-filter proxy enforcing `sandbox.egressAllowlist` (CONNECT + HTTP forward)
@@ -150,6 +151,7 @@
 ### Phase 3 — Robusteza (Edge Cases & Hardening)
 
 - **`deepMerge` cycle detection**: Uses `WeakSet` to track visited objects; throws on circular references in config
+- **`deepMerge` prototype-pollution guard (#478)**: Iterates own enumerable keys only (`Object.keys`) and skips `__proto__`/`constructor`/`prototype` at every merge level with a stderr warning naming the key path and file; the same denylist guards the repo-probe manifest parsers (TOML/YAML/Makefile/XML) and the permission-prompt arg redaction
 - **URL validation**: `validateConfig` + `provider.ts` validate `baseUrl` with `new URL()` before use
 - **`collectFiles` depth limit**: Max 20 directory depth to prevent stack overflow on deeply nested trees
 - **`unlinkSync` error propagation**: Logs warning with error message instead of silent catch during cleanup
@@ -195,6 +197,9 @@ npm run build     # Compile TypeScript
 npm run dev       # Watch mode
 npm link          # Install globally
 sc-agent          # Run the CLI
+npm test          # Unit/integration suite (vitest, src/**/*.test.ts)
+npm run test:e2e  # E2E smoke suite — spawns built bin/sc.js vs a mock provider
+                  # (test/e2e/, requires `npm run build` first; see its README)
 ```
 
 ## Common Tasks
@@ -239,7 +244,7 @@ sc-agent profile use my-custom
 
 ## Notes
 
-- Uses native `fetch` (Node 18+), no external HTTP library needed
+- Uses native `fetch` (Node 20+), no external HTTP library needed
 - Streaming is done via `ReadableStream` (Web Streams API)
 - Cross-platform shell execution uses `spawn({ shell: true })`
 - No external AI SDK dependencies (direct API calls)

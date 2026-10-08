@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, test } from 'vitest';
+import { afterEach, beforeEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const key of ENV_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedEnv[key];
@@ -147,6 +148,52 @@ test('loadConfig: env overrides take precedence over the active profile', async 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+// --- file permissions (#475) -------------------------------------------------
+// Skip on Windows: POSIX mode bits are synthesized there and cannot be
+// tightened by chmod.
+const posix = test.skipIf(process.platform === 'win32');
+
+posix('loadConfig warns on and repairs a loose global config.json', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'sc-agent-global-'));
+  const configPath = path.join(dir, 'config.json');
+  await writeFile(configPath, JSON.stringify({ model: { model: 'file-model' } }), 'utf-8');
+  chmodSync(configPath, 0o644);
+
+  const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const config = await loadConfig(undefined, { globalConfigPath: configPath });
+
+  assert.equal(config.model.model, 'file-model');
+  assert.equal(statSync(configPath).mode & 0o777, 0o600, 'loose config must be repaired to 0600');
+  assert.ok(
+    spy.mock.calls.some((c) => /loose permissions/.test(String(c[0]))),
+    'expected a loose-permissions warning'
+  );
+});
+
+posix('loadConfig stays silent when the global config is already owner-only', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'sc-agent-global-'));
+  const configPath = path.join(dir, 'config.json');
+  await writeFile(configPath, JSON.stringify({}), { mode: 0o600 });
+
+  const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await loadConfig(undefined, { globalConfigPath: configPath });
+
+  assert.equal(spy.mock.calls.length, 0);
+  assert.equal(statSync(configPath).mode & 0o777, 0o600);
+});
+
+posix('loadConfig does not warn for the project config layer', async () => {
+  const projectRoot = mkdtempSync(path.join(tmpdir(), 'sc-agent-project-'));
+  const projectConfigPath = path.join(projectRoot, '.sc-agent.json');
+  await writeFile(projectConfigPath, JSON.stringify({ model: { model: 'p' } }), 'utf-8');
+  chmodSync(projectConfigPath, 0o644);
+
+  const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await loadConfig(projectRoot, { globalConfigPath: null });
+
+  assert.equal(spy.mock.calls.length, 0);
+});
 
 // --- sandbox config (#423) ---------------------------------------------------
 
@@ -292,6 +339,101 @@ test('loadConfig: run_shell.allowedEnvVars flows through deepMerge', async () =>
   const projectRoot = await createProjectWithConfig({ run_shell: { allowedEnvVars: ['MY_FLAG'] } });
   const config = await loadIsolated(projectRoot);
   assert.deepEqual(config.run_shell?.allowedEnvVars, ['MY_FLAG']);
+});
+
+// --- deepMerge prototype-pollution guard (#478) -------------------------------
+
+// Raw JSON text (not JSON.stringify) so `__proto__` lands as an own
+// enumerable key — the exact shape a crafted config file produces.
+async function createProjectWithRawConfig(rawJson: string): Promise<string> {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'sc-agent-config-'));
+  await writeFile(path.join(projectRoot, '.sc-agent.json'), rawJson, 'utf-8');
+  return projectRoot;
+}
+
+test('loadConfig: __proto__/constructor/prototype keys cannot alter the merged prototype', async () => {
+  const projectRoot = await createProjectWithRawConfig(
+    '{"__proto__":{"polluted":"yes"},"constructor":{"polluted":1},"prototype":{"polluted":2},' +
+      '"model":{"model":"legit-model"}}'
+  );
+
+  const config = await loadIsolated(projectRoot);
+
+  assert.equal(Object.getPrototypeOf(config), Object.prototype);
+  assert.equal((config as Record<string, unknown>).polluted, undefined);
+  assert.ok(!('polluted' in {}), 'Object.prototype must stay clean');
+  assert.equal(config.model.model, 'legit-model');
+});
+
+test('loadConfig: dangerous keys are skipped at nested merge levels', async () => {
+  const projectRoot = await createProjectWithRawConfig(
+    '{"model":{"__proto__":{"polluted":"nested"},"constructor":{"x":1},"prototype":{"y":2},' +
+      '"model":"nested-model"},"sandbox":{"enabled":true,"__proto__":{"polluted":true}}}'
+  );
+
+  const config = await loadIsolated(projectRoot);
+
+  assert.equal(config.model.model, 'nested-model');
+  assert.equal(Object.getPrototypeOf(config.model), Object.prototype);
+  assert.equal((config.model as Record<string, unknown>).polluted, undefined);
+  assert.equal(Object.hasOwn(config.model, 'constructor'), false);
+  assert.equal(Object.hasOwn(config.model, 'prototype'), false);
+
+  assert.equal(config.sandbox?.enabled, true);
+  assert.equal(Object.getPrototypeOf(config.sandbox), Object.prototype);
+  assert.equal((config.sandbox as Record<string, unknown>).polluted, undefined);
+  assert.ok(!('polluted' in {}), 'Object.prototype must stay clean');
+});
+
+test('loadConfig: dangerous keys in the global config file are also skipped', async () => {
+  const globalDir = await mkdtemp(path.join(tmpdir(), 'sc-agent-global-'));
+  const globalPath = path.join(globalDir, 'config.json');
+  await writeFile(
+    globalPath,
+    '{"__proto__":{"polluted":"global"},"model":{"model":"global-model"}}',
+    'utf-8'
+  );
+
+  const config = await loadConfig(undefined, { globalConfigPath: globalPath });
+
+  assert.equal(Object.getPrototypeOf(config), Object.prototype);
+  assert.equal((config as Record<string, unknown>).polluted, undefined);
+  assert.equal(config.model.model, 'global-model');
+});
+
+test('loadConfig: warns naming the unsafe key path and the config file', async () => {
+  const projectRoot = await createProjectWithRawConfig(
+    '{"model":{"__proto__":{"polluted":1},"model":"m"}}'
+  );
+  const configPath = path.join(projectRoot, '.sc-agent.json');
+
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // Read mock.calls before restoring — mockRestore() clears recorded calls.
+  let messages: string[] = [];
+  try {
+    await loadIsolated(projectRoot);
+    messages = warnSpy.mock.calls.map((c) => String(c[0]));
+  } finally {
+    warnSpy.mockRestore();
+  }
+  assert.ok(
+    messages.some((m) => m.includes('model.__proto__') && m.includes(configPath)),
+    `expected a warning naming "model.__proto__" and ${configPath}, got: ${messages.join(' | ')}`
+  );
+});
+
+test('loadConfig: inherited enumerable properties are never merged', async () => {
+  const projectRoot = await createProjectWithRawConfig('{"model":{"model":"m"}}');
+  (Object.prototype as Record<string, unknown>).injectedInherited = 'nope';
+  try {
+    const config = await loadIsolated(projectRoot);
+    // hasOwn, not truthiness — the injected member still resolves through the
+    // prototype chain; the guard must keep it from becoming an own property.
+    assert.equal(Object.hasOwn(config, 'injectedInherited'), false);
+    assert.equal(Object.hasOwn(config.model, 'injectedInherited'), false);
+  } finally {
+    delete (Object.prototype as Record<string, unknown>).injectedInherited;
+  }
 });
 
 // --- SC_CONFIG_PATH relocation (#499) -----------------------------------------
