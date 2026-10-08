@@ -124,6 +124,7 @@
 - User can override with `-y` flag (auto-approve all)
 - **Unattended git guard**: under `-y`/`--permissions unlimited`, `run_shell` refuses git-mutating commands (`git checkout/restore/reset/clean/stash/add/commit/push/...`) — the dedicated `git` tool owns repo state; interactive mode is unaffected (#464)
 - **"Always" scope cap** (#477): the permission prompt's "Always" persists to the global config only for non-mutating tools — for `run_shell`/`git`/`memory_write`/`write_file`/`edit_file` it is capped at session scope (nothing is written to `~/.sc-agent/config.json`)
+- **External tools share the gate** (#485): `registerPluginTools` wraps every plugin module (#400) and MCP server tool (#401) `execute` with `requestPermission` — external code cannot self-gate, so autoApprove lists, `-y`, session grants and prompts apply to `mcp__*`/plugin tools exactly like built-ins
 
 ### Error Recovery & Classification
 
