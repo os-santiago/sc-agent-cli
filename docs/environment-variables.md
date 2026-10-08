@@ -542,14 +542,40 @@ Relocates the session-artifact root directory. `session.json`/`status.json` trac
 
 ---
 
+## Child Process Environment (#471)
+
+Commands the agent spawns (`run_shell`, `mcp_validate`, MCP stdio servers) do **not** inherit your full shell environment. They receive a fixed safe base — `PATH`, `HOME`, `SHELL`, `TERM`, `USER`, `LANG`/locale vars, `TMPDIR`/`TMP`/`TEMP`, `XDG_*` dirs, proxy vars, and the Windows essentials (`SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, …) — plus any names you opt in via config:
+
+```json
+{ "run_shell": { "allowedEnvVars": ["NPM_CONFIG_REGISTRY", "CARGO_TERM_COLOR"] } }
+```
+
+- Credential-shaped names — `SC_*`, `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_KEY*`, `*_PASSWORD`, `*_AUTH`, `*_CREDENTIALS`, `BEARER` — are stripped **unconditionally**. `allowedEnvVars` can never re-add them, so `env`/`printenv` inside a spawned command cannot expose provider keys.
+- MCP servers (`mcp.servers.*`) receive the same scrubbed base plus whatever you wire explicitly into that server's `env` map — set server credentials there.
+- `run_shell` output is additionally masked for *known* secret values (credential env vars + configured API keys are replaced with `***`) before it reaches the model context.
+- `permissions.denyPaths` only guards the file tools — it does **not** constrain shell commands. `denyCommands` ships defaults that block `cat .env`-style credential reads (see [permission-profiles.md](permission-profiles.md#hard-deny-list-denycommands)); `sandbox.enabled` is the hard boundary when you need stronger isolation (see [sandboxing.md](sandboxing.md)).
 ### SC_CHECKPOINT_DIR
 
-Overrides the directory where execution checkpoints are written — the agent auto-saves full run state (message history, input history, iteration and tool counts) every 5 iterations for crash recovery, and `/checkpoint save` / `/checkpoint list` plus the resume-on-crash flow read and write the same root. Checkpoints older than 7 days — and any beyond the 20 most recent — are auto-cleaned on each save. Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/`.
+Relocates the checkpoint root directory. Checkpoints written by `--checkpoint` land under `SC_CHECKPOINT_DIR/<sessionId>.json` instead of the default. Useful for tests and sandboxed CI runs that must not touch the host's `~/.sc-agent/`.
 
 **Default:** `~/.sc-agent/checkpoints/`
 
+### SC_SESSIONS_DIR
+
+Relocates the session-artifact root directory. `session.json`/`status.json` traces land under `SC_SESSIONS_DIR/<sessionId>/` instead of the default. Useful for tests and sandboxed CI runs.
+
+**Default:** `~/.sc-agent/sessions/`
+
+---
+
+### SC_CHECKPOINT_DIR
+
+Overrides the directory where execution checkpoints are stored — the `<sessionId>.json` snapshots saved every 5 agent iterations for crash recovery (`/checkpoint save`, `/checkpoint list`, `findLatestCheckpoint`). Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/checkpoints/`.
+
+**Default:** `~/.sc-agent/checkpoints`
+
 ```bash
-# Keep checkpoints on a throwaway filesystem
+# Keep checkpoint writes inside an ephemeral workspace
 export SC_CHECKPOINT_DIR=/tmp/sc-agent/checkpoints
 scc chat
 ```
@@ -558,12 +584,12 @@ scc chat
 
 ### SC_SESSIONS_DIR
 
-Overrides the root directory where per-session trace artifacts are written — `<sessionId>/session.json` (redacted message history) and `<sessionId>/status.json` per run. Writes are best-effort (failures are ignored) and every payload passes through the secret-redaction layer before hitting disk. Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/`.
+Overrides the root directory where per-session artifacts are written — each run gets `<sessionId>/session.json` (redacted message trace) and `<sessionId>/status.json`. Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/sessions/`.
 
-**Default:** `~/.sc-agent/sessions/`
+**Default:** `~/.sc-agent/sessions`
 
 ```bash
-# Keep session traces on a throwaway filesystem
+# Capture session traces on a throwaway mount
 export SC_SESSIONS_DIR=/tmp/sc-agent/sessions
 scc chat
 ```
