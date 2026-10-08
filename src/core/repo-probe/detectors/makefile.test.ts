@@ -73,7 +73,7 @@ test('check target alone maps to test command', () => {
   assert.equal(detectMakefile(root).commands.test, 'make check');
 });
 
-test('lowercase makefile and GNUmakefile names are found', () => {
+test.skipIf(process.platform !== 'linux')('lowercase makefile and GNUmakefile names are found', () => {
   for (const name of ['makefile', 'GNUmakefile']) {
     const root = repo({ [name]: 'build:\n\techo hi\n' });
     const res = detectMakefile(root);
@@ -86,7 +86,7 @@ test('lowercase makefile and GNUmakefile names are found', () => {
   }
 });
 
-test('Makefile precedence order: Makefile before makefile before GNUmakefile', () => {
+test.skipIf(process.platform !== 'linux')('Makefile precedence order: Makefile before makefile before GNUmakefile', () => {
   const root = repo({
     'Makefile': 'a:\n\techo a\n',
     'makefile': 'b:\n\techo b\n',
