@@ -14,7 +14,7 @@
 //   * the workspace carries a `.sc-agent.json` pointing model.baseUrl at
 //     the local mock provider — nothing but loopback is ever contacted.
 
-import { execFile, type ExecFileException } from 'node:child_process';
+import { execFile, type ChildProcess, type ExecFileException } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -70,6 +70,9 @@ export interface RunCliOptions {
   input?: string;
   /** Spawn watchdog — SIGKILL after this many ms. Default 30s. */
   timeoutMs?: number;
+  /** Called synchronously with the live child right after spawn — lets tests
+   *  signal it mid-run (e.g. SIGTERM → exit 143). */
+  onSpawn?: (child: ChildProcess) => void;
 }
 
 // CSI escape sequences (chalk emits SGR, the agent loop emits line-erases) —
@@ -104,6 +107,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
         });
       },
     );
+    options.onSpawn?.(child);
     if (options.input !== undefined && child.stdin) {
       child.stdin.write(options.input);
     }
@@ -165,6 +169,11 @@ export interface RunManifestShape {
   iterations?: number;
   attempts?: Array<Record<string, unknown>>;
   final_message?: string | null;
+  /** Terminal resolution from the detector (#446): completed | no_changes |
+   *  not_actionable | blocked | budget_exceeded | error. */
+  resolution?: string;
+  resolution_reason?: string;
+  files_changed?: number;
 }
 
 /**
