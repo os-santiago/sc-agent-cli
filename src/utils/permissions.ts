@@ -295,7 +295,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       }
 
       console.log(chalk.gray(`\n   ✓ "${ctx.toolName}" auto-approved for this and future sessions`));
-      console.log(chalk.gray(`   Saved to ${configPath} — remove it from permissions.autoApprove to revoke\n`));
+      console.log(chalk.gray(`   Saved to ${configPath} — remove it from the permissions auto-approve list to revoke\n`));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.log(chalk.gray(`\n   ⚠️  Could not save to config: ${errorMsg}`));
