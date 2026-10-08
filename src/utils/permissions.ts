@@ -3,8 +3,10 @@ import chalk from 'chalk';
 import type { ProjectConfig } from '../core/types.js';
 import { getGlobalConfigPath } from '../core/config.js';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
+import { ensureSecureDirSync, writeFileSecureSync } from './secure-fs.js';
 import { boxHeader, boxFooter } from './box-drawing.js';
 
 export interface PermissionContext {
@@ -205,10 +207,11 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
     'jwt', 'jwt_token', 'sessionKey', 'session_key',
     'sshKey', 'ssh_key', 'sshPrivateKey',
   ]);
-  const redactedArgs: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(ctx.args)) {
-    redactedArgs[k] = SENSITIVE_KEYS.has(k) ? '***' : v;
-  }
+  // Object.fromEntries defines own properties instead of assigning through
+  // [[Set]] — a '__proto__' key in tool args can't mutate the prototype (#478).
+  const redactedArgs: Record<string, unknown> = Object.fromEntries(
+    Object.entries(ctx.args).map(([k, v]) => [k, SENSITIVE_KEYS.has(k) ? '***' : v])
+  );
   console.log(chalk.gray(`\n${boxHeader('Permission', 2)}`));
   console.log(chalk.gray(`  │ ${chalk.yellow('🔐')} Tool: ${ctx.toolName}`));
   console.log(chalk.gray(`  │    Args: ${JSON.stringify(redactedArgs)}`));
@@ -263,9 +266,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       const configPath = getGlobalConfigPath();
       const configDir = path.dirname(configPath);
 
-      if (!existsSync(configDir)) {
-        mkdirSync(configDir, { recursive: true });
-      }
+      ensureSecureDirSync(configDir);
 
       let configContent: Record<string, unknown> = {};
       if (existsSync(configPath)) {
@@ -280,7 +281,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       if (!permissions.autoApprove.includes(ctx.toolName)) {
         permissions.autoApprove.push(ctx.toolName);
         configContent.permissions = permissions;
-        writeFileSync(configPath, JSON.stringify(configContent, null, 2));
+        writeFileSecureSync(configPath, JSON.stringify(configContent, null, 2));
       }
 
       // Also update in-memory config for immediate effect in this session
