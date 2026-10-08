@@ -26,14 +26,29 @@ Thanks for your interest in contributing! This is a personal project, but contri
 
 ## Testing
 
-Currently, testing is manual. To test your changes:
+Two suites run in CI:
 
-1. Build the project: `npm run build`
-2. Run different scenarios:
-   ```bash
-   sc chat
-   # Try various commands: file operations, search, shell execution
-   ```
+- **Unit/integration tests** (`src/**/*.test.ts`, vitest):
+  ```bash
+  npm run build && npm test
+  ```
+- **E2E smoke suite** (`test/e2e/`): spawns the built `bin/sc.js` — offline
+  commands (`--version`, `--help`, `sc doctor`) plus headless `sc chat` runs
+  against a mock OpenAI-compatible provider, asserting the documented exit
+  codes end-to-end. Requires a prior build:
+  ```bash
+  npm run build && npm run test:e2e
+  ```
+
+See [`test/e2e/README.md`](test/e2e/README.md) for how the mock provider and
+spawn helpers work.
+
+For manual testing, also run a few scenarios interactively:
+```bash
+npm run build
+sc chat
+# Try various commands: file operations, search, shell execution
+```
 
 ## Adding Features
 

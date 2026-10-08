@@ -27,6 +27,8 @@ jobs:
 
       - run: npm test
 
+      - run: npm run test:e2e
+
       - run: npx vitest run --coverage
         continue-on-error: true
         env:
