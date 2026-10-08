@@ -465,7 +465,7 @@ export const DANGEROUS_COMMANDS: DangerousPattern[] = [
     severity: 'medium',
   },
   {
-    pattern: /\bgit\s+(?:-[cC]\s+\S+\s+|--git-dir=\S+\s+|-C\s+\S+\s+)*config\s+[^;&|]*?(?:--global\b|--system\b|core\.(?:hooksPath|pager|sshCommand|editor|fsmonitor)|alias\.|include(?:If)?\.)/,
+    pattern: /\bgit\s+(?:-[cC]\s+\S+\s+|--git-dir=\S+\s+)*config\s+[^;&|]*?(?:--global\b|--system\b|core\.(?:hooksPath|pager|sshCommand|editor|fsmonitor)|alias\.|include(?:If)?\.)/,
     category: 'persistence',
     description: 'Modify git config — hooksPath/alias/global can run code',
     severity: 'medium',
