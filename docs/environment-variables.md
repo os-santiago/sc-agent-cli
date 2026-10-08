@@ -474,6 +474,34 @@ scc chat
 
 ---
 
+### SC_CHECKPOINT_DIR
+
+Overrides the directory where execution checkpoints are written — the agent auto-saves full run state (message history, input history, iteration and tool counts) every 5 iterations for crash recovery, and `/checkpoint save` / `/checkpoint list` plus the resume-on-crash flow read and write the same root. Checkpoints older than 7 days — and any beyond the 20 most recent — are auto-cleaned on each save. Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/`.
+
+**Default:** `~/.sc-agent/checkpoints/`
+
+```bash
+# Keep checkpoints on a throwaway filesystem
+export SC_CHECKPOINT_DIR=/tmp/sc-agent/checkpoints
+scc chat
+```
+
+---
+
+### SC_SESSIONS_DIR
+
+Overrides the root directory where per-session trace artifacts are written — `<sessionId>/session.json` (redacted message history) and `<sessionId>/status.json` per run. Writes are best-effort (failures are ignored) and every payload passes through the secret-redaction layer before hitting disk. Useful for tests, CI, and sandboxed runs that must not touch the host's `~/.sc-agent/`.
+
+**Default:** `~/.sc-agent/sessions/`
+
+```bash
+# Keep session traces on a throwaway filesystem
+export SC_SESSIONS_DIR=/tmp/sc-agent/sessions
+scc chat
+```
+
+---
+
 ## Headless Output Markers
 
 These are **not** environment inputs — the CLI *emits* them so wrappers and CI can branch on run outcomes without parsing prose. In `--output-format text` they go to stdout; with `--output-format json` stdout is reserved for the run manifest, so markers move to stderr.
