@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, statSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtempSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PersistentMemory, workspaceIdFor, memoryScopeTag } from './memory.js';
@@ -177,7 +178,10 @@ test('writes default to the workspace scope', async () => {
   const entry = await mem.remember('plain', 'no scope given');
   assert.equal(entry.scope, 'workspace');
   assert.equal(entry.workspaceId, await workspaceIdFor(wsDirA));
-  assert.equal(entry.workspacePath, realpathSync(wsDirA));
+  // resolveWorkspacePath uses the async realpath — on Windows the sync
+  // non-native variant can keep 8.3 short-name segments (e.g. RUNNER~1 in
+  // %TEMP%) while the async call returns the canonical long form.
+  assert.equal(entry.workspacePath, await realpath(wsDirA));
 });
 
 test('injection cap is shared — workspace entries win, global fills the rest', async () => {
