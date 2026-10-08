@@ -8,7 +8,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { Agent } from '../core/agent.js';
 import type { AgentOptions } from '../core/agent.js';
 import type { Message } from '../core/types.js';
@@ -25,6 +25,7 @@ import { showConfig } from '../utils/config-display.js';
 import { resolveSettings } from '../utils/settings.js';
 import { verbose, verboseSession, verboseError } from '../utils/verbose-logger.js';
 import { getWorkspaceGitState, detectSessionMutations, countMutatingToolCalls } from '../utils/mutation-detector.js';
+import { ensureSecureDirSync, writeFileSecureSync } from '../utils/secure-fs.js';
 import { buildRunManifest, emitRunManifest, type RunExitReason } from '../utils/run-manifest.js';
 import { detectSessionResolution } from '../utils/resolution-detector.js';
 import { resolveRolePipeline, resolveMaxRoleFixes, runRolePipeline } from '../core/roles.js';
@@ -438,10 +439,8 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   function saveSessionTrace(msgs: Message[]) {
     try {
       const sessionDir = join(homedir(), '.sc-agent', 'sessions', sessionId);
-      if (!existsSync(sessionDir)) {
-        mkdirSync(sessionDir, { recursive: true });
-      }
-      writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(msgs, null, 2));
+      ensureSecureDirSync(sessionDir);
+      writeFileSecureSync(join(sessionDir, 'session.json'), JSON.stringify(msgs, null, 2));
     } catch {
       // Silent: logging is best-effort
     }
@@ -455,9 +454,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   function saveSessionStatus(status: string, error?: string, historyMsgs?: Message[]) {
     try {
       const sessionDir = join(homedir(), '.sc-agent', 'sessions', sessionId);
-      if (!existsSync(sessionDir)) {
-        mkdirSync(sessionDir, { recursive: true });
-      }
+      ensureSecureDirSync(sessionDir);
       const hasChanges = historyMsgs ? countMutatingToolCalls(historyMsgs) > 0 : false;
       const statusData: Record<string, unknown> = {
         status,
@@ -468,7 +465,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         provider: currentConfig.model.provider,
       };
       if (error) statusData.error = error;
-      writeFileSync(join(sessionDir, 'status.json'), JSON.stringify(statusData, null, 2));
+      writeFileSecureSync(join(sessionDir, 'status.json'), JSON.stringify(statusData, null, 2));
     } catch {
       // Silent: best-effort
     }
@@ -478,7 +475,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
   try {
     if (options.clearHistory) {
       if (existsSync(historyPaths.conv)) {
-        writeFileSync(historyPaths.conv, JSON.stringify([], null, 2));
+        writeFileSecureSync(historyPaths.conv, JSON.stringify([], null, 2));
       }
       history = [];
     } else if (existsSync(historyPaths.conv)) {
@@ -1007,9 +1004,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       // Persist restored history + input history
       try {
         const dir = dirname(historyPaths.conv);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
-        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        ensureSecureDirSync(dir);
+        writeFileSecureSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSecureSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
       } catch {
         console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
@@ -1035,9 +1032,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       // Persist restored history + input history
       try {
         const dir = dirname(historyPaths.conv);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
-        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        ensureSecureDirSync(dir);
+        writeFileSecureSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSecureSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
       } catch {
         console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
@@ -1054,7 +1051,6 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       if (sessionSub === 'export') {
         const exportPath = sessionArgs[2] || join(process.cwd(), `session-${Date.now()}.json`);
         try {
-          const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
           const exportDir = dirname(exportPath);
           if (!existsSync(exportDir)) mkdirSync(exportDir, { recursive: true });
           const payload = {
@@ -1067,7 +1063,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
             history,
             inputHistory,
           };
-          writeFileSync(exportPath, JSON.stringify(payload, null, 2));
+          writeFileSecureSync(exportPath, JSON.stringify(payload, null, 2));
           console.log(chalk.green(`\n✓ Session exported to ${exportPath} (${history.length} messages)\n`));
         } catch (err: unknown) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -1096,9 +1092,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           // Persist imported history
           try {
             const dir = dirname(historyPaths.conv);
-            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
-            writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+            ensureSecureDirSync(dir);
+            writeFileSecureSync(historyPaths.conv, JSON.stringify(history, null, 2));
+            writeFileSecureSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
             saveSessionTrace(history);
           } catch {
             console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist history to disk\n'));
@@ -1223,16 +1219,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         });
         if (sel.fields && sel.fields.length > 0) {
           hudFields = sel.fields;
-          const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-          const { dirname } = await import('node:path');
           const configPath = getGlobalConfigPath();
           const configDir = dirname(configPath);
-          if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+          ensureSecureDirSync(configDir);
           let cfg: Record<string, unknown> = {};
           if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
           if (!cfg.settings) cfg.settings = {};
           (cfg.settings as Record<string, unknown>).hudFields = hudFields;
-          writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+          writeFileSecureSync(configPath, JSON.stringify(cfg, null, 2));
           console.log(chalk.green(`\n✓ HUD fields: ${hudFields.join(', ')}\n`));
         } else {
           console.log(chalk.gray('\n  Fields unchanged\n'));
@@ -1247,16 +1241,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       } else {
         // Toggle on/off
         hudEnabled = !hudEnabled;
-        const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-        const { dirname } = await import('node:path');
         const configPath = getGlobalConfigPath();
         const configDir = dirname(configPath);
-        if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+        ensureSecureDirSync(configDir);
         let cfg: Record<string, unknown> = {};
         if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
         if (!cfg.settings) cfg.settings = {};
         (cfg.settings as Record<string, unknown>).hud = hudEnabled;
-        writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+        writeFileSecureSync(configPath, JSON.stringify(cfg, null, 2));
 
         if (hudEnabled) {
           console.log(chalk.cyan('\n📊 HUD enabled'));
@@ -1522,19 +1514,14 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
         // Save to config
         try {
-          const fs = await import('node:fs');
-          const path = await import('node:path');
-
           const configPath = getGlobalConfigPath();
-          const configDir = path.dirname(configPath);
+          const configDir = dirname(configPath);
 
-          if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-          }
+          ensureSecureDirSync(configDir);
 
           let config: Record<string, unknown> = {};
-          if (fs.existsSync(configPath)) {
-            const configContent = fs.readFileSync(configPath, 'utf-8');
+          if (existsSync(configPath)) {
+            const configContent = readFileSync(configPath, 'utf-8');
             config = JSON.parse(configContent);
           }
 
@@ -1543,7 +1530,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
           }
           (config.permissions as {profile?: string}).profile = profileChoice.profile;
 
-          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          writeFileSecureSync(configPath, JSON.stringify(config, null, 2));
 
           // Update current config
           if (!currentConfig.permissions) {
@@ -1674,21 +1661,16 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         if (confirm.value) {
           // Save to config
           try {
-            const fs = await import('node:fs');
-            const path = await import('node:path');
-
             const configPath = getGlobalConfigPath();
 
             // Ensure directory exists
-            const configDir = path.dirname(configPath);
-            if (!fs.existsSync(configDir)) {
-              fs.mkdirSync(configDir, { recursive: true });
-            }
+            const configDir = dirname(configPath);
+            ensureSecureDirSync(configDir);
 
             // Read existing config or create new
             let config: Record<string, unknown> = {};
-            if (fs.existsSync(configPath)) {
-              const configContent = fs.readFileSync(configPath, 'utf-8');
+            if (existsSync(configPath)) {
+              const configContent = readFileSync(configPath, 'utf-8');
               config = JSON.parse(configContent);
             }
 
@@ -1699,7 +1681,7 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
             (config.permissions as {autoApprove?: string[]}).autoApprove = preApprovedTools;
 
             // Write config
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            writeFileSecureSync(configPath, JSON.stringify(config, null, 2));
 
             console.log(chalk.green('\n✓ Configuration saved to:'));
             console.log(chalk.gray(`  ${configPath}\n`));
@@ -1911,15 +1893,13 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
 
         if (saveDefault.value) {
           try {
-            const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
-            const { dirname } = await import('node:path');
             const configPath = getGlobalConfigPath();
             const configDir = dirname(configPath);
-            if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+            ensureSecureDirSync(configDir);
             let cfg: Record<string, unknown> = {};
             if (existsSync(configPath)) cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
             cfg.activeProfile = selection.profile;
-            writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+            writeFileSecureSync(configPath, JSON.stringify(cfg, null, 2));
             console.log(chalk.gray(`  ✓ Saved "${selection.profile}" as default\n`));
           } catch {
             console.log(chalk.gray(`  ⚠️  Could not save to config\n`));
@@ -1945,9 +1925,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       // Persist conversation + input history for cross-session/workspace continuity
       try {
         const dir = dirname(historyPaths.conv);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(historyPaths.conv, JSON.stringify(history, null, 2));
-        writeFileSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
+        ensureSecureDirSync(dir);
+        writeFileSecureSync(historyPaths.conv, JSON.stringify(history, null, 2));
+        writeFileSecureSync(historyPaths.input, JSON.stringify(inputHistory, null, 2));
         saveSessionTrace(history);
       } catch {
         console.log(chalk.yellow('\n  ⚠️  Warning: Could not persist conversation history\n'));

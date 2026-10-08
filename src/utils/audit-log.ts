@@ -1,6 +1,7 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { appendFileSecureSync } from './secure-fs.js';
 
 export interface AuditEvent {
   type: 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'devcontainer' | 'sandbox_violation' | 'context_budget';
@@ -19,7 +20,7 @@ export class AuditLogger {
 
   emit(event: AuditEvent): void {
     try {
-      appendFileSync(this.path, JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n');
+      appendFileSecureSync(this.path, JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n');
     } catch {
       // Best-effort: an unwritable audit path must never kill a run.
     }

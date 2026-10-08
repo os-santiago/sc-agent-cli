@@ -1,10 +1,11 @@
 import prompts from 'prompts';
 import chalk from 'chalk';
 import type { ProjectConfig } from '../core/types.js';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { isDangerousCommand, formatDangerousWarning } from './dangerous-commands.js';
+import { ensureSecureDirSync, writeFileSecureSync } from './secure-fs.js';
 import { boxHeader, boxFooter } from './box-drawing.js';
 
 export interface PermissionContext {
@@ -228,9 +229,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       const configDir = path.join(homedir(), '.sc-agent');
       const configPath = path.join(configDir, 'config.json');
 
-      if (!existsSync(configDir)) {
-        mkdirSync(configDir, { recursive: true });
-      }
+      ensureSecureDirSync(configDir);
 
       let configContent: Record<string, unknown> = {};
       if (existsSync(configPath)) {
@@ -245,7 +244,7 @@ export async function requestPermission(ctx: PermissionContext): Promise<boolean
       if (!permissions.autoApprove.includes(ctx.toolName)) {
         permissions.autoApprove.push(ctx.toolName);
         configContent.permissions = permissions;
-        writeFileSync(configPath, JSON.stringify(configContent, null, 2));
+        writeFileSecureSync(configPath, JSON.stringify(configContent, null, 2));
       }
 
       // Also update in-memory config for immediate effect in this session

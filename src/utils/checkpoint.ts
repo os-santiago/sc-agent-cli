@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import type { Message } from '../core/types.js';
+import { ensureSecureDirSync, writeFileSecureSync } from './secure-fs.js';
 
 const CHECKPOINT_DIR = join(homedir(), '.sc-agent', 'checkpoints');
 
@@ -18,9 +19,7 @@ export interface CheckpointData {
 }
 
 function ensureDir(): void {
-  if (!existsSync(CHECKPOINT_DIR)) {
-    mkdirSync(CHECKPOINT_DIR, { recursive: true });
-  }
+  ensureSecureDirSync(CHECKPOINT_DIR);
 }
 
 export function saveCheckpoint(data: Omit<CheckpointData, 'version' | 'timestamp'>): string {
@@ -31,7 +30,7 @@ export function saveCheckpoint(data: Omit<CheckpointData, 'version' | 'timestamp
     ...data,
   };
   const filePath = join(CHECKPOINT_DIR, `${data.sessionId}.json`);
-  writeFileSync(filePath, JSON.stringify(checkpoint, null, 2));
+  writeFileSecureSync(filePath, JSON.stringify(checkpoint, null, 2));
   // Auto-clean old checkpoints on each save
   cleanOldCheckpoints();
   return filePath;

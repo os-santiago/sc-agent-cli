@@ -1,7 +1,8 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { ProjectConfig } from './types.js';
+import { ensureSecureDir, warnOnLoosePermissions, writeFileSecure } from '../utils/secure-fs.js';
 
 const CONFIG_DIR = path.join(homedir(), '.sc-agent');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -269,10 +270,11 @@ export async function saveConfig(config: ProjectConfig, global = true): Promise<
   const targetPath = global ? CONFIG_PATH : path.join(process.cwd(), '.sc-agent.json');
 
   if (global) {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await ensureSecureDir(CONFIG_DIR);
   }
 
-  await writeFile(targetPath, JSON.stringify(config, null, 2), 'utf-8');
+  // Config files can carry API keys — owner-only mode in both scopes (#475).
+  await writeFileSecure(targetPath, JSON.stringify(config, null, 2));
 }
 
 export async function initConfig(force = false): Promise<void> {
@@ -338,6 +340,11 @@ async function mergeConfigFile(
       `Check file permissions and try again.`,
       { cause: err }
     );
+  }
+
+  // The global config holds credentials — flag + repair loose modes (#475).
+  if (scope === 'global') {
+    warnOnLoosePermissions(configPath, 'Global config');
   }
 
   let parsedConfig: Partial<ProjectConfig>;
