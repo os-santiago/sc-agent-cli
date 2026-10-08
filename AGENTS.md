@@ -123,6 +123,7 @@
 - Session tracking: "Ask once" mode remembers per session
 - User can override with `-y` flag (auto-approve all)
 - **Unattended git guard**: under `-y`/`--permissions unlimited`, `run_shell` refuses git-mutating commands (`git checkout/restore/reset/clean/stash/add/commit/push/...`) — the dedicated `git` tool owns repo state; interactive mode is unaffected (#464)
+- **Normalized matching**: `denyCommands` and the git-mutation guard both run on `normalizeCommand()` (#474) — quoting/`$IFS`/`env`/`VAR=x`/wrappers/git global flags/path-prefixed binaries/`eval`/substitution are folded before matching, and unresolvable expansions fail closed (`git $OP` → `git <dynamic>`)
 
 ### Error Recovery & Classification
 
