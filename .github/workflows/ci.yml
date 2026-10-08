@@ -53,6 +53,10 @@ jobs:
 
       - name: Coverage summary
         if: always()
+        # bash everywhere: pwsh maps `mkdir -p` to New-Item, which errors when
+        # coverage/ already exists (vitest creates it). Git Bash is present on
+        # windows runners and is the default shell on Linux/macOS.
+        shell: bash
         run: |
           mkdir -p coverage
           node scripts/coverage-summary.mjs | tee coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
