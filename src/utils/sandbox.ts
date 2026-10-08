@@ -535,7 +535,7 @@ export class SandboxRuntime {
       } catch (err) {
         const v: SandboxViolation = { rule: 'spawn', target: 'egress-proxy' };
         this.recordViolation(v);
-        throw new Error(`sandbox egress proxy failed to start: ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error(`sandbox egress proxy failed to start: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
       }
     }
     // Proxy envs are appended *after* scrubbing so the egress allowlist filter
