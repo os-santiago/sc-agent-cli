@@ -219,6 +219,8 @@ test('checkpoint root falls back to ~/.sc-agent/checkpoints when SC_CHECKPOINT_D
   try {
     vi.stubEnv('SC_CHECKPOINT_DIR', '');
     vi.stubEnv('HOME', fakeHome);
+    // os.homedir() ignores HOME on win32 — USERPROFILE is the lookup there.
+    vi.stubEnv('USERPROFILE', fakeHome);
     const filePath = saveCheckpoint(makeInput({ sessionId: 'home-dflt' }));
     assert.equal(filePath, join(fakeHome, '.sc-agent', 'checkpoints', 'home-dflt.json'));
     assert.ok(existsSync(filePath));

@@ -169,7 +169,7 @@ test('parseCiWorkflowYaml: empty/malformed input returns the empty shape', () =>
   // @ts-expect-error — non-string input
   assert.deepEqual(parseCiWorkflowYaml(null), { jobs: {}, steps: [], allRuns: [] });
   // Garbage lines are ignored rather than throwing.
-  const res = parseCiWorkflowYaml('\x00\x01{{{ nonsense\n');
+  const res = parseCiWorkflowYaml(String.fromCharCode(0, 1) + '{{{ nonsense\n');
   assert.deepEqual(res.jobs, {});
   assert.deepEqual(res.steps, []);
 });

@@ -1,6 +1,6 @@
 import { test, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { detectMakefile } from './makefile.js';
@@ -78,7 +78,10 @@ test('lowercase makefile and GNUmakefile names are found', () => {
     const root = repo({ [name]: 'build:\n\techo hi\n' });
     const res = detectMakefile(root);
     assert.equal(res.detected, true, name);
-    assert.ok(res.manifests.includes(name));
+    // Case-insensitive filesystems (macOS/Windows defaults) resolve the
+    // 'Makefile' probe name to a lowercase 'makefile' file, so the reported
+    // manifest spelling is canonical there — compare modulo case.
+    assert.ok(res.manifests.some((m) => m.toLowerCase() === name.toLowerCase()), name);
     assert.equal(res.commands.build, 'make build');
   }
 });
@@ -91,7 +94,12 @@ test('Makefile precedence order: Makefile before makefile before GNUmakefile', (
   });
   const res = detectMakefile(root);
   assert.deepEqual(res.manifests, ['Makefile']);
-  assert.deepEqual(Object.keys(res.targets), ['a']);
+  // 'Makefile' and 'makefile' alias to one file on case-insensitive
+  // filesystems (macOS/Windows defaults): the later 'makefile' write then
+  // overwrites the same inode, so the surviving recipe is 'b' there and 'a'
+  // on case-sensitive volumes.
+  const makefileAliased = existsSync(join(root, 'MAKEFILE'));
+  assert.deepEqual(Object.keys(res.targets), [makefileAliased ? 'b' : 'a']);
 });
 
 test('empty/unparseable makefile still reports detected', () => {
