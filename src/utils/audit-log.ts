@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { appendFileSecureSync } from './secure-fs.js';
+import { redactDeep } from './secret-redaction.js';
 
 export interface AuditEvent {
   type: 'llm_request' | 'llm_response' | 'tool_call' | 'tool_result' | 'devcontainer' | 'sandbox_violation' | 'context_budget';
@@ -20,7 +21,9 @@ export class AuditLogger {
 
   emit(event: AuditEvent): void {
     try {
-      appendFileSecureSync(this.path, JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n');
+      // #472: every string field crosses the redaction layer — error text
+      // and violation targets can carry credentials or signed URLs.
+      appendFileSecureSync(this.path, JSON.stringify({ ts: new Date().toISOString(), ...redactDeep(event) }) + '\n');
     } catch {
       // Best-effort: an unwritable audit path must never kill a run.
     }
