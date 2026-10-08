@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        # engines claims >=20.0.0 — CI covers every released major in that
+        # range (20/22 maintenance LTS, 24 active LTS, 26 current) (#509).
+        node-version: [20, 22, 24, 26]
 
     steps:
       - uses: actions/checkout@v4

@@ -26,7 +26,9 @@ Thanks for your interest in contributing! This is a personal project, but contri
 
 ## Testing
 
-Currently, testing is manual. To test your changes:
+Run the automated suite with `npm test` (vitest). CLI-level tests in `src/cli.test.ts` build `dist/` automatically when missing, but `npm run build` first is the recommended workflow.
+
+For manual smoke testing:
 
 1. Build the project: `npm run build`
 2. Run different scenarios:
