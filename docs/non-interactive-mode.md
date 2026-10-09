@@ -523,14 +523,16 @@ stdout/stderr marker, and the failover nuance (HTTP failures — including a
 live `401` or `500` — surface as `24` provider-chain-exhausted, not `20`/`21`).
 
 Reserved: 2-9 clean terminals, 12-19 run outcomes (`11` = not-actionable /
-blocked, `SCC_NOT_ACTIONABLE`/`SCC_BLOCKED`), 25+ fatal. Codes are stable
-across releases and asserted end-to-end by `test/e2e/chat-exit-codes.test.ts`.
+blocked, `SCC_NOT_ACTIONABLE`/`SCC_BLOCKED`; `12` = zero-mutation stall,
+`SCC_ZERO_MUTATIONS`), 25+ fatal. Codes are stable across releases and
+asserted end-to-end by `test/e2e/chat-exit-codes.test.ts`.
 
 ```bash
 scc chat -yq --max-steps 50 'implement issue #42'
 case $? in
   0)  echo "PR-ready changes" ;;
   10) echo "no-op run — check the issue spec" ;;
+  12) echo "model stalled — zero changes after re-prompts" ;;
   21) echo "rotate the provider key" ;;
   22) echo "raise the budget or split the task" ;;
 esac
@@ -538,11 +540,12 @@ esac
 
 ## Zero-Mutation Completion Guard
 
-In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests workspace changes must not end its turn having executed zero mutating tools. When the model answers with prose only — a narrated plan, a patch pasted as text, or a premature "done" — the agent blocks the turn completion and re-prompts the model to apply the change via `write_file`/`edit_file`/`git`/`run_shell`.
+In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests workspace changes must not end its turn having produced zero workspace changes. When the model answers with prose only — a narrated plan, a patch pasted as text, or a premature "done" — the agent blocks the turn completion and re-prompts the model to apply the change via `write_file`/`edit_file`/`git`/`run_shell` and verify it landed.
 
-- **Budget:** `SC_ZERO_MUTATION_REPROMPTS` (default `2`; `0` disables the guard).
-- **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
-- **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
+- **Budget:** `SC_ZERO_MUTATION_REPROMPTS` (default `2`; `0` disables the guard, including stall escalation).
+- **Worktree check (authoritative in git repos):** the guard compares git status/HEAD before vs after the run, so writes made through unclassified shell paths still count as mutations — and mutating tool calls that leave no trace (a no-op write, a reverted edit, a path outside the tracked tree) count the same as no calls at all (#449). Engine artifacts written inside the worktree (`--audit-log`) are excluded. Without git, classified mutating tool calls are the fallback signal.
+- **Stall escalation:** a turn that still closes with zero changes after the re-prompt budget is spent records a `zero_mutation_stall` audit event and is counted; the batch exit path then resolves the run as `resolution: "zero_mutations"` and exits `12` with `SCC_ZERO_MUTATIONS` — a failed terminal, not a clean no-op, so orchestrators never reach a verify/commit phase expecting a diff. A `VERDICT: COMPLETED` claim on a defeated guard does not defuse the escalation.
+- **Verdicts honored:** an explicit no-change verdict ("no changes required", "already implemented", "nothing to commit") or a terminal `VERDICT: NO_CHANGES`/`NOT_ACTIONABLE`/`BLOCKED` marker completes the turn immediately — `SCC_NO_CHANGES` / exit `10` (or `11` for not-actionable/blocked) remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
 
 ## Unattended Git Guard

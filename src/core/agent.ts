@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { resolve } from 'node:path';
 import type { Message, ProjectConfig, StreamDelta, AgentCallbacks, ToolCall } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { resolveFailoverChain } from './failover.js';
@@ -33,11 +34,12 @@ import type { SandboxViolation, SandboxRunInfo } from '../utils/sandbox.js';
 import { resolveThrottleConfig } from '../utils/throttle.js';
 import {
   getWorkspaceGitState,
-  hasWorktreeChanges,
+  hasWorktreeChangesExcluding,
   isMutatingToolCall,
   isWorkspaceMutatingToolCall,
   expectsWorkspaceMutation,
   declaresNoChangesNeeded,
+  declaresTerminalVerdict,
 } from '../utils/mutation-detector.js';
 import { redactSecrets, redactDeep, registerConfigSecrets } from '../utils/secret-redaction.js';
 
@@ -786,6 +788,10 @@ export class Agent {
   private _sessionId: string = '';
   private audit?: AuditLogger;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
+  // #449: turns that closed with zero workspace changes after the guard's
+  // re-prompt budget was exhausted — accumulated across phase runs so the
+  // batch exit path can escalate the terminal outcome.
+  private _zeroMutationStalls: number = 0;
   private sandbox?: SandboxRuntime;
   private _contextBudgetReport: ContextBudgetReport | null = null;
 
@@ -835,8 +841,8 @@ export class Agent {
     this._sessionId = options.sessionId || '';
   }
 
-  getStats(): { iterations: number; totalIterations: number; toolRunCount: number; sessionId: string; budgetExceeded: string | null } {
-    return { iterations: this._iterations, totalIterations: this._totalIterations, toolRunCount: this._toolRunCount, sessionId: this._sessionId, budgetExceeded: this._budgetExceeded };
+  getStats(): { iterations: number; totalIterations: number; toolRunCount: number; sessionId: string; budgetExceeded: string | null; zeroMutationStalls: number } {
+    return { iterations: this._iterations, totalIterations: this._totalIterations, toolRunCount: this._toolRunCount, sessionId: this._sessionId, budgetExceeded: this._budgetExceeded, zeroMutationStalls: this._zeroMutationStalls };
   }
 
   /**
@@ -1736,40 +1742,78 @@ export class Agent {
           continue;
         }
 
-        // Zero-mutation completion guard (#448): an unattended run whose
-        // prompt requests workspace changes must not end its turn having
-        // executed zero mutating tools — weak/auto-routed models narrate a
-        // plan or paste the fix as prose and the run exits SCC_NO_CHANGES
-        // with nothing applied (failure signature scc:zero-mutations:*).
-        // Re-prompt a bounded number of times; afterwards the turn ends
-        // normally and the caller still gets the documented no-changes
-        // exit contract. An explicit no-changes verdict is honored.
+        // Zero-mutation completion guard (#448, hardened #449): an
+        // unattended run whose prompt requests workspace changes must not
+        // end its turn having produced zero real workspace changes —
+        // weak/auto-routed models narrate a plan or paste the fix as prose,
+        // and mutating calls that left no worktree trace (no-op write,
+        // reverted edit, untracked path) count the same as no calls at all
+        // (failure signature scc:zero-mutations:*). When git tracks the
+        // workspace the status/HEAD delta is the authority; without git,
+        // classified mutating tool calls are the only signal. Re-prompt a
+        // bounded number of times; a turn that still closes with zero
+        // changes after the budget is spent is recorded as a zero-mutation
+        // stall so the batch exit path can escalate it (SCC_ZERO_MUTATIONS)
+        // instead of reporting a clean no-changes terminal. Explicit
+        // no-change/terminal verdicts are honored.
         const mutatingCalls = toolsUsed.reduce(
           (n, t) => n + (t.success && isWorkspaceMutatingToolCall(t.name, t.args) ? 1 : 0),
           0
         );
-        if (
+        const gitStateAfter = unattendedRun ? getWorkspaceGitState(this.options.workspaceRoot) : null;
+        const gitTracked = runGitStateBefore !== null && gitStateAfter !== null;
+        // Engine-owned artifacts appended during the run (an --audit-log
+        // JSONL placed inside the worktree) are not workspace mutations —
+        // without the exclusion the guard would see its own log as "work".
+        const engineArtifacts = this.options.auditLog
+          ? [resolve(this.options.workspaceRoot, this.options.auditLog)]
+          : undefined;
+        const worktreeChanged = hasWorktreeChangesExcluding(runGitStateBefore, gitStateAfter, engineArtifacts);
+        const zeroWorkspaceChanges = gitTracked ? !worktreeChanged : mutatingCalls === 0;
+        const zeroMutationTurn =
           !suppressGuards &&
           unattendedRun &&
-          zeroMutationReprompts < zeroMutationRepromptBudget &&
-          mutatingCalls === 0 &&
+          zeroWorkspaceChanges &&
           expectsWorkspaceMutation(userMessage) &&
           !declaresNoChangesNeeded(content) &&
-          !hasWorktreeChanges(runGitStateBefore, getWorkspaceGitState(this.options.workspaceRoot))
-        ) {
+          !declaresTerminalVerdict(content);
+        if (zeroMutationTurn && zeroMutationReprompts < zeroMutationRepromptBudget) {
           zeroMutationReprompts++;
+          const detail = mutatingCalls === 0
+            ? `no write_file, edit_file, mutating git operation, or mutating run_shell command was executed`
+            : `mutating tool calls ran but the git worktree shows no file changes — the mutations did not land (no-op write, reverted edit, or a path outside the tracked tree)`;
           messages.push({
             role: 'user',
             content:
               `[ZERO-MUTATION ${zeroMutationReprompts}/${zeroMutationRepromptBudget} — iteration ${iterations}] ` +
-              `The turn is about to end, but this run produced ZERO workspace changes — no write_file, edit_file, mutating git operation, or mutating run_shell command was executed. ` +
-              `The task requires modifying the workspace. Do NOT describe or paste the fix in prose — apply it now using the tools. ` +
+              `The turn is about to end, but this run produced ZERO workspace changes — ${detail}. ` +
+              `The task requires modifying the workspace. Do NOT describe or paste the fix in prose — apply it now using the tools, ` +
+              `then verify with git status/diff that the changes actually landed on disk. ` +
               `If the task is genuinely read-only, or the requested change is already present, state explicitly that no changes are required and explain why.`,
           });
           if (!this.options.quiet) {
             this.log(chalk.yellow(`\n  │ 🔧 Zero-mutation turn blocked (${zeroMutationReprompts}/${zeroMutationRepromptBudget}) — forcing execution...`));
           }
           continue;
+        }
+        if (zeroMutationTurn && zeroMutationRepromptBudget > 0) {
+          // Consecutive zero-change turns defeated the re-prompt budget —
+          // a stall, not a legitimate no-op. The batch exit path reads the
+          // counter and escalates the terminal to SCC_ZERO_MUTATIONS so the
+          // failure is attributed to this run instead of surfacing later as
+          // "zero file changes" in the caller's verify phase (#449).
+          this._zeroMutationStalls++;
+          this.audit?.emit({
+            type: 'zero_mutation_stall',
+            iteration: iterations,
+            reprompts: zeroMutationReprompts,
+            mutating_tool_calls: mutatingCalls,
+            model: this._phaseModel ?? this.options.config.model.model,
+          });
+          verbose(`[ZERO-MUTATION] turn closed with zero workspace changes after ${zeroMutationReprompts} re-prompt(s)`);
+          if (!this.options.quiet) {
+            this.log(chalk.yellow(`\n  │ ⚠️  Zero-mutation stall — ${zeroMutationReprompts} re-prompt(s) produced no workspace changes`));
+          }
         }
 
         // No tool calls, finish the loop

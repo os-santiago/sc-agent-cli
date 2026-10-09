@@ -657,6 +657,9 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         afterGitState: getWorkspaceGitState(options.workspaceRoot),
         workspaceRoot: options.workspaceRoot,
         excludePaths: engineArtifactPaths,
+        // #449: a guard-defeated zero-change terminal escalates the
+        // resolution to `zero_mutations` (SCC_ZERO_MUTATIONS / exit 12).
+        zeroMutationStalls: agent.getStats().zeroMutationStalls,
       });
     } catch {
       return undefined;
@@ -887,13 +890,17 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
       return;
     }
 
-    // Zero-mutation signal: run completed but never called a mutating tool
-    // (model refused, answered read-only, or only ran inspections). Emit a
-    // machine-greppable marker and exit with the documented code — 11 when
-    // the terminal resolution is not_actionable/blocked (#446 verdict,
-    // wired to the process exit in #486), 10 for the generic no-changes
-    // outcome. Both are clean exits; the caller decides.
-    const mutations = detectSessionMutations(history, batchGitStateBefore, getWorkspaceGitState(options.workspaceRoot));
+    // Zero-mutation signal: run completed but never produced workspace
+    // changes (model refused, answered read-only, or only ran inspections —
+    // when git tracks the workspace the real worktree diff decides, so
+    // mutating calls that left no trace count as no mutations, #449). Emit
+    // a machine-greppable marker and exit with the documented code — 11
+    // when the terminal resolution is not_actionable/blocked (#446 verdict,
+    // wired to the process exit in #486), 12 when the zero-mutation guard's
+    // re-prompt budget was exhausted on a mutation-scoped prompt
+    // (scc:zero-mutations:* stall — a failed execution, not a no-op), and
+    // 10 for the generic no-changes outcome.
+    const mutations = detectSessionMutations(history, batchGitStateBefore, getWorkspaceGitState(options.workspaceRoot), engineArtifactPaths);
     if (!mutations.hasMutations) {
       const resolution = detectResolutionSafely('no_changes');
       if (resolution && (resolution.resolution === 'not_actionable' || resolution.resolution === 'blocked')) {
@@ -901,6 +908,13 @@ function readUserInput(history: string[], workspaceRoot: string): Promise<string
         markerOut(resolution.stdout_marker ?? `SCC_${resolution.resolution === 'blocked' ? 'BLOCKED' : 'NOT_ACTIONABLE'}`);
         process.exitCode = EXIT_CODES.NOT_ACTIONABLE;
         emitUsageSummary('no_changes');
+        return;
+      }
+      if (resolution && resolution.resolution === 'zero_mutations') {
+        saveSessionStatus('zero_mutations', resolution.resolution_reason, history);
+        markerOut(resolution.stdout_marker ?? 'SCC_ZERO_MUTATIONS');
+        process.exitCode = EXIT_CODES.ZERO_MUTATIONS;
+        emitUsageSummary('zero_mutations');
         return;
       }
       saveSessionStatus('no_changes', undefined, history);

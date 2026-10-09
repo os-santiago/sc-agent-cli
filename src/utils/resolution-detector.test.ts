@@ -268,3 +268,107 @@ test('detectSessionResolution: reports no_changes when only engine artifacts dif
   assert.equal(res.resolution, 'no_changes');
   assert.equal(res.exit_code, EXIT_CODES.NO_CHANGES);
 });
+
+test('detectSessionResolution: zeroMutationStalls escalates a zero-change terminal to zero_mutations (#449)', () => {
+  const history: Message[] = [
+    { role: 'user', content: 'fix(engine): apply the parser guard' },
+    {
+      role: 'assistant',
+      content: 'I have completed the requested changes.',
+    },
+  ];
+
+  const res = detectSessionResolution({
+    history,
+    beforeGitState: { status: '', head: 'h1' },
+    afterGitState: { status: '', head: 'h1' },
+    zeroMutationStalls: 1,
+  });
+
+  assert.equal(res.resolution, 'zero_mutations');
+  assert.equal(res.files_changed, 0);
+  assert.equal(res.exit_code, EXIT_CODES.ZERO_MUTATIONS);
+  assert.equal(res.stdout_marker, 'SCC_ZERO_MUTATIONS');
+});
+
+test('detectSessionResolution: zeroMutationStalls overrides a lying VERDICT: COMPLETED (#449)', () => {
+  // The signature failure shape: the model claims completion but the
+  // worktree has zero changes and the guard already burned its re-prompts.
+  const history: Message[] = [
+    { role: 'user', content: 'Update the endpoint validation' },
+    { role: 'assistant', content: 'VERDICT: COMPLETED - fix applied' },
+  ];
+
+  const res = detectSessionResolution({
+    history,
+    beforeGitState: { status: '', head: 'h1' },
+    afterGitState: { status: '', head: 'h1' },
+    zeroMutationStalls: 2,
+  });
+
+  assert.equal(res.resolution, 'zero_mutations');
+  assert.equal(res.exit_code, EXIT_CODES.ZERO_MUTATIONS);
+  assert.equal(res.stdout_marker, 'SCC_ZERO_MUTATIONS');
+});
+
+test('detectSessionResolution: stalls do not override legitimate verdicts or real work (#449)', () => {
+  // Explicit NOT_ACTIONABLE still resolves as not_actionable — a stall flag
+  // cannot turn an honest "cannot be fixed by code" into a failure.
+  const notActionable = detectSessionResolution({
+    history: [
+      { role: 'user', content: 'Fix branch protection' },
+      { role: 'assistant', content: 'VERDICT: NOT_ACTIONABLE - requires org admin access' },
+    ],
+    beforeGitState: { status: '', head: 'h1' },
+    afterGitState: { status: '', head: 'h1' },
+    zeroMutationStalls: 1,
+  });
+  assert.equal(notActionable.resolution, 'not_actionable');
+  assert.equal(notActionable.exit_code, EXIT_CODES.NOT_ACTIONABLE);
+
+  // Prose that reads as blocked still resolves as blocked.
+  const blocked = detectSessionResolution({
+    history: [
+      { role: 'user', content: 'Deploy the service' },
+      { role: 'assistant', content: 'Task is blocked due to missing AWS credentials.' },
+    ],
+    beforeGitState: { status: '', head: 'h1' },
+    afterGitState: { status: '', head: 'h1' },
+    zeroMutationStalls: 1,
+  });
+  assert.equal(blocked.resolution, 'blocked');
+  assert.equal(blocked.exit_code, EXIT_CODES.NOT_ACTIONABLE);
+
+  // Real work happened → completed; a stall flag never downgrades a run
+  // whose diff is non-empty.
+  const completed = detectSessionResolution({
+    history: [
+      { role: 'user', content: 'fix it' },
+      { role: 'assistant', content: 'Done.' },
+    ],
+    beforeGitState: { status: '', head: 'h1' },
+    afterGitState: { status: ' M src/a.ts', head: 'h1' },
+    zeroMutationStalls: 1,
+  });
+  assert.equal(completed.resolution, 'completed');
+  assert.equal(completed.exit_code, EXIT_CODES.SUCCESS);
+});
+
+test('detectSessionResolution: zeroMutationStalls 0/undefined keeps the plain no_changes terminal (#449)', () => {
+  const history: Message[] = [
+    { role: 'user', content: 'What is 2+2?' },
+    { role: 'assistant', content: '4' },
+  ];
+
+  for (const stalls of [0, undefined]) {
+    const res = detectSessionResolution({
+      history,
+      beforeGitState: { status: '', head: 'h1' },
+      afterGitState: { status: '', head: 'h1' },
+      zeroMutationStalls: stalls,
+    });
+    assert.equal(res.resolution, 'no_changes');
+    assert.equal(res.exit_code, EXIT_CODES.NO_CHANGES);
+    assert.equal(res.stdout_marker, 'SCC_NO_CHANGES');
+  }
+});

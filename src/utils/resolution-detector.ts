@@ -9,6 +9,7 @@ export type TaskResolution =
   | 'no_changes'
   | 'not_actionable'
   | 'blocked'
+  | 'zero_mutations'
   | 'budget_exceeded'
   | 'error';
 
@@ -32,6 +33,13 @@ export interface DetectResolutionOptions {
   /** Engine-owned artifact paths (e.g. --summary-file/--output-file/--audit-log
    *  written inside the worktree) excluded from files_changed (#464). */
   excludePaths?: string[];
+  /**
+   * Zero-mutation stall count reported by the agent (#449): how many turns
+   * closed with zero workspace changes after the zero-mutation guard's
+   * re-prompt budget was exhausted on a mutation-scoped prompt. >0 upgrades
+   * a zero-change terminal from `no_changes` to `zero_mutations`.
+   */
+  zeroMutationStalls?: number;
 }
 
 export function countFilesChanged(
@@ -207,6 +215,13 @@ export function detectSessionResolution(options: DetectResolutionOptions): Resol
     }
 
     if (verdictType === 'COMPLETED') {
+      // #449: a COMPLETED verdict on a defeated zero-mutation guard is the
+      // lying-model shape — the model claimed completion while producing
+      // zero real changes. Escalate to the zero_mutations terminal instead
+      // of reporting a completion with no diff.
+      if (files_changed === 0 && (options.zeroMutationStalls ?? 0) > 0) {
+        return zeroMutationsTerminal(options.zeroMutationStalls!);
+      }
       const reason = explicitReason || 'Task completed successfully';
       return {
         resolution: 'completed',
@@ -271,6 +286,15 @@ export function detectSessionResolution(options: DetectResolutionOptions): Resol
       }
     }
 
+    // Escalated zero-mutation terminal (#449): a mutation-scoped prompt in
+    // an unattended run closed turn(s) with zero workspace changes even
+    // after the guard's re-prompt budget — the model stalled. Distinct from
+    // `no_changes`: this is a failed execution, not a legitimate no-op, and
+    // callers must not proceed to a verify/commit phase expecting a diff.
+    if ((options.zeroMutationStalls ?? 0) > 0) {
+      return zeroMutationsTerminal(options.zeroMutationStalls!);
+    }
+
     // Default no_changes
     return {
       resolution: 'no_changes',
@@ -287,6 +311,22 @@ export function detectSessionResolution(options: DetectResolutionOptions): Resol
     resolution_reason: `Task completed with ${files_changed} file(s) changed`,
     files_changed,
     exit_code: EXIT_CODES.SUCCESS,
+  };
+}
+
+/**
+ * Terminal result for a defeated zero-mutation guard (#449):
+ * `SCC_ZERO_MUTATIONS` marker + dedicated run-outcome exit code.
+ */
+function zeroMutationsTerminal(stalls: number): ResolutionResult {
+  return {
+    resolution: 'zero_mutations',
+    resolution_reason:
+      `Zero-mutation stall: the model closed ${stalls} turn(s) with zero workspace changes ` +
+      `after exhausting the zero-mutation re-prompt budget`,
+    files_changed: 0,
+    exit_code: EXIT_CODES.ZERO_MUTATIONS,
+    stdout_marker: 'SCC_ZERO_MUTATIONS',
   };
 }
 
