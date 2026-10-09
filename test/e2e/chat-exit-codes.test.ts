@@ -24,7 +24,7 @@ import { afterEach, beforeAll, describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIST_ENTRY,
@@ -253,6 +253,11 @@ describe('sc chat headless — exit code contract', () => {
     spawnSync('git', ['init', '-b', 'main'], { cwd: ws });
     spawnSync('git', ['config', 'user.name', 'E2E'], { cwd: ws });
     spawnSync('git', ['config', 'user.email', 'e2e@example.com'], { cwd: ws });
+    // HOME=ws (see chatEnv) puts the engine's own state root inside this
+    // repo — .sc-agent/sessions, /checkpoints, /repo-profiles bookkeeping is
+    // written by the run itself and is not a workspace mutation. Ignore the
+    // dir so it neither satisfies the guard nor dirties the final status.
+    await writeFile(join(ws, '.gitignore'), '.sc-agent/\n');
     // The workspace fixture files are pre-run state — commit them so a dirty
     // .sc-agent.json/prompt.md pair cannot masquerade as a mutation.
     spawnSync('git', ['add', '-A'], { cwd: ws });
