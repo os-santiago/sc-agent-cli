@@ -11,6 +11,7 @@ test('EXIT_CODES: the documented numeric contract is pinned', () => {
     ERROR: 1,
     NO_CHANGES: 10,
     NOT_ACTIONABLE: 11,
+    ZERO_MUTATIONS: 12,
     PROVIDER_ERROR: 20,
     AUTH_ERROR: 21,
     BUDGET_EXCEEDED: 22,

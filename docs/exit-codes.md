@@ -27,6 +27,7 @@ Codes apply to headless/batch runs (`sc chat <prompt>`,
 | `1` | `ERROR` | Generic/unspecified error — usage errors (bad flag values, unreadable `--prompt-file`, `--output-format` misuse), unclassified failures | `Error: …` on stderr |
 | `10` | `NO_CHANGES` | Completed with **zero workspace mutations** — read-only answer, refusal, or explicit `VERDICT: NO_CHANGES`/`VERDICT: COMPLETED` | `SCC_NO_CHANGES` |
 | `11` | `NOT_ACTIONABLE` | Completed with zero mutations and a terminal **not-actionable/blocked** resolution — explicit `VERDICT: NOT_ACTIONABLE` / `VERDICT: BLOCKED`, or matching prose ("requires repo-admin", "requires human intervention", …) | `SCC_NOT_ACTIONABLE <reason>` / `SCC_BLOCKED <reason>` |
+| `12` | `ZERO_MUTATIONS` | **Zero-mutation stall** — a mutation-scoped prompt closed turn(s) with zero workspace changes after the zero-mutation guard's re-prompt budget was exhausted; the git worktree diff is the mutation authority, so no-op writes, reverted edits and writes outside the tracked tree count as zero | `SCC_ZERO_MUTATIONS` |
 | `20` | `PROVIDER_ERROR` | Provider failure **outside** the failover envelope — e.g. the consecutive-empty-response abort | `Error: …` on stderr |
 | `21` | `AUTH_ERROR` | Auth failure **before the network** — missing/invalid credentials for a known provider host (config validation) | `Error: …` on stderr |
 | `22` | `BUDGET_EXCEEDED` | Execution budget hit — `--max-steps`/`SC_MAX_STEPS`, `--max-seconds`/`SC_MAX_SECONDS`, `--max-total-tokens`/`SC_MAX_TOTAL_TOKENS` | `SC_BUDGET_EXCEEDED <steps\|seconds\|tokens>` |
@@ -52,7 +53,7 @@ Errors thrown by a run are classified by `classifyError()`
 5. Anything else → `1`.
 
 Graceful run outcomes bypass `classifyError` — the batch path sets
-`process.exitCode` directly: `10`/`11` on zero-mutation terminals, `22` on
+`process.exitCode` directly: `10`/`11`/`12` on zero-mutation terminals, `22` on
 budget exhaustion.
 
 ### HTTP failures are always `24`, never `20`/`21`
@@ -72,7 +73,7 @@ configured provider too. Consequently:
 - The manifest on `24` carries `terminalResolution: "provider_error"`,
   `errorClass`, and the per-candidate `attempts` array.
 
-### Zero-mutation terminals: `10` vs `11`
+### Zero-mutation terminals: `10` vs `11` vs `12`
 
 `10` and `11` are both *clean* terminals — the run finished, the caller
 decides what to do next. `11` means the final answer declared (or matched)
@@ -82,10 +83,28 @@ claims non-actionability exits `0` (the edits stand). The manifest refines
 the outcome as `resolution: "not_actionable" | "blocked"` with
 `resolution_reason` and `files_changed`.
 
+`12` is a **failed** terminal, not a clean no-op (#449). It means a
+mutation-scoped prompt ended turn(s) with zero workspace changes *even after
+the zero-mutation guard burned its re-prompt budget*
+(`SC_ZERO_MUTATION_REPROMPTS`) — the model stalled, whether by prose-only
+replies or by mutating calls that left no trace in the git worktree (no-op
+write, reverted edit, untracked path). The manifest carries
+`resolution: "zero_mutations"` and `exit_reason: "zero_mutations"`. Callers
+must treat it as an execution failure: there is nothing to verify, commit, or
+push — the signature that previously surfaced downstream as "agent produced
+zero file changes" in the verify phase is now attributed at the source.
+Legitimate zero-change terminals are unaffected: `VERDICT: NO_CHANGES` /
+`VERDICT: NOT_ACTIONABLE` / `VERDICT: BLOCKED` (and matching prose) still
+exit `10`/`11`, and a stalled run whose diff is non-empty still exits `0`.
+A bare `VERDICT: COMPLETED` does **not** defuse the escalation — a completion
+claim with a defeated guard and an empty diff is exactly the lying-model
+shape the code exists to catch.
+
 ## Reserved ranges
 
 - `2–9` — other clean terminals
-- `12–19` — run outcomes (`11` is taken: not-actionable/blocked)
+- `12–19` — run outcomes (`11` is taken: not-actionable/blocked; `12` is
+  taken: zero-mutation stall)
 - `25+` — fatal errors
 - `128+n` — signal exits (`130` = SIGINT, `143` = SIGTERM)
 
@@ -103,6 +122,7 @@ this suite fails; do not weaken it.
 | `1` | unreadable `--prompt-file`; `sc doctor` on a dead endpoint |
 | `10` | read-only answer; explicit `VERDICT: NO_CHANGES` |
 | `11` | `VERDICT: NOT_ACTIONABLE`, `VERDICT: BLOCKED`, and heuristic prose — each with zero mutations |
+| `12` | mutation-scoped prompt + prose/no-op replies until `SC_ZERO_MUTATION_REPROMPTS` is exhausted in a clean git worktree |
 | `20` | consecutive empty responses (`{kind:'message'}` with no content) |
 | `21` | `SC_BASE_URL=https://api.openai.com/v1` with no key — pre-flight config check |
 | `22` | `--max-steps 1` and `--max-seconds 1` + delayed reply (`delayMs`) |

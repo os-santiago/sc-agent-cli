@@ -14,6 +14,7 @@ import {
   detectSessionMutations,
   expectsWorkspaceMutation,
   declaresNoChangesNeeded,
+  declaresTerminalVerdict,
 } from './mutation-detector.js';
 import type { Message } from '../core/types.js';
 
@@ -352,6 +353,76 @@ test('declaresNoChangesNeeded detects explicit no-change verdicts (#448)', () =>
   assert.equal(declaresNoChangesNeeded('Updated parser.ts with the guard clause.'), false);
   assert.equal(declaresNoChangesNeeded('Here is the plan for the refactor.'), false);
   assert.equal(declaresNoChangesNeeded(''), false);
+});
+
+test('declaresTerminalVerdict honors non-mutating terminal markers but not COMPLETED (#449)', () => {
+  assert.equal(declaresTerminalVerdict('VERDICT: NOT_ACTIONABLE - requires org admin'), true);
+  assert.equal(declaresTerminalVerdict('[VERDICT: BLOCKED] database unavailable'), true);
+  assert.equal(declaresTerminalVerdict('VERDICT: NO_CHANGES - nothing to modify'), true);
+  assert.equal(declaresTerminalVerdict('RESOLUTION: NOT_ACTIONABLE'), true);
+  assert.equal(declaresTerminalVerdict('verdict: blocked'), true);
+
+  // A bare completion claim with zero mutations is the failure shape the
+  // guard exists to catch — it must NOT count as a terminal verdict.
+  assert.equal(declaresTerminalVerdict('VERDICT: COMPLETED - fix applied'), false);
+  assert.equal(declaresTerminalVerdict('RESOLUTION: COMPLETED'), false);
+  assert.equal(declaresTerminalVerdict('I have completed the requested changes.'), false);
+  assert.equal(declaresTerminalVerdict(''), false);
+});
+
+test('detectSessionMutations treats the git worktree as authoritative when tracked (#449)', () => {
+  // Signature regression: mutating tool calls ran but left no git-visible
+  // change (no-op write / reverted edit / untracked path). hasMutations must
+  // be false so the batch exit path cannot report success.
+  const noOpWriteHistory: Message[] = [
+    {
+      role: 'assistant',
+      content: 'Writing the fix',
+      tool_calls: [
+        {
+          id: '1',
+          type: 'function',
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'src/a.ts' }) },
+        },
+        {
+          id: '2',
+          type: 'function',
+          function: { name: 'git', arguments: JSON.stringify({ operation: 'commit' }) },
+        },
+      ],
+    },
+  ];
+
+  const res = detectSessionMutations(
+    noOpWriteHistory,
+    { status: '', head: 'abc' },
+    { status: '', head: 'abc' },
+  );
+  assert.equal(res.mutatingToolCalls, 2); // diagnostics still count attempts
+  assert.equal(res.worktreeChanged, false);
+  assert.equal(res.hasMutations, false);
+});
+
+test('detectSessionMutations falls back to mutating tool calls when git is unavailable (#449)', () => {
+  // Non-git workspace: classified calls are the only mutation signal.
+  const writeHistory: Message[] = [
+    {
+      role: 'assistant',
+      content: 'Writing the fix',
+      tool_calls: [
+        {
+          id: '1',
+          type: 'function',
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'src/a.ts' }) },
+        },
+      ],
+    },
+  ];
+
+  const res = detectSessionMutations(writeHistory, null, null);
+  assert.equal(res.mutatingToolCalls, 1);
+  assert.equal(res.worktreeChanged, false);
+  assert.equal(res.hasMutations, true);
 });
 
 test('getWorkspaceGitState and hasWorktreeChanges work on actual git repo', () => {

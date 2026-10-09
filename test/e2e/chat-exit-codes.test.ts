@@ -1,12 +1,13 @@
 // E2E smoke — headless `sc chat` against a mock OpenAI-compatible provider
-// (#483, extended in #486). Asserts the documented exit-code contract
+// (#483, extended in #486, #449). Asserts the documented exit-code contract
 // end-to-end through the built bin — docs/exit-codes.md is the canonical
 // spec; every code below is the real process exit status, not an internal
 // assertion:
 //   0 success · 1 generic error · 10 SCC_NO_CHANGES · 11 SCC_NOT_ACTIONABLE/
-//   SCC_BLOCKED · 20 provider error · 21 auth error · 22 SC_BUDGET_EXCEEDED
-//   (steps + seconds) · 23 agent-loop abort · 24 provider chain exhausted
-//   (401 non-retryable + 500 retried) · 143 SIGTERM interruption.
+//   SCC_BLOCKED · 12 SCC_ZERO_MUTATIONS · 20 provider error · 21 auth error ·
+//   22 SC_BUDGET_EXCEEDED (steps + seconds) · 23 agent-loop abort · 24
+//   provider chain exhausted (401 non-retryable + 500 retried) · 143 SIGTERM
+//   interruption.
 //
 // Notes on the mapping (see src/utils/exit-codes.ts + src/core/failover.ts):
 //   * HTTP/transport failures traverse the failover contract and surface as
@@ -21,9 +22,9 @@
 
 import { afterEach, beforeAll, describe, test } from 'vitest';
 import assert from 'node:assert/strict';
-import type { ChildProcess } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIST_ENTRY,
@@ -229,6 +230,54 @@ describe('sc chat headless — exit code contract', () => {
     assert.equal(result.code, 11, describeRun(result));
     assert.match(result.stdout, /SCC_NOT_ACTIONABLE/);
     assert.equal(lastManifest(result.stdout).resolution, 'not_actionable');
+  });
+
+  test('zero-mutation stall on a mutation-scoped prompt → SCC_ZERO_MUTATIONS + exit 12 (#449)', async () => {
+    // Failure signature scc:zero-mutations:model — the model claims the fix
+    // is applied but the git worktree never changes. The guard re-prompts
+    // (SC_ZERO_MUTATION_REPROMPTS=1 here to keep the run short) and the
+    // exhausted budget escalates to a distinct failed terminal instead of a
+    // clean SCC_NO_CHANGES that would later die in the caller's
+    // verify_changes phase.
+    const { ws, provider, run } = await setupRun(
+      [
+        { kind: 'message', content: 'I analyzed the request — the change is straightforward.' },
+        // A read-only tool call keeps the loop going (and resets the
+        // livelock streak) without producing a mutation.
+        { kind: 'message', toolCalls: [{ name: 'list_dir', arguments: { path: '.' } }] },
+        { kind: 'message', content: 'The file has been updated with the greeting.' },
+      ],
+      { prompt: 'Create zero-mutation-e2e.txt with a short greeting.' },
+    );
+    // Git-tracked workspace: the worktree diff is the mutation authority.
+    spawnSync('git', ['init', '-b', 'main'], { cwd: ws });
+    spawnSync('git', ['config', 'user.name', 'E2E'], { cwd: ws });
+    spawnSync('git', ['config', 'user.email', 'e2e@example.com'], { cwd: ws });
+    // HOME=ws (see chatEnv) puts the engine's own state root inside this
+    // repo — .sc-agent/sessions, /checkpoints, /repo-profiles bookkeeping is
+    // written by the run itself and is not a workspace mutation. Ignore the
+    // dir so it neither satisfies the guard nor dirties the final status.
+    await writeFile(join(ws, '.gitignore'), '.sc-agent/\n');
+    // The workspace fixture files are pre-run state — commit them so a dirty
+    // .sc-agent.json/prompt.md pair cannot masquerade as a mutation.
+    spawnSync('git', ['add', '-A'], { cwd: ws });
+    spawnSync('git', ['commit', '-m', 'fixture'], { cwd: ws });
+
+    const result = await run(['chat', '-q', '-y', '--prompt-file', 'prompt.md'], {
+      env: { SC_ZERO_MUTATION_REPROMPTS: '1' },
+    });
+
+    assert.equal(result.code, 12, describeRun(result));
+    assert.match(result.stdout, /SCC_ZERO_MUTATIONS/);
+    const manifest = lastManifest(result.stdout);
+    assert.equal(manifest.resolution, 'zero_mutations');
+    assert.equal(manifest.exit_reason, 'zero_mutations');
+    assert.equal(manifest.files_changed, 0);
+    // 1 prompt + 1 read-only tool turn + 1 reprompted reply = 3 calls.
+    assert.equal(chatRequests(provider).length, 3, 'expected exactly one zero-mutation re-prompt');
+    // The workspace really is unchanged — nothing for a caller to commit.
+    const status = spawnSync('git', ['status', '--porcelain'], { cwd: ws, encoding: 'utf-8' });
+    assert.equal(status.stdout.trim(), '', 'worktree must be clean after a stalled run');
   });
 
   test('persistent empty responses → exit 20', async () => {

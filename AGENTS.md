@@ -137,7 +137,7 @@
 - Loop detection: detects repeated errors to prevent infinite loops
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
-- **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
+- **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero workspace changes — the git status/HEAD delta is the authority (no-op writes, reverted edits and untracked paths count as zero; `--audit-log`-type engine artifacts are excluded; classified tool calls are the fallback outside git repos). The agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change/terminal verdicts (`NO_CHANGES`/`NOT_ACTIONABLE`/`BLOCKED` — a bare `VERDICT: COMPLETED` does not count); a turn that still closes clean records a `zero_mutation_stall` and the batch run escalates to `SCC_ZERO_MUTATIONS` / exit `12` (`resolution: "zero_mutations"`) instead of a clean `SCC_NO_CHANGES` (#449)
 
 ### Long-Running Execution (100+ iterations)
 

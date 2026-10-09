@@ -10,6 +10,8 @@
 //   22 budget exhausted               (SC_BUDGET_EXCEEDED,  #408)
 //   23 agent-loop abort               (tool livelock, malformed-args storm)
 //   11 completed but not actionable   (SCC_NOT_ACTIONABLE/SCC_BLOCKED, #446; wired to process exit in #486)
+//   12 zero-mutation stall            (SCC_ZERO_MUTATIONS — mutation-scoped prompt,
+//                                    guard re-prompts exhausted, still zero changes, #449)
 //   24 provider chain exhausted       (failover contract — every candidate failed, #425)
 //
 // Reserved ranges: 2-9 other clean terminals, 12-19 run outcomes, 25+ fatal.
@@ -23,6 +25,7 @@ export const EXIT_CODES = {
   BUDGET_EXCEEDED: 22,
   LOOP_ABORT: 23,
   NOT_ACTIONABLE: 11,
+  ZERO_MUTATIONS: 12,
   PROVIDER_EXHAUSTED: 24,
 } as const;
 

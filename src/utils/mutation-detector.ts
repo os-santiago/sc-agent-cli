@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import type { Message } from '../core/types.js';
 
 export interface WorkspaceGitState {
@@ -68,6 +69,48 @@ export function hasWorktreeChanges(
     return false;
   }
   return before.status !== after.status || before.head !== after.head;
+}
+
+/**
+ * `hasWorktreeChanges` with engine-artifact exclusions (#449): files owned
+ * by the run itself — e.g. an `--audit-log` JSONL written inside the
+ * worktree — are not workspace mutations and must not satisfy the
+ * zero-mutation guard or flip the batch exit gate to "success".
+ *
+ * `excludeAbsPaths` are absolute paths matched against repo-root-resolved
+ * porcelain entries.
+ */
+export function hasWorktreeChangesExcluding(
+  before: WorkspaceGitState | null,
+  after: WorkspaceGitState | null,
+  excludeAbsPaths: string[] = [],
+): boolean {
+  if (!before || !after) {
+    return false;
+  }
+  if (before.head !== after.head) {
+    return true;
+  }
+  if (excludeAbsPaths.length === 0) {
+    return before.status !== after.status;
+  }
+  const excluded = new Set(excludeAbsPaths);
+  const stripArtifacts = (state: WorkspaceGitState): string => {
+    const root = state.root;
+    if (!root) return state.status;
+    return state.status
+      .split('\n')
+      .filter(line => {
+        // porcelain v1: "XY <path>" (or "XY <orig> -> <new>" for renames).
+        const raw = line.slice(3).trim();
+        if (!raw) return true;
+        const target = raw.includes(' -> ') ? raw.split(' -> ')[1].trim() : raw;
+        const unquoted = target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
+        return !excluded.has(resolve(root, unquoted));
+      })
+      .join('\n');
+  };
+  return stripArtifacts(before) !== stripArtifacts(after);
 }
 
 /**
@@ -334,16 +377,45 @@ export function declaresNoChangesNeeded(content: string): boolean {
 }
 
 /**
+ * Detect an explicit terminal resolution marker in an assistant response
+ * (#449). `VERDICT: NOT_ACTIONABLE` / `VERDICT: BLOCKED` / `VERDICT:
+ * NO_CHANGES` (and the `RESOLUTION:` alias) are the model's contract-level
+ * claim that the task ends without workspace mutations — the zero-mutation
+ * guard honors them instead of burning its re-prompt budget on an answer
+ * the resolution detector would have accepted anyway.
+ *
+ * `VERDICT: COMPLETED` is deliberately NOT honored: a bare completion claim
+ * with zero mutations is exactly the lying-model shape this guard exists
+ * to catch.
+ */
+const TERMINAL_VERDICT_PATTERN =
+  /\b(?:VERDICT|RESOLUTION)\s*:\s*(?:NOT_ACTIONABLE|BLOCKED|NO_CHANGES)\b/i;
+
+export function declaresTerminalVerdict(content: string): boolean {
+  if (!content || typeof content !== 'string') return false;
+  return TERMINAL_VERDICT_PATTERN.test(content);
+}
+
+/**
  * Evaluate session mutations considering both git worktree state and tool call history.
+ *
+ * `hasMutations` answers "did this session leave real workspace changes
+ * behind". When git tracks the workspace (both snapshots captured), the
+ * worktree diff is authoritative: a mutating tool call that left no trace —
+ * a no-op write, a reverted edit, a failed call, a write to a path git does
+ * not track — is not a real mutation (#449). Only when git cannot observe
+ * the workspace (non-repo) do we fall back to counting classified calls.
  */
 export function detectSessionMutations(
   history: Message[],
   beforeState: WorkspaceGitState | null,
   afterState: WorkspaceGitState | null,
+  excludePaths?: string[],
 ): MutationDetectionResult {
   const mutatingToolCalls = countMutatingToolCalls(history);
-  const worktreeChanged = hasWorktreeChanges(beforeState, afterState);
-  const hasMutations = worktreeChanged || mutatingToolCalls > 0;
+  const worktreeChanged = hasWorktreeChangesExcluding(beforeState, afterState, excludePaths);
+  const gitTracked = beforeState !== null && afterState !== null;
+  const hasMutations = gitTracked ? worktreeChanged : mutatingToolCalls > 0;
   return {
     hasMutations,
     mutatingToolCalls,

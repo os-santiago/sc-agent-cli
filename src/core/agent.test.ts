@@ -1,10 +1,25 @@
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { pruneMessageHistory, limitMessageHistory, Agent } from './agent.js';
 import { resolveRole, resolveRolePipeline, phasePolicy, runRolePipeline } from './roles.js';
 import { writeFileTool } from '../tools/write-file.js';
 import { estimateTokens } from '../utils/token-tracker.js';
 import type { Message } from './types.js';
+
+// Real git workspace for the zero-mutation guard tests (#449): the guard is
+// git-authoritative, so a mocked tool call that never touches disk must NOT
+// satisfy it — and a real file write must.
+function makeGitWorkspace(): string {
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-zero-mut-'));
+  spawnSync('git', ['init', '-b', 'main'], { cwd: tmp });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
+  return tmp;
+}
 
 test('Agent.run forwards configured non-streaming mode to the provider', async () => {
   const agent = new Agent({
@@ -230,53 +245,62 @@ test('Agent.run recovers after a single empty response', async () => {
 // calls, so the wrapper had nothing to commit. The guard must re-prompt.
 
 test('Agent.run re-prompts a zero-mutation turn completion on a mutation-scoped prompt (#448)', async () => {
-  const agent = new Agent({
-    workspaceRoot: process.cwd(),
-    autoApprove: true,
-    quiet: true,
-    config: {
-      model: {
-        provider: 'openai-compatible',
-        baseUrl: 'http://test.api/v1',
-        model: 'auto/best-coding',
+  // Git-tracked workspace: the write_file mock writes a real file so the
+  // #449 worktree check can see the mutation land.
+  const tmp = makeGitWorkspace();
+  try {
+    const agent = new Agent({
+      workspaceRoot: tmp,
+      autoApprove: true,
+      quiet: true,
+      config: {
+        model: {
+          provider: 'openai-compatible',
+          baseUrl: 'http://test.api/v1',
+          model: 'auto/best-coding',
+        }
       }
-    }
-  });
+    });
 
-  // Mock the mutating tool so nothing touches the real worktree.
-  const { writeFileTool } = await import('../tools/write-file.js');
-  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+    const writeSpy = vi.spyOn(writeFileTool, 'execute').mockImplementation(async () => {
+      writeFileSync(join(tmp, 'parser.ts'), 'x');
+      return 'ok';
+    });
 
-  let callCount = 0;
-  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
-    callCount++;
-    if (callCount === 1) {
-      // The #448 failure shape: prose narration of the fix, no tool calls.
-      return { content: 'The parser is missing a null check on the token stream. The right approach is a guard clause at the top of parseToken before accessing token.value.' };
-    }
-    if (callCount === 2) {
-      return {
-        content: '',
-        tool_calls: [{
-          id: 'w1',
-          type: 'function' as const,
-          function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
-        }],
-      };
-    }
-    return { content: 'The fix has been applied and the parser is patched.' };
-  });
+    let callCount = 0;
+    const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // The #448 failure shape: prose narration of the fix, no tool calls.
+        return { content: 'The parser is missing a null check on the token stream. The right approach is a guard clause at the top of parseToken before accessing token.value.' };
+      }
+      if (callCount === 2) {
+        return {
+          content: '',
+          tool_calls: [{
+            id: 'w1',
+            type: 'function' as const,
+            function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
+          }],
+        };
+      }
+      return { content: 'The fix has been applied and the parser is patched.' };
+    });
 
-  const result = await agent.run('Fix the null check in parser.ts');
+    const result = await agent.run('Fix the null check in parser.ts');
 
-  assert.equal(callCount, 3);
-  assert.equal(writeSpy.mock.calls.length, 1);
-  const reprompts = result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION'));
-  assert.equal(reprompts.length, 1);
-  assert.match(reprompts[0].content, /apply it now using the tools/i);
+    assert.equal(callCount, 3);
+    assert.equal(writeSpy.mock.calls.length, 1);
+    const reprompts = result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION'));
+    assert.equal(reprompts.length, 1);
+    assert.match(reprompts[0].content, /apply it now using the tools/i);
+    assert.equal(agent.getStats().zeroMutationStalls, 0);
 
-  mock.mockRestore();
-  writeSpy.mockRestore();
+    mock.mockRestore();
+    writeSpy.mockRestore();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('Agent.run caps zero-mutation re-prompts and still completes cleanly', async () => {
@@ -305,6 +329,8 @@ test('Agent.run caps zero-mutation re-prompts and still completes cleanly', asyn
   // 1 initial turn + 2 re-prompts (default SC_ZERO_MUTATION_REPROMPTS budget)
   assert.equal(callCount, 3);
   assert.equal(result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION')).length, 2);
+  // The defeated guard records a stall for the batch exit path (#449).
+  assert.equal(agent.getStats().zeroMutationStalls, 1);
   mock.mockRestore();
 });
 
@@ -437,20 +463,27 @@ test('Agent.run does not count memory_write as a workspace mutation for the guar
 });
 
 test('Agent.run: a #464-refused run_shell git mutation does not satisfy the zero-mutation guard (#485)', async () => {
-  const agent = new Agent({
-    workspaceRoot: process.cwd(),
-    autoApprove: true,
-    quiet: true,
-    config: {
-      model: {
-        provider: 'openai-compatible',
-        baseUrl: 'http://test.api/v1',
-        model: 'test-model',
+  const tmp = makeGitWorkspace();
+  try {
+    const agent = new Agent({
+      workspaceRoot: tmp,
+      autoApprove: true,
+      quiet: true,
+      config: {
+        model: {
+          provider: 'openai-compatible',
+          baseUrl: 'http://test.api/v1',
+          model: 'test-model',
+        }
       }
-    }
-  });
+    });
 
-  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+  // The write_file mock lands a real file so the #449 worktree check can
+  // verify the mutation once the model produces one.
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockImplementation(async () => {
+    writeFileSync(join(tmp, 'x.ts'), 'y');
+    return 'ok';
+  });
 
   let callCount = 0;
   const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
@@ -485,22 +518,205 @@ test('Agent.run: a #464-refused run_shell git mutation does not satisfy the zero
     return { content: 'Done.' };
   });
 
-  const result = await agent.run('Fix the parser bug');
+    const result = await agent.run('Fix the parser bug');
 
-  // The refusal surfaces as a tool-result error carrying the guard message.
-  const refused = result.find(m => m.role === 'tool' && m.tool_call_id === 'g1');
-  assert.ok(refused, 'expected a tool result for the refused run_shell call');
-  assert.match(refused!.content, /refused in unattended mode/);
+    // The refusal surfaces as a tool-result error carrying the guard message.
+    const refused = result.find(m => m.role === 'tool' && m.tool_call_id === 'g1');
+    assert.ok(refused, 'expected a tool result for the refused run_shell call');
+    assert.match(refused!.content, /refused in unattended mode/);
 
-  // A refused call is a failure, not a mutation — the #448 guard still
-  // re-prompts once, then the write_file call satisfies it.
-  const reprompts = result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION'));
-  assert.equal(reprompts.length, 1);
-  assert.equal(writeSpy.mock.calls.length, 1);
-  assert.equal(callCount, 4);
+    // A refused call is a failure, not a mutation — the #448 guard still
+    // re-prompts once, then the write_file call satisfies it.
+    const reprompts = result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION'));
+    assert.equal(reprompts.length, 1);
+    assert.equal(writeSpy.mock.calls.length, 1);
+    assert.equal(callCount, 4);
+    assert.equal(agent.getStats().zeroMutationStalls, 0);
 
+    mock.mockRestore();
+    writeSpy.mockRestore();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- Zero-mutation stall escalation (#449) ---
+// Failure signature scc:zero-mutations:model — the #448 loophole: a successful
+// mutating tool call satisfied the guard even when it left no git-visible
+// change (no-op write, reverted edit, untracked path). In a git-tracked
+// workspace the worktree diff is now the authority.
+
+test('Agent.run does not let a no-op mutating tool call satisfy the guard — exhausts re-prompts and records a stall (#449)', async () => {
+  const tmp = makeGitWorkspace();
+  try {
+    const agent = new Agent({
+      workspaceRoot: tmp,
+      autoApprove: true,
+      quiet: true,
+      livelockThreshold: 0, // the reprompt budget, not the livelock abort, is the limiter
+      auditLog: join(tmp, 'audit.jsonl'),
+      config: {
+        model: {
+          provider: 'openai-compatible',
+          baseUrl: 'http://test.api/v1',
+          model: 'auto/best-coding',
+        }
+      }
+    });
+
+    // The tool "succeeds" but never touches the worktree — the exact shape
+    // that defeated the #448 guard.
+    const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+    let callCount = 0;
+    const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          content: '',
+          tool_calls: [{
+            id: 'w1',
+            type: 'function' as const,
+            function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
+          }],
+        };
+      }
+      return { content: 'The fix is in place — parser.ts now guards the token stream.' };
+    });
+
+    const result = await agent.run('Fix the null check in parser.ts');
+
+    // write_file ran + 2 prose turns burned the budget + 1 stall turn.
+    assert.equal(callCount, 4);
+    assert.equal(writeSpy.mock.calls.length, 1);
+    assert.equal(result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION')).length, 2);
+    assert.equal(agent.getStats().zeroMutationStalls, 1);
+
+    // The stall is auditable — the batch exit path escalates it to
+    // SCC_ZERO_MUTATIONS / exit 12 (#449).
+    const auditLines = readFileSync(join(tmp, 'audit.jsonl'), 'utf-8').trim().split('\n').map(l => JSON.parse(l));
+    assert.ok(auditLines.some(e => e.type === 'zero_mutation_stall'));
+
+    mock.mockRestore();
+    writeSpy.mockRestore();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Agent.run honors an explicit non-mutating terminal verdict without re-prompting (#449)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    return { content: 'VERDICT: NOT_ACTIONABLE - branch protection requires org admin access' };
+  });
+
+  const result = await agent.run('Fix the branch protection rules');
+
+  assert.equal(callCount, 1);
+  assert.ok(!result.some(m => m.role === 'user' && m.content.includes('ZERO-MUTATION')));
+  assert.equal(agent.getStats().zeroMutationStalls, 0);
   mock.mockRestore();
-  writeSpy.mockRestore();
+});
+
+test('Agent.run does not honor a bare VERDICT: COMPLETED on a zero-change turn (#449)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // The lying-model shape the guard exists to catch.
+      return { content: 'VERDICT: COMPLETED - fix applied' };
+    }
+    // A subsequent legitimate terminal verdict still ends the turn cleanly.
+    return { content: 'VERDICT: NO_CHANGES - the guard clause already exists' };
+  });
+
+  const result = await agent.run('Fix issue #449 in the engine');
+
+  assert.equal(callCount, 2);
+  assert.equal(result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION')).length, 1);
+  assert.equal(agent.getStats().zeroMutationStalls, 0);
+  mock.mockRestore();
+});
+
+test('Agent.run keeps the mutating-call fallback when the workspace is not a git repo (#449)', async () => {
+  // No `git init` — getWorkspaceGitState returns null and classified mutating
+  // tool calls remain the only mutation signal.
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-zero-mut-nogit-'));
+  try {
+    const agent = new Agent({
+      workspaceRoot: tmp,
+      autoApprove: true,
+      quiet: true,
+      config: {
+        model: {
+          provider: 'openai-compatible',
+          baseUrl: 'http://test.api/v1',
+          model: 'test-model',
+        }
+      }
+    });
+
+    const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+    let callCount = 0;
+    const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // Same prose shape as the #448 failure — no self-heal triggers.
+        return { content: 'The parser is missing a null check on the token stream. The right approach is a guard clause at the top of parseToken before accessing token.value.' };
+      }
+      if (callCount === 2) {
+        return {
+          content: '',
+          tool_calls: [{
+            id: 'w1',
+            type: 'function' as const,
+            function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
+          }],
+        };
+      }
+      return { content: 'The fix has been applied.' };
+    });
+
+    const result = await agent.run('Fix the null check in parser.ts');
+
+    assert.equal(callCount, 3);
+    assert.equal(writeSpy.mock.calls.length, 1);
+    assert.equal(result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION')).length, 1);
+    assert.equal(agent.getStats().zeroMutationStalls, 0);
+
+    mock.mockRestore();
+    writeSpy.mockRestore();
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
