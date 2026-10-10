@@ -8,6 +8,9 @@ on:
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
+  # Manual trigger so scan-range fixes can be verified on demand without
+  # waiting for the daily cron (#535).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -155,12 +158,17 @@ jobs:
         with:
           fetch-depth: 0  # Full history for comprehensive scan
 
+      # base/head are intentionally unset: with no explicit range the action
+      # derives it from the event — push scans github.event.before..after
+      # (empty base → full history when `before` is the zero SHA), pull_request
+      # scans base.sha..head.sha, and schedule/workflow_dispatch scan the full
+      # repository. The old `base: main`/`head: HEAD` resolved to the same
+      # commit on push and scheduled runs, failing with "BASE and HEAD commits
+      # are the same" (#535).
       - name: TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85  # v3.97.9
         with:
           path: ./
-          base: main
-          head: HEAD
           extra_args: --debug --only-verified
 
   supply-chain-security:
