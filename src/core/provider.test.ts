@@ -310,3 +310,243 @@ test('chatCompletion retries on 429 with backoff', async () => {
   assert.equal(callCount, 3);
   assert.equal(result.content, 'ok');
 });
+
+// --- Non-canonical wire shapes (#533) ---
+// Failure signature scc:zero-mutations:devin/swe-2-high. Shims over
+// non-OpenAI protocols (devin/swe-2-class gateways, Anthropic adapters,
+// llama.cpp) relay tool invocations in shapes the strict parser dropped:
+// a non-array payload threw inside processChunk and killed every call in
+// the chunk, index-less calls all collapsed into one slot, and
+// `function_call`/`message`/content-part channels were ignored entirely.
+// Every path below ended a turn with zero mutations.
+
+function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+}
+
+test('chatCompletion streams index-less tool_calls as separate calls (no undefined-slot collapse)', async () => {
+  const chunks = [
+    sseDelta({
+      tool_calls: [
+        { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } },
+        { id: 'call-2', type: 'function', function: { name: 'list_dir', arguments: '{"path":"."}' } },
+      ],
+    }),
+    sseDelta({ content: '' }, 'stop'),
+    'data: [DONE]\n\n',
+  ];
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, body: streamOf(chunks) } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 2);
+  assert.equal(result.tool_calls?.[0].function.name, 'read_file');
+  assert.equal(result.tool_calls?.[1].function.name, 'list_dir');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"path":"a.ts"}');
+});
+
+test('chatCompletion merges index-less args-only fragments into the preceding call', async () => {
+  const chunks = [
+    sseDelta({ tool_calls: [{ id: 'call-1', function: { name: 'write_file' } }] }),
+    sseDelta({ tool_calls: [{ function: { arguments: '{"path"' } }] }),
+    sseDelta({ tool_calls: [{ function: { arguments: ':"a.ts"}' } }] }),
+    sseDelta({ content: '' }, 'stop'),
+    'data: [DONE]\n\n',
+  ];
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, body: streamOf(chunks) } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'write_file');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"path":"a.ts"}');
+});
+
+test('chatCompletion accepts a non-array tool_calls payload instead of dropping the chunk', async () => {
+  const chunks = [
+    sseDelta({
+      tool_calls: { id: 'call-1', type: 'function', function: { name: 'run_shell', arguments: '{"command":"ls"}' } },
+    }),
+    sseDelta({ content: '' }, 'stop'),
+    'data: [DONE]\n\n',
+  ];
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, body: streamOf(chunks) } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'run_shell');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"command":"ls"}');
+});
+
+test('chatCompletion recovers the legacy function_call field', async () => {
+  const chunks = [
+    sseDelta({ function_call: { name: 'search_text', arguments: '{"pattern":"TODO"}' } }),
+    sseDelta({ content: '' }, 'stop'),
+    'data: [DONE]\n\n',
+  ];
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, body: streamOf(chunks) } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'search_text');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"pattern":"TODO"}');
+});
+
+test('chatCompletion accepts message-shaped chunks inside an SSE stream', async () => {
+  const chunk = {
+    id: 'chatcmpl-x',
+    object: 'chat.completion.chunk',
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            { id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } },
+          ],
+        },
+      },
+    ],
+  };
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: true,
+    body: streamOf([`data: ${JSON.stringify(chunk)}\n\n`, 'data: [DONE]\n\n']),
+  } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'read_file');
+});
+
+test('chatCompletion recovers tool_use blocks from array content parts', async () => {
+  const chunks = [
+    sseDelta({
+      content: [
+        { type: 'text', text: 'Let me read it.' },
+        { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { path: 'a.ts' } },
+      ],
+    }),
+    sseDelta({ content: '' }, 'stop'),
+    'data: [DONE]\n\n',
+  ];
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, body: streamOf(chunks) } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.content, 'Let me read it.');
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'read_file');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"path":"a.ts"}');
+});
+
+test('chatCompletion does not double-count a re-sent completed call', async () => {
+  const frame = sseDelta({
+    tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }],
+  });
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: true,
+    body: streamOf([frame, frame, sseDelta({ content: '' }, 'stop'), 'data: [DONE]\n\n']),
+  } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: true,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"path":"a.ts"}');
+});
+
+test('chatCompletion non-streamed normalizes non-canonical tool_calls shapes', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: true,
+    json: () => Promise.resolve({
+      choices: [
+        {
+          message: {
+            content: null,
+            // single object, not an array; arguments as an object
+            tool_calls: { id: 'call-1', function: { name: 'write_file', arguments: { path: 'a.ts', content: 'x' } } },
+          },
+        },
+      ],
+    }),
+  } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: false,
+  });
+
+  assert.equal(result.tool_calls?.length, 1);
+  assert.equal(result.tool_calls?.[0].function.name, 'write_file');
+  assert.equal(result.tool_calls?.[0].function.arguments, '{"path":"a.ts","content":"x"}');
+});
+
+test('chatCompletion non-streamed recovers function_call and array content parts', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: true,
+    json: () => Promise.resolve({
+      choices: [
+        {
+          message: {
+            content: [
+              { type: 'text', text: 'Reading the file.' },
+              { type: 'tool_use', id: 'tu_1', name: 'read_file', input: { path: 'a.ts' } },
+            ],
+            function_call: { name: 'list_dir', arguments: { path: '.' } },
+          },
+        },
+      ],
+    }),
+  } as any);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  const result = await provider.chatCompletion({
+    messages: [{ role: 'user', content: 'hi' }],
+    stream: false,
+  });
+
+  assert.equal(result.content, 'Reading the file.');
+  assert.equal(result.tool_calls?.length, 2);
+  const names = result.tool_calls!.map((tc) => tc.function.name).sort();
+  assert.deepEqual(names, ['list_dir', 'read_file']);
+  const read = result.tool_calls!.find((tc) => tc.function.name === 'read_file')!;
+  assert.equal(read.function.arguments, '{"path":"a.ts"}');
+});
