@@ -395,4 +395,32 @@ describe('sc chat headless — exit code contract', () => {
       'default streaming transport was not exercised',
     );
   });
+
+  test('tool call embedded as <tool_call> markup in content (swe-2 shape, #533) → executes + exit 0', async () => {
+    // The #533 failure shape: the model emits a <summary> report envelope
+    // and the invocation as in-content markup instead of a structured
+    // tool_calls field — pre-fix this ended the turn with zero mutations
+    // (SCC_NO_CHANGES, exit 10). The agent must recover and execute it.
+    const { ws, provider, run } = await setupRun(
+      [
+        {
+          kind: 'message',
+          content:
+            '<summary>\n## Overview\nApplying the requested change.\n</summary>\n' +
+            '<tool_call>{"name":"write_file","arguments":{"path":"swe2-output.txt","content":"recovered from markup\\n"}}</tool_call>',
+        },
+        { kind: 'message', content: 'Done.' },
+      ],
+      { prompt: 'Create swe2-output.txt with one line.' },
+    );
+
+    const result = await run(['chat', '-q', '-y', '--prompt-file', 'prompt.md']);
+
+    assert.equal(result.code, 0, describeRun(result));
+    const manifest = lastManifest(result.stdout);
+    assert.equal(manifest.exit_reason, 'success');
+    assert.equal(manifest.tool_calls?.write_file, 1);
+    assert.equal(await readFile(join(ws, 'swe2-output.txt'), 'utf-8'), 'recovered from markup\n');
+    assert.equal(chatRequests(provider).length, 2, 'markup recovery + final answer, no re-prompts');
+  });
 });

@@ -544,6 +544,7 @@ In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests wo
 - **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
 - **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
+- **Embedded tool-call recovery:** models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) may deliver invocations as `tool_call`/`invoke`/`function*` markup inside `content` — or as non-canonical wire shapes (non-array/index-less `tool_calls`, legacy `function_call`, `tool_use` content parts). The provider normalizes those payloads and the agent recovers markup calls, so they count as real mutations instead of ending the turn empty (#533).
 
 ## Unattended Git Guard
 
