@@ -1,10 +1,13 @@
 import { test, vi, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
 import {
+  MALFORMED_TOOL_ARGS_MARKER,
   MessageValidationError,
   validateMessageSequence,
   autoCorrectMessageSequence,
   isMessageSequenceValid,
+  isValidToolArguments,
+  sanitizeToolCallArguments,
 } from './message-validator.js';
 import type { Message, ToolCall } from './types.js';
 
@@ -194,4 +197,73 @@ test('autoCorrectMessageSequence passes a valid sequence through unchanged', () 
   ];
   const corrected = autoCorrectMessageSequence(messages);
   assert.deepEqual(corrected, messages);
+});
+
+// --- Malformed tool-call arguments repair (#537) ---------------------------
+// A model-emitted call whose `function.arguments` is not a valid JSON object
+// string must never sit in history verbatim: providers that validate
+// tool_calls on every request answer a deterministic 400 that recurs with
+// the same context. The history/wire copy is repaired to a placeholder.
+
+test('isValidToolArguments requires a JSON string decoding to a plain object', () => {
+  assert.equal(isValidToolArguments('{"path":"a.ts"}'), true);
+  assert.equal(isValidToolArguments(' {} '), true);
+  // Valid JSON but not an object — providers demand an object string.
+  for (const bad of ['[1,2]', '"x"', '42', 'null', '{"a":1', '', 'not json', 123, null, undefined, ['a']]) {
+    assert.equal(isValidToolArguments(bad), false, String(bad));
+  }
+});
+
+test('sanitizeToolCallArguments returns the same reference for valid args', () => {
+  const call = toolCall('c1');
+  assert.equal(sanitizeToolCallArguments(call), call);
+});
+
+test('sanitizeToolCallArguments replaces malformed args with a marked placeholder', () => {
+  const call = toolCall('c1', 'edit_file');
+  call.function.arguments = '{"patch": "bad\u001fescape"}'; // invalid control char
+
+  const fixed = sanitizeToolCallArguments(call);
+  assert.notEqual(fixed, call);
+  assert.equal(fixed.id, 'c1');
+  assert.equal(fixed.function.name, 'edit_file');
+
+  // The repaired arguments are themselves a valid JSON object string.
+  const parsed = JSON.parse(fixed.function.arguments);
+  assert.equal(typeof parsed, 'object');
+  assert.ok(MALFORMED_TOOL_ARGS_MARKER in parsed);
+  assert.match(parsed[MALFORMED_TOOL_ARGS_MARKER], /bad/);
+  assert.equal(isValidToolArguments(fixed.function.arguments), true);
+});
+
+test('sanitizeToolCallArguments bounds the preserved raw preview', () => {
+  const call = toolCall('c1');
+  call.function.arguments = `{"x": "${'y'.repeat(5000)}` ;
+  const fixed = sanitizeToolCallArguments(call);
+  const parsed = JSON.parse(fixed.function.arguments);
+  assert.ok(parsed[MALFORMED_TOOL_ARGS_MARKER].length <= 400);
+});
+
+test('sanitizeToolCallArguments re-serializes object-typed arguments losslessly', () => {
+  const call = toolCall('c1');
+  // Some OpenAI-compatible providers emit arguments pre-parsed.
+  (call.function as { arguments: unknown }).arguments = { path: 'a.ts', offset: 2 };
+  const fixed = sanitizeToolCallArguments(call);
+  assert.equal(fixed.function.arguments, '{"path":"a.ts","offset":2}');
+  assert.equal(isValidToolArguments(fixed.function.arguments), true);
+});
+
+test('autoCorrectMessageSequence repairs malformed tool-call args in history', () => {
+  const bad = assistantWithCall('c1', 'write_file');
+  bad.tool_calls![0].function.arguments = '{"content": "unterminated';
+  const good = assistantWithCall('c2', 'read_file');
+  const messages: Message[] = [{ role: 'user', content: 'hi' }, bad, toolResult('c1'), good, toolResult('c2')];
+
+  const corrected = autoCorrectMessageSequence(messages);
+
+  const repaired = corrected[1].tool_calls![0].function.arguments;
+  assert.ok(isValidToolArguments(repaired));
+  assert.match(repaired, new RegExp(MALFORMED_TOOL_ARGS_MARKER));
+  // Valid calls pass through untouched.
+  assert.equal(corrected[3].tool_calls![0].function.arguments, '{}');
 });

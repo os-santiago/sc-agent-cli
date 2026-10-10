@@ -198,3 +198,24 @@ test('single-candidate chain failure still produces the structured failover erro
     }
   );
 });
+
+test('400 rejecting malformed tool-call args exhausts the chain as engine_protocol (#537)', async () => {
+  fetchByUrl([['http://primary.test', () => errResponse(
+    400,
+    '400 Validation: messages[52].tool_calls[0].function.arguments must be a valid JSON object string: invalid escape at line 1 column 841',
+  )]]);
+
+  const provider = new OpenAICompatibleProvider(makeConfig());
+  await assert.rejects(
+    provider.chatCompletion({ messages: [{ role: 'user', content: 'hi' }], stream: false }),
+    (err: unknown) => {
+      assert.ok(err instanceof ProviderFailoverError);
+      const fe = err as ProviderFailoverError;
+      assert.equal(fe.errorClass, 'engine_protocol');
+      assert.equal(fe.attempts.length, 1, 'engine_protocol is non-retryable — deterministic with the same context');
+      assert.equal(fe.attempts[0].errorClass, 'engine_protocol');
+      assert.equal(fe.attempts[0].status, 400);
+      return true;
+    }
+  );
+});

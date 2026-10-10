@@ -46,6 +46,9 @@ export type ProviderErrorClass =
   | 'server_error'  // HTTP 5xx — retryable for 500/502/503/504
   | 'auth'          // HTTP 401/403 — non-retryable, cascade
   | 'client'        // other HTTP 4xx (incl. unsupported model) — non-retryable
+  | 'engine_protocol' // 400/422 rejecting the engine's own payload (malformed
+                    // tool_calls[].function.arguments) — deterministic with the
+                    // same context, self-inflicted; non-retryable, cascades
   | 'aborted'       // caller-cancelled — never retried, never cascaded
   | 'unknown';
 
@@ -114,6 +117,27 @@ export class ProviderFailoverError extends Error {
 }
 
 /**
+ * #537: a 400/422 whose body blames the JSON validity of
+ * `tool_calls[].function.arguments` is an engine-protocol failure — the
+ * malformed payload came from the model's own output persisted in our
+ * serialized history, so it recurs deterministically on any retry with the
+ * same context (unlike a transient provider fault). Observed signature
+ * (NVIDIA NIM): `messages[52].tool_calls[0].function.arguments must be a
+ * valid JSON object string: invalid escape at line 1 column 841`.
+ *
+ * All three cues must co-occur inside the response body so an unrelated
+ * schema rejection (e.g. unsupported model, max_tokens out of range) keeps
+ * the generic `client` class.
+ */
+export function isMalformedToolArgsRejection(text: string): boolean {
+  return (
+    /tool_calls/i.test(text) &&
+    /function\.arguments/i.test(text) &&
+    /must be a valid json|invalid (?:json|escape)|malformed|parse error|cannot parse|not (?:a )?valid json|json object string/i.test(text)
+  );
+}
+
+/**
  * Classify a provider failure per the failover contract.
  * Retryable: timeouts, transport errors, 429, 500/502/503/504.
  * Non-retryable: 400/401/403 and other 4xx (incl. unsupported model) — these
@@ -127,6 +151,9 @@ export function classifyProviderError(err: unknown): ProviderErrorInfo {
     }
     if (status === 401 || status === 403) {
       return { errorClass: 'auth', retryable: false, status, message: err.message };
+    }
+    if ((status === 400 || status === 422) && isMalformedToolArgsRejection(err.message)) {
+      return { errorClass: 'engine_protocol', retryable: false, status, message: err.message };
     }
     if (status >= 500) {
       return { errorClass: 'server_error', retryable: TRANSIENT_HTTP_STATUSES.has(status), status, message: err.message };

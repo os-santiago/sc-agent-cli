@@ -119,7 +119,7 @@ Behavior:
 - **Transient failures** (connect/attempt timeouts, `ECONNRESET`/`ETIMEDOUT`, HTTP 429, HTTP 500/502/503/504) retry first with bounded backoff (2s→4s→8s +20% jitter, capped at 8s)
 - The primary credential is never forwarded to a different host — each candidate resolves its own key (`SC_API_KEY`, host-matched env key, or its profile's `apiKey`)
 - Once the cascade advances to a working candidate, later calls in the run stick to it
-- If every candidate is exhausted, the run exits with code **24** and the manifest reports `terminalResolution: "provider_error"`, `errorClass`, and the `attempts` array per candidate
+- If every candidate is exhausted, the run exits with code **24** and the manifest reports `terminalResolution` (`"provider_error"`, or `"engine_protocol"` when the terminal 400/422 rejected the engine's own `tool_calls[].function.arguments` payload — see `docs/exit-codes.md`), `errorClass`, and the `attempts` array per candidate
 
 ---
 

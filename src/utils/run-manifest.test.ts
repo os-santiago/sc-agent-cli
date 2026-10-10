@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildRunManifest, emitRunManifest, type RunManifestInput } from './run-manifest.js';
+import { ProviderFailoverError } from '../core/failover.js';
 import type { Message } from '../core/types.js';
 
 function baseInput(overrides: Partial<RunManifestInput> = {}): RunManifestInput {
@@ -243,4 +244,43 @@ test('buildRunManifest emits the context_budget block when provided (#422)', () 
 test('buildRunManifest omits context_budget when no report exists', () => {
   assert.ok(!('context_budget' in buildRunManifest(baseInput())));
   assert.ok(!('context_budget' in buildRunManifest(baseInput({ contextBudget: null }))));
+});
+
+// #537: a failover chain exhausted on malformed tool_calls[].function.arguments
+// is self-inflicted — the terminal bucket must differ from provider outages.
+test('buildRunManifest maps an engine_protocol-exhausted chain to a distinct terminalResolution', () => {
+  const err = new ProviderFailoverError([
+    {
+      candidate: 'nvidia/nemotron',
+      attempt: 1,
+      errorClass: 'engine_protocol',
+      retryable: false,
+      status: 400,
+      error: 'API Error 400: tool_calls[0].function.arguments must be a valid JSON object string',
+      durationMs: 120,
+    },
+  ], 'engine_protocol');
+
+  const m = buildRunManifest(baseInput({ exitReason: 'error', errorObj: err }));
+  assert.equal(m.terminalResolution, 'engine_protocol');
+  assert.equal(m.errorClass, 'engine_protocol');
+  assert.equal(m.attempts?.length, 1);
+});
+
+test('buildRunManifest keeps provider_error for genuine provider failures', () => {
+  const err = new ProviderFailoverError([
+    {
+      candidate: 'openai/gpt-4o',
+      attempt: 4,
+      errorClass: 'rate_limit',
+      retryable: true,
+      status: 429,
+      error: 'API Error 429: slow down',
+      durationMs: 50,
+    },
+  ], 'rate_limit');
+
+  const m = buildRunManifest(baseInput({ exitReason: 'error', errorObj: err }));
+  assert.equal(m.terminalResolution, 'provider_error');
+  assert.equal(m.errorClass, 'rate_limit');
 });

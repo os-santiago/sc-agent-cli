@@ -10,7 +10,7 @@ import { generateRepoMap } from './repo-map.js';
 import { probeRepo, formatRepoProfileForPrompt } from './repo-probe/index.js';
 import { ALL_TOOLS, getToolByName } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
-import { autoCorrectMessageSequence } from './message-validator.js';
+import { autoCorrectMessageSequence, sanitizeToolCallArguments } from './message-validator.js';
 import { persistentMemory } from '../utils/memory.js';
 import { detectShell, getShellPromptSections } from '../utils/shell-env.js';
 import type { ShellInfo } from '../utils/shell-env.js';
@@ -720,6 +720,15 @@ function redactToolCall(call: ToolCall): ToolCall {
   return { ...call, function: { ...call.function, arguments: redactSecrets(call.function.arguments) } };
 }
 
+// #537: the history copy must also be wire-valid — a malformed arguments
+// string left in `messages` makes the provider reject every later request
+// with a deterministic 400. Sanitizing replaces it with the placeholder
+// marker (execution below still uses the raw response and reports the
+// args-parse failure as a tool error, so the model can retry).
+function historyToolCall(call: ToolCall): ToolCall {
+  return sanitizeToolCallArguments(redactToolCall(call));
+}
+
 export interface AgentOptions {
   workspaceRoot: string;
   config: ProjectConfig;
@@ -1385,7 +1394,7 @@ export class Agent {
       const assistantMessage: Message = {
         role: 'assistant',
         content: typeof response.content === 'string' ? redactSecrets(response.content) : response.content,
-        tool_calls: response.tool_calls?.map(redactToolCall),
+        tool_calls: response.tool_calls?.map(historyToolCall),
       };
       messages.push(assistantMessage);
 
@@ -1447,7 +1456,7 @@ export class Agent {
           const recovered = recoverHarmonyToolCalls(response.content);
           if (recovered.length > 0) {
             response.tool_calls = recovered;
-            assistantMessage.tool_calls = recovered.map(redactToolCall);
+            assistantMessage.tool_calls = recovered.map(historyToolCall);
             if (!this.options.quiet) {
               this.log(chalk.yellow(`\n  │ ♻️  Recovered ${recovered.length} tool call(s) from Harmony markup in content`));
             }

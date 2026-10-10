@@ -99,7 +99,7 @@ export interface RunManifest {
   provider: string | null;
   /** Terminal resolution for machine consumers: 'completed' on success, else the exit reason. */
   resolution: string;
-  /** Error classification on failure exits (provider_error|auth_error|loop_abort|error). */
+  /** Error classification on failure exits (provider_error|engine_protocol|auth_error|loop_abort|error). */
   terminalResolution?: string;
   /** ProviderErrorClass + per-candidate attempt trace when the failover chain exhausted. */
   errorClass?: string;
@@ -216,7 +216,13 @@ export function buildRunManifest(input: RunManifestInput): RunManifest {
 
 function errorFields(err: unknown): Pick<RunManifest, 'terminalResolution' | 'errorClass' | 'attempts'> {
   if (err instanceof ProviderFailoverError) {
-    return { terminalResolution: 'provider_error', errorClass: err.errorClass, attempts: err.attempts };
+    // #537: an exhausted chain whose terminal class is `engine_protocol`
+    // (provider rejected our own serialized payload — malformed
+    // tool_calls[].function.arguments) is self-inflicted, not a provider
+    // outage — give it a distinct terminal bucket so run ledgers and
+    // postmortem runbooks dedup it away from transport/quota failures.
+    const terminalResolution = err.errorClass === 'engine_protocol' ? 'engine_protocol' : 'provider_error';
+    return { terminalResolution, errorClass: err.errorClass, attempts: err.attempts };
   }
   return { terminalResolution: TERMINAL_RESOLUTIONS[classifyError(err)] ?? 'error' };
 }
