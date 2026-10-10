@@ -221,7 +221,7 @@ test('sanitizeToolCallArguments returns the same reference for valid args', () =
 
 test('sanitizeToolCallArguments replaces malformed args with a marked placeholder', () => {
   const call = toolCall('c1', 'edit_file');
-  call.function.arguments = '{"patch": "bad\u001fescape"}'; // invalid control char
+  call.function.arguments = `{"patch": "bad${String.fromCharCode(31)}escape"}`; // invalid control char
 
   const fixed = sanitizeToolCallArguments(call);
   assert.notEqual(fixed, call);

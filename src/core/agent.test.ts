@@ -252,7 +252,7 @@ test('Agent.run sanitizes malformed tool_call arguments in the history copy', as
         tool_calls: [{
           id: 'bad1',
           type: 'function' as const,
-          function: { name: 'read_file', arguments: '{"path": "bad\u001fescape"}' },
+          function: { name: 'read_file', arguments: `{"path": "bad${String.fromCharCode(31)}escape"}` },
         }],
       };
     }
