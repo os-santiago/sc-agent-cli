@@ -18,6 +18,11 @@
 //     branch like `@main`
 //   * `--only-verified` stays in extra_args — verified-secret findings are
 //     what fail the job
+//   * pr-security-checks.yml's dependency-review step keeps its per-dependency
+//     license exemption for TruffleHog: the pinned action is AGPL-3.0, which
+//     the deny-licenses gate rejects even though the scanner is CI-only and
+//     never ships. Losing the exemption re-fails Dependency Review on the
+//     next PR that touches the workflow.
 
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -27,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 const SRC_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_PATH = path.resolve(SRC_DIR, '..', '.github', 'workflows', 'security-scan.yml');
+const PR_CHECKS_PATH = path.resolve(SRC_DIR, '..', '.github', 'workflows', 'pr-security-checks.yml');
 
 function workflow(): string {
   return readFileSync(WORKFLOW_PATH, 'utf-8');
@@ -97,6 +103,29 @@ test('security-scan: TruffleHog stays SHA-pinned and verified-only', () => {
     'TruffleHog must be pinned to a full commit SHA — a mutable @main ref can drift back into the broken config'
   );
   assert.match(step, /--only-verified/, 'TruffleHog step must keep --only-verified reporting semantics');
+});
+
+test('security-scan: dependency review exempts CI-only TruffleHog without weakening the license gate', () => {
+  const yaml = readFileSync(PR_CHECKS_PATH, 'utf-8');
+  const step = stepChunks(yaml).find((chunk) => chunk.includes('actions/dependency-review-action'));
+  assert.ok(step, 'pr-security-checks.yml has no actions/dependency-review-action step');
+
+  // The policy itself must stay: AGPL remains denied for everything else —
+  // the exemption is per-dependency, not a removal of the license gate.
+  assert.match(step, /deny-licenses:[^\n]*AGPL-3\.0/, 'dependency-review must keep denying AGPL-3.0');
+
+  // The exemption must name the same action the workflow pins. Matching is
+  // version-less in the action, so the purl covers future SHA re-pins.
+  assert.match(
+    trufflehogStep(workflow()),
+    /uses:\s*trufflesecurity\/trufflehog@[0-9a-f]{40}\b/,
+    'exemption presumes the SHA-pinned TruffleHog action — re-check it if the scanner changes'
+  );
+  assert.match(
+    step,
+    /allow-dependencies-licenses:[^\n]*pkg:githubactions\/trufflesecurity\/trufflehog\b/,
+    'dependency-review must exempt pkg:githubactions/trufflesecurity/trufflehog — the AGPL-3.0 CI scanner otherwise fails the license gate'
+  );
 });
 
 test('security-scan: secret-scan checkout keeps fetch-depth: 0', () => {
