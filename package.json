@@ -23,6 +23,8 @@
     "test:watch": "vitest",
     "pretest:coverage": "node scripts/ensure-deps.mjs vitest",
     "test:coverage": "vitest run --coverage",
+    "pretest:sandbox": "node scripts/ensure-deps.mjs vitest",
+    "test:sandbox": "vitest run --config vitest.sandbox.config.ts",
     "pretest:e2e": "node scripts/ensure-deps.mjs vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },

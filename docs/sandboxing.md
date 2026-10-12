@@ -96,3 +96,6 @@ Sandbox rules compose **additively** with `permissions.denyPaths` /
 - Sandbox setup failures are **fail-closed**: the command is not run, and the
   error is tagged `[SANDBOX_VIOLATION] {"rule":"spawn"}`.
 - `SC_SANDBOX=on` forces enablement from CI without editing config files.
+- `test/sandbox/` holds the opt-in integration suite that exercises a real
+  `bwrap` boundary: `SC_SANDBOX_TESTS=1 npm run test:sandbox` — every test
+  self-skips unless `hasBwrap()` detects a working bwrap/userns host.

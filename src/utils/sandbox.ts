@@ -257,6 +257,19 @@ export function resetSandboxBackendCache(): void {
   cachedBackend = undefined;
 }
 
+/**
+ * True when this host can build the real bwrap boundary — Linux plus a
+ * working bubblewrap binary and usable unprivileged user namespaces.
+ *
+ * Used by the opt-in sandbox integration suite (#544) to gate real-namespace
+ * tests via `describe.skipIf(!hasBwrap())`; pure unit tests inject a fake
+ * backend through `SandboxRuntimeOptions.detectBackend` instead of probing.
+ * Probe results are memoized per process via detectSandboxBackendCached.
+ */
+export function hasBwrap(env: NodeJS.ProcessEnv = process.env): boolean {
+  return detectSandboxBackendCached(env).mode === 'bwrap';
+}
+
 // ---------------------------------------------------------------------------
 // bwrap argv construction
 // ---------------------------------------------------------------------------
