@@ -6,6 +6,7 @@ import { Agent } from '../../core/agent.js';
 import { loadConfig, getGlobalConfigPath } from '../../core/config.js';
 import { clearSessionPermissions } from '../../utils/permissions.js';
 import { ensureSecureDirSync, writeFileSecureSync } from '../../utils/secure-fs.js';
+import { redactSecrets } from '../../utils/secret-redaction.js';
 import type { PermissionMode, SlashCommandHandler } from './types.js';
 
 /** `/permissions` — choose the permission mode and auto-restore behavior. */
@@ -338,7 +339,7 @@ export const handlePreApprovedCommands: SlashCommandHandler = async (ctx, input)
         console.log(chalk.gray('  Pre-approved tools are now active\n'));
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.log(chalk.red(`\n✗ Error saving config: ${errorMsg}\n`));
+        console.log(chalk.red(`\n✗ Error saving config: ${redactSecrets(errorMsg)}\n`));
       }
     } else {
       console.log(chalk.gray('\n  Configuration not saved\n'));

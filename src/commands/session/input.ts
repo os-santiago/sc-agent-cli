@@ -3,6 +3,8 @@ import { stdin as input } from 'node:process';
 import { emitKeypressEvents } from 'node:readline';
 import { createCompleter } from '../../utils/autocomplete.js';
 
+const ESC = String.fromCharCode(0x1b);
+
 // Multi-line input handler: Enter=submit, Shift+Enter=newline, paste inserts verbatim
 export function readUserInput(history: string[], workspaceRoot: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -53,7 +55,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
       const prefix = chalk.bold.blue('│ ');
       // Move up and clear previous lines
       for (let i = 0; i < prevPhysicalRows; i++) {
-        process.stdout.write('\x1b[1A\x1b[2K\r');
+        process.stdout.write(`${ESC}[1A${ESC}[2K\r`);
       }
       let totalPhysicalRows = 0;
       // Write current content
@@ -96,7 +98,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
       input.removeAllListeners('keypress');
       // Erase the input area
       for (let i = 0; i < prevPhysicalRows; i++) {
-        process.stdout.write('\x1b[1A\x1b[2K\r');
+        process.stdout.write(`${ESC}[1A${ESC}[2K\r`);
       }
       resolve(getFullInput());
     }
@@ -350,7 +352,11 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
         // Handle printable characters (including symbols like '/' or ':' and emojis/surrogate pairs)
         // that Node's keypress doesn't assign a single-character name to, or when pasting.
         const char = _chunk ? _chunk.toString() : '';
-        if (char && !ctrl && !meta && !/[\x00-\x1f\x7f-\x9f]/.test(char)) {
+        const hasControlChar = [...char].some((c) => {
+          const code = c.codePointAt(0) ?? 0;
+          return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+        });
+        if (char && !ctrl && !meta && !hasControlChar) {
           insertChar(char);
           return;
         }

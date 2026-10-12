@@ -8,6 +8,7 @@ import { loadConfig, getGlobalConfigPath } from '../../core/config.js';
 import { checkStorageLimit, enforceStorageLimit, formatBytes } from '../../utils/storage-limit.js';
 import { getStorageGuidance } from '../../utils/storage-guidance.js';
 import { ensureSecureDirSync, writeFileSecureSync } from '../../utils/secure-fs.js';
+import { redactSecrets } from '../../utils/secret-redaction.js';
 import { getModelProfileEmptyStateGuidance } from '../chat-session-guidance.js';
 import type { SlashCommandHandler } from './types.js';
 
@@ -89,7 +90,7 @@ export const handleReload: SlashCommandHandler = async (ctx, input) => {
     console.log(chalk.yellow('\n💡 Tip: Conversation history preserved. Use /clear to reset.\n'));
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.log(chalk.red(`\n✗ Error reloading config: ${errorMsg}\n`));
+    console.log(chalk.red(`\n✗ Error reloading config: ${redactSecrets(errorMsg)}\n`));
   }
   return true;
 };
@@ -186,7 +187,7 @@ export const handleModel: SlashCommandHandler = async (ctx, input) => {
 
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.log(chalk.red(`\n✗ Error: ${errorMsg}\n`));
+    console.log(chalk.red(`\n✗ Error: ${redactSecrets(errorMsg)}\n`));
   }
   return true;
 };
