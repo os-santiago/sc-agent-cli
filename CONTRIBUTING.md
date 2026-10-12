@@ -145,9 +145,17 @@ local option (`sc profile use ollama`).
 ## Pull Requests
 
 - **Title**: follow [Conventional Commits](https://www.conventionalcommits.org/) —
-  `feat: ...`, `fix: ...`, `docs: ...`, `refactor: ...`, `test: ...`,
-  `chore: ...`. PRs are **squash-merged**, so the title becomes the commit
-  message on `main`.
+  `type: summary` or `type(scope): summary` (e.g. `feat: add MCP client`,
+  `fix(permissions): close denyPaths bypass`). Accepted types: `feat`, `fix`,
+  `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`,
+  `revert`, `security`. The `pr-title.yml` workflow enforces this on
+  `opened`/`edited`/`reopened` PR events — a non-conforming title fails the
+  "Validate PR title" check, and renaming the title re-runs it. PRs are
+  **squash-merged**, so the title becomes the commit message on `main`;
+  keeping it parseable is the foundation for automated release/changelog
+  generation. Maintainers should keep the repo configured for squash merging
+  with "Default to PR title for squash merge commits" so main's history stays
+  conventional.
 - **Link the issue**: put `Closes #N` (or `Fixes #N`) in the PR body so merging
   auto-closes it. Changelog entries reference issues the same way
   (`(Closes #N)`).
@@ -168,6 +176,13 @@ local option (`sc profile use ollama`).
   escapes (`\xNN`, `\uNNNN`), WebSockets, `FormData` uploads, and clipboard
   access fail the check. Changes to `src/utils/permissions.ts` or
   `src/utils/dangerous-commands.ts` get flagged for extra review.
+- **PR title** (`pr-title.yml`): validates the PR title against
+  conventional-commit types (`feat`, `fix`, `docs`, `style`, `refactor`,
+  `perf`, `test`, `build`, `ci`, `chore`, `revert`, `security`) whenever the
+  PR is opened, edited, or reopened. It runs on `pull_request_target` with a
+  SHA-pinned `amannn/action-semantic-pull-request` and never checks out your
+  code — the title alone is linted. Fix a red check by renaming the title,
+  not by pushing new commits.
 
 If your change legitimately needs a flagged pattern, expect to justify it in
 review — the scans are intentional.
