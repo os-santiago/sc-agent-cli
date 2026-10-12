@@ -149,7 +149,7 @@ cd D:\git\sc-agent-cli\scripts
 
 ### `ensure-deps.mjs`
 
-Dependency bootstrap hook wired into `npm run build` (`prebuild`) and `npm test` (`pretest`). Fresh worktrees and CI gates that invoke npm scripts without a prior `npm ci` would otherwise fail with `sh: line 1: tsc: command not found`.
+Dependency bootstrap hook wired into `npm run build` (`prebuild`), `npm test` (`pretest`), and `npm run lint` (`prelint`). Fresh worktrees and CI gates that invoke npm scripts without a prior `npm ci` would otherwise fail with `sh: line 1: tsc: command not found`.
 
 **What it does:**
 
@@ -163,6 +163,7 @@ Dependency bootstrap hook wired into `npm run build` (`prebuild`) and `npm test`
 ```bash
 node scripts/ensure-deps.mjs          # checks typescript
 node scripts/ensure-deps.mjs vitest   # checks vitest
+node scripts/ensure-deps.mjs eslint   # checks eslint
 ```
 
 ## Verification

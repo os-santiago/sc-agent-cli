@@ -57,12 +57,13 @@ npm run build && npm test              # the same gates CI runs
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:coverage` | Vitest with v8 coverage (thresholds in `vitest.config.ts`) |
 | `npm start` | Run the CLI from source (`node bin/sc.js`) |
-| `npx eslint .` | Lint with the flat config in `eslint.config.mjs` |
+| `npm run lint` | Lint with the flat config in `eslint.config.mjs` (`eslint .`) |
 
-There is no `npm run lint` script yet. ESLint + typescript-eslint are configured
-(`eslint.config.mjs`) and CI's security-scan workflow runs
-`npx eslint --ext .ts,.js src/ --max-warnings=0` in advisory mode, so keep new
-code lint-clean even though lint is not (yet) a hard gate.
+ESLint + typescript-eslint are configured (`eslint.config.mjs`). The CI `lint`
+job runs `npm run lint` in advisory mode (`continue-on-error`) and
+`security-scan.yml`'s static-analysis job reports the findings too — a clean
+baseline is pending the eslint config fix + violation cleanup, so keep new
+code lint-clean until the gate is flipped on.
 
 ## Testing
 
@@ -136,9 +137,10 @@ local option (`sc profile use ollama`).
 - **Linting**: `eslint.config.mjs` (flat config, typescript-eslint recommended).
   Notable rules: `@typescript-eslint/no-unused-vars` errors unless prefixed with
   `_`; `no-explicit-any` warns.
-- **Pre-commit hook**: husky + lint-staged runs
+- **Pre-commit hook**: husky + lint-staged runs `eslint --fix` and
   `vitest run --reporter=verbose --changed` on staged `*.ts` files — committing
-  TypeScript changes automatically runs the tests related to your diff.
+  TypeScript changes lints your staged files and runs the tests related to
+  your diff.
 - Handle errors with meaningful messages; avoid `any` in new code.
 - All file operations must go through `resolveSafePath` validation.
 
@@ -159,7 +161,9 @@ local option (`sc profile use ollama`).
 ### What CI runs on your PR
 
 - **CI** (`ci.yml`): `npm ci` → `npm run build` → `npm test` on Ubuntu Node
-  20/22/24/26 plus Windows and macOS on Node 22, plus a coverage report.
+  20/22/24/26 plus Windows and macOS on Node 22, plus a coverage report. A
+  separate `lint` job runs `npm run lint` in advisory mode
+  (`continue-on-error`) until the baseline is clean.
 - **Security scan** (`security-scan.yml`): CodeQL, TruffleHog secret scanning,
   `npm audit`, license compliance (GPL-licensed deps fail), and pattern scans
   for `eval(`, WebSocket usage, base64/obfuscation, and hardcoded secrets.

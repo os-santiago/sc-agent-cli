@@ -107,3 +107,25 @@ jobs:
           name: coverage-report-${{ matrix.os }}-${{ matrix.node-version }}
           path: coverage/
           retention-days: 7
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory, not gating: `eslint .` still reports pre-existing violations
+    # on a clean checkout — the eslint.config.mjs fix and the violation
+    # cleanup are a companion issue (#490 wires the gate, it doesn't clean
+    # the baseline). The job still runs and annotates findings on every PR;
+    # drop `continue-on-error` to make it a real gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run lint
