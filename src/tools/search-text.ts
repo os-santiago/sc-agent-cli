@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import fg from 'fast-glob';
+import { glob } from 'tinyglobby';
 import type { Tool, ToolContext } from './tool.js';
 
 export const searchTextTool: Tool = {
@@ -47,7 +47,7 @@ export const searchTextTool: Tool = {
     }
 
     const regex = useRegex ? new RegExp(pattern, 'i') : null;
-    const files = await fg(globPattern, {
+    const files = await glob(globPattern, {
       cwd: ctx.workspaceRoot,
       absolute: true,
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**'],
