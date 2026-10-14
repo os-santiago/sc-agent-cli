@@ -243,7 +243,7 @@ sc-agent profile use my-custom
 - **chalk**: Terminal colors
 - **commander**: CLI framework
 - **diff**: Unified diff patching
-- **fast-glob**: Fast file globbing
+- **tinyglobby**: Fast file globbing
 - **ignore**: .gitignore-style pattern matching
 - **prompts**: Interactive prompts
 

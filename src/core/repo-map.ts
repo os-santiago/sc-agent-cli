@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises';
 import path from 'node:path';
-import fg from 'fast-glob';
+import { glob } from 'tinyglobby';
 import ignore from 'ignore';
 import type { ProjectConfig } from './types.js';
 import { resolveSafePath } from '../utils/path-security.js';
@@ -469,7 +469,7 @@ export async function generateRepoMap(
 
   let relPaths: string[];
   try {
-    relPaths = await fg('**/*', {
+    relPaths = await glob('**/*', {
       cwd: workspaceRoot,
       dot: true,
       onlyFiles: true,
