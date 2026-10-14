@@ -70,7 +70,38 @@ configured provider too. Consequently:
   `20` is reserved for provider failures that never reach the failover
   envelope (the consecutive-empty-response abort).
 - The manifest on `24` carries `terminalResolution: "provider_error"`,
-  `errorClass`, and the per-candidate `attempts` array.
+  `errorClass`, and the per-candidate `attempts` array — **except** when
+  the terminal `errorClass` is `engine_protocol` (see below), which reports
+  `terminalResolution: "engine_protocol"` instead.
+
+### Self-inflicted protocol rejections: `engine_protocol` (#537)
+
+A `400`/`422` whose body blames the JSON validity of
+`tool_calls[].function.arguments` (signature:
+`tool_calls` + `function.arguments` + a JSON-validity complaint, e.g.
+`messages[52].tool_calls[0].function.arguments must be a valid JSON object
+string: invalid escape …`) is an **engine/serialization-class** failure —
+the malformed payload came from the model's own output sitting in our
+serialized history, so it recurs deterministically on any retry with the
+same context, unlike a transient provider fault. It is **non-retryable**
+and cascades like other 4xx, and when the chain exhausts the run still
+exits `24` — but the manifest reports
+`terminalResolution: "engine_protocol"` + `errorClass: "engine_protocol"`
+so run ledgers and postmortem runbooks can dedup self-inflicted failures
+away from provider outages (`rate_limit`, `server_error`, `transport`,
+`timeout`).
+
+Two hardening layers make the terminal path rare in practice:
+
+- **Ingest repair** — the history copy of a model tool call whose
+  `arguments` is not a valid JSON object string is replaced by a marked
+  placeholder (`{"__sc_malformed_tool_args__": "<raw preview>"}`) before it
+  enters `messages`. Execution still sees the raw call and reports the
+  args-parse failure as a tool error, so the model can retry — the run
+  survives instead of dying on the next request.
+- **History sweep** — `autoCorrectMessageSequence` applies the same repair
+  before every send, covering poisoned histories restored from sessions or
+  checkpoints.
 
 ### Zero-mutation terminals: `10` vs `11`
 
@@ -107,7 +138,7 @@ this suite fails; do not weaken it.
 | `21` | `SC_BASE_URL=https://api.openai.com/v1` with no key — pre-flight config check |
 | `22` | `--max-steps 1` and `--max-seconds 1` + delayed reply (`delayMs`) |
 | `23` | `--livelock-threshold 1` + tool-free scripted reply |
-| `24` | HTTP `401` (non-retryable, 1 attempt) and HTTP `500` (retried to the 4-attempt bound) |
+| `24` | HTTP `401` (non-retryable, 1 attempt) and HTTP `500` (retried to the 4-attempt bound); HTTP `400` with the malformed `tool_calls[].function.arguments` signature (`terminalResolution: "engine_protocol"`); malformed-args repair coverage keeps the run alive |
 | `143` | `SIGTERM` delivered while a delayed request is in flight (POSIX only) |
 
 ## Consumers

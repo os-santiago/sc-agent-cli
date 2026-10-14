@@ -224,6 +224,57 @@ test('Agent.run recovers after a single empty response', async () => {
   mock.mockRestore();
 });
 
+// --- Malformed tool-call args → sanitized history copy (#537) ---
+// The model's malformed arguments must not re-enter the provider context
+// verbatim: the history copy is repaired to a wire-valid placeholder while
+// execution still reports the args-parse failure as a tool error.
+
+test('Agent.run sanitizes malformed tool_call arguments in the history copy', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'bad1',
+          type: 'function' as const,
+          function: { name: 'read_file', arguments: `{"path": "bad${String.fromCharCode(31)}escape"}` },
+        }],
+      };
+    }
+    return { content: 'Understood — that call had invalid arguments.' };
+  });
+
+  const result = await agent.run('test');
+
+  assert.equal(callCount, 2);
+  const assistant = result.find(m => m.role === 'assistant' && m.tool_calls?.length);
+  const args = assistant!.tool_calls![0].function.arguments;
+  // Wire-valid: parses to a JSON object carrying the repair marker.
+  const parsed = JSON.parse(args);
+  assert.ok('__sc_malformed_tool_args__' in parsed);
+  // The raw response still drove execution — the tool result reports the
+  // parse failure so the model can retry.
+  const toolResult = result.find(m => m.role === 'tool' && m.tool_call_id === 'bad1');
+  assert.match(toolResult!.content, /Invalid tool arguments JSON/);
+
+  mock.mockRestore();
+});
+
 // --- Zero-mutation completion guard (#448) ---
 // Failure signature scc:zero-mutations:auto/best-coding: in unattended runs
 // the model completed its turn with a prose answer and zero mutating tool
