@@ -138,6 +138,7 @@
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
 - **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
+- **Embedded tool-call markup recovery**: models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) can leak invocations into `content` as `tool_call`/`invoke`/`function*` tags or Harmony channel markup — `utils/embedded-tool-calls.ts` recovers them into real tool calls, the agent re-prompts (max 2) on unrecoverable markup, and aborts with a format-incompatibility error if the model persists (#533, extends #417). The provider also normalizes non-canonical wire shapes: non-array or index-less `tool_calls`, the legacy `function_call` field, message-shaped stream chunks, and `tool_use` content parts
 
 ### Long-Running Execution (100+ iterations)
 
