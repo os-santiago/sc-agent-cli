@@ -865,3 +865,106 @@ test('Agent.run accounts tool output context spend in the budget report', async 
     else process.env.SC_CONTEXT_BUDGET_TOKENS = prev;
   }
 });
+
+// --- Embedded tool-call markup recovery (#533) ---
+// Failure signature scc:zero-mutations:devin/swe-2-high: tag-structured
+// models emit a <summary> envelope plus the invocation as in-content
+// markup instead of a structured tool_calls field. Unhandled, the agent
+// treats the text as the final answer and the turn ends with zero
+// workspace mutations (SCC_NO_CHANGES); the agent must recover the call
+// and execute it, and re-prompt when markup is present but unrecoverable.
+
+test('Agent.run recovers a tool call embedded as <tool_call> markup in content (swe-2 shape, #533)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'devin/swe-2-high',
+      }
+    }
+  });
+
+  const { writeFileTool } = await import('../tools/write-file.js');
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // The #533 failure shape: a <summary> report plus the invocation
+      // embedded as markup — no structured tool_calls field.
+      return {
+        content:
+          '<summary>\n## Overview\nApplying the requested fix to parser.ts.\n</summary>\n' +
+          '<tool_call>{"name":"write_file","arguments":{"path":"parser.ts","content":"patched"}}</tool_call>',
+      };
+    }
+    return { content: 'The fix has been applied to parser.ts.' };
+  });
+
+  const result = await agent.run('Fix the null check in parser.ts');
+
+  assert.equal(callCount, 2);
+  assert.equal(writeSpy.mock.calls.length, 1);
+  assert.deepEqual(writeSpy.mock.calls[0][0], { path: 'parser.ts', content: 'patched' });
+  const assistant = result.find(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0);
+  assert.ok(assistant, 'the recovered call should be recorded on the assistant message');
+  assert.equal(assistant!.tool_calls![0].function.name, 'write_file');
+  assert.ok(!result.some(m => m.role === 'user' && m.content.includes('MALFORMED TOOL CALL')));
+
+  mock.mockRestore();
+  writeSpy.mockRestore();
+});
+
+test('Agent.run re-prompts on unrecoverable action markup, then executes the structured call (#533)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'devin/swe-2-high',
+      }
+    }
+  });
+
+  const { writeFileTool } = await import('../tools/write-file.js');
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // Markup tag present but no parseable name/payload — the agent
+      // re-prompts for a structured tool_calls field instead of ending
+      // the turn with zero mutations.
+      return { content: '<tool_call>}{ not json and no usable name</tool_call>' };
+    }
+    if (callCount === 2) {
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'w1',
+          type: 'function' as const,
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
+        }],
+      };
+    }
+    return { content: 'The fix has been applied.' };
+  });
+
+  const result = await agent.run('Fix the null check in parser.ts');
+
+  assert.equal(callCount, 3);
+  assert.equal(writeSpy.mock.calls.length, 1);
+  assert.equal(result.filter(m => m.role === 'user' && m.content.includes('MALFORMED TOOL CALL')).length, 1);
+
+  mock.mockRestore();
+  writeSpy.mockRestore();
+});

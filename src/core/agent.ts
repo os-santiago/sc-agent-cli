@@ -1198,8 +1198,8 @@ export class Agent {
     let totalEmptyResponses = 0;
     let consecutiveNoToolResponses = 0;
     const livelockLimit = this.options.livelockThreshold ?? (this.options.autoApprove ? 3 : 0);
-    let harmonyRepromptCount = 0;
-    const MAX_HARMONY_REPROMPTS = 2;
+    let markupRepromptCount = 0;
+    const MAX_MARKUP_REPROMPTS = 2;
     let zeroMutationReprompts = 0;
     // Re-prompt budget for the zero-mutation completion guard (#448).
     // Env override follows the SC_MAX_ITERATIONS convention; invalid
@@ -1436,35 +1436,39 @@ export class Agent {
         this.provider.setLastCallWasError(false);
       }
 
-      // Recover Harmony-format tool calls leaked into `content` (#417): some
-      // providers emit "<|channel|>commentary to=functions.X<|message|>{args}"
-      // as plain text instead of structured tool_calls, which would otherwise
-      // end the turn silently with zero changes.
+      // Recover tool calls embedded as markup inside `content` (#417 harmony;
+      // #533 tag-structured models): providers routing non-OpenAI protocols —
+      // devin/swe-2-class gateways stream a `summary` envelope while actions
+      // ride a native channel, Hermes/llama.cpp and Anthropic-style adapters
+      // leak `tool_call`/`invoke`/`function` tags — can deliver invocations as
+      // in-content markup instead of a structured tool_calls field. Left
+      // alone the agent treats that text as the final answer and the turn
+      // ends with zero workspace mutations (scc:zero-mutations:*).
       const noStructuredCalls = !response.tool_calls || response.tool_calls.length === 0;
-      if (noStructuredCalls && typeof response.content === 'string' && response.content.includes('<|channel|>')) {
-        const { recoverHarmonyToolCalls, hasHarmonyMarkup } = await import('../utils/harmony-format.js');
-        if (hasHarmonyMarkup(response.content)) {
-          const recovered = recoverHarmonyToolCalls(response.content);
+      if (noStructuredCalls && typeof response.content === 'string') {
+        const { hasEmbeddedActionMarkup, recoverEmbeddedToolCalls } = await import('../utils/embedded-tool-calls.js');
+        if (hasEmbeddedActionMarkup(response.content)) {
+          const recovered = recoverEmbeddedToolCalls(response.content);
           if (recovered.length > 0) {
             response.tool_calls = recovered;
             assistantMessage.tool_calls = recovered.map(redactToolCall);
             if (!this.options.quiet) {
-              this.log(chalk.yellow(`\n  │ ♻️  Recovered ${recovered.length} tool call(s) from Harmony markup in content`));
+              this.log(chalk.yellow(`\n  │ ♻️  Recovered ${recovered.length} tool call(s) from markup in content`));
             }
           } else {
-            harmonyRepromptCount++;
-            if (harmonyRepromptCount <= MAX_HARMONY_REPROMPTS) {
+            markupRepromptCount++;
+            if (markupRepromptCount <= MAX_MARKUP_REPROMPTS) {
               messages.push({
                 role: 'user',
-                content: `[MALFORMED TOOL CALL ${harmonyRepromptCount}/${MAX_HARMONY_REPROMPTS}] Your previous message embedded a tool call as Harmony markup ("<|channel|>...<|message|>") inside content instead of a structured tool call. Re-emit the intended action using the proper tool_calls field. Do NOT output <|channel|> markup.`,
+                content: `[MALFORMED TOOL CALL ${markupRepromptCount}/${MAX_MARKUP_REPROMPTS}] Your previous message embedded a tool call as text markup inside content (a "tool_call", "invoke" or channel-markup tag) instead of a structured tool call. Re-emit the intended action using the proper tool_calls field. Do NOT output tool calls as text markup.`,
               });
               if (!this.options.quiet) {
-                this.log(chalk.yellow(`\n  │ 🔄 Harmony markup detected in content — re-prompting (${harmonyRepromptCount}/${MAX_HARMONY_REPROMPTS})...`));
+                this.log(chalk.yellow(`\n  │ 🔄 Tool-call markup detected in content — re-prompting (${markupRepromptCount}/${MAX_MARKUP_REPROMPTS})...`));
               }
               continue;
             }
             throw new Error(
-              `Model emitted Harmony markup tool calls inside content ${harmonyRepromptCount} times instead of structured tool_calls. ` +
+              `Model emitted tool calls as markup inside content ${markupRepromptCount} times instead of structured tool_calls. ` +
               'This indicates a provider/model format incompatibility — try a different model, ' +
               'lower temperature (0.2-0.3), or disabling streaming (stream: false).'
             );
