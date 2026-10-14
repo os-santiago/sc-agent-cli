@@ -1,0 +1,50 @@
+# CODEOWNERS — auto-requested reviewers per path.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Rules are evaluated top-to-bottom and the LAST matching pattern wins, so the
+# default `*` owner must stay first and the security-sensitive surfaces stay
+# below it. Owners must be GitHub users (@handle) or org teams (@org/team)
+# with write access to the repo — anything else silently disables the rule.
+#
+# When the org gains a dedicated security team, point the surfaces below at it
+# (e.g. @os-santiago/security) instead of the project lead.
+
+# ── Default owner ─────────────────────────────────────────────────────────
+*                                   @scanalesespinoza
+
+# ── Security-sensitive surfaces (#501) ────────────────────────────────────
+# These paths gate command execution, sandboxing, credential handling,
+# network egress and external code loading — or can weaken the review gates
+# themselves. The `*` stem suffix keeps colocated `*.test.ts` files under the
+# same owner.
+
+# Shell execution, permission gate, path validation, sandbox, env scrubbing.
+/src/tools/run-shell*.ts            @scanalesespinoza
+/src/utils/permissions*.ts          @scanalesespinoza
+/src/utils/path-security*.ts        @scanalesespinoza
+/src/utils/dangerous-commands*.ts   @scanalesespinoza
+/src/utils/sandbox*.ts              @scanalesespinoza
+/src/utils/env-scrub*.ts            @scanalesespinoza
+
+# Provider wire protocol, credential handling, workspace trust boundary.
+/src/core/provider*.ts              @scanalesespinoza
+/src/core/config*.ts                @scanalesespinoza
+/src/utils/secret-redaction*.ts     @scanalesespinoza
+/src/utils/secure-fs*.ts            @scanalesespinoza
+/src/utils/audit-log*.ts            @scanalesespinoza
+
+# Network egress surfaces (SSRF guard + fetch tool).
+/src/utils/ssrf-guard*.ts           @scanalesespinoza
+/src/tools/web-fetch*.ts            @scanalesespinoza
+
+# External code surfaces: MCP client/server bridge and plugin loader.
+/src/mcp/                           @scanalesespinoza
+/src/tools/mcp-validate-tool*.ts    @scanalesespinoza
+/src/tools/plugin-loader*.ts        @scanalesespinoza
+
+# Supply chain: dependency manifests.
+/package*.json                      @scanalesespinoza
+
+# Review gates themselves — editing these can weaken everything above.
+/.github/workflows/                 @scanalesespinoza
+/.github/CODEOWNERS                 @scanalesespinoza
