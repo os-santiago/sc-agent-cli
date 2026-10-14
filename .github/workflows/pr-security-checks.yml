@@ -19,11 +19,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # TruffleHog (AGPL-3.0) is exempt from the license gate: it runs only in
+      # CI via security-scan.yml and is never shipped with the product. The
+      # version-less purl keeps the exemption valid across SHA re-pins; every
+      # other dependency stays fully checked.
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
           comment-summary-in-pr: always
 
   code-diff-analysis:

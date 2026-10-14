@@ -139,6 +139,7 @@
 - Three failed attempts → alert user
 - **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
 - **Engine-protocol class (#537)**: a provider 400/422 rejecting malformed `tool_calls[].function.arguments` classifies as `engine_protocol` (non-retryable, cascades) — distinct terminal bucket `terminalResolution: "engine_protocol"` (still exit 24) separates self-inflicted failures from provider outages; malformed args are repaired to a `__sc_malformed_tool_args__` placeholder before entering history/the wire so runs survive
+- **Embedded tool-call markup recovery**: models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) can leak invocations into `content` as `tool_call`/`invoke`/`function*` tags or Harmony channel markup — `utils/embedded-tool-calls.ts` recovers them into real tool calls, the agent re-prompts (max 2) on unrecoverable markup, and aborts with a format-incompatibility error if the model persists (#533, extends #417). The provider also normalizes non-canonical wire shapes: non-array or index-less `tool_calls`, the legacy `function_call` field, message-shaped stream chunks, and `tool_use` content parts
 
 ### Long-Running Execution (100+ iterations)
 
