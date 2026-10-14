@@ -17,7 +17,7 @@
 //     config can no longer set (#469) — nothing but loopback is contacted.
 
 import { execFile, type ChildProcess, type ExecFileException } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,7 +141,8 @@ export interface WorkspaceOptions {
  * still written — post-#469 it is ignored as a project-scope privileged key
  * (the stderr warning doubles as coverage); routing actually comes from the
  * SC_BASE_URL env the caller must pass (see `chatEnv` overrides).
- * The caller owns cleanup (`rm -rf` — see the cleanups pattern in the test files).
+ * The caller owns cleanup — push `() => removeWorkspace(dir)` onto the
+ * cleanups array (see the pattern in the test files).
  */
 export async function makeWorkspace(options: WorkspaceOptions): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'sc-e2e-'));
@@ -159,6 +160,29 @@ export async function makeWorkspace(options: WorkspaceOptions): Promise<string> 
   await writeFile(join(dir, '.sc-agent.json'), JSON.stringify(config, null, 2));
   await writeFile(join(dir, 'prompt.md'), options.prompt ?? 'Say hello briefly.');
   return dir;
+}
+
+// Errors Windows surfaces while a directory is still locked — Defender/
+// indexer scans of freshly written files, or the kernel's lazy teardown of a
+// just-exited child's cwd handle. On a loaded runner they can outlast rm's
+// built-in retry window; a leftover mkdtemp dir under %TEMP% is harmless (the
+// OS reclaims it), so teardown warns and moves on rather than failing a run
+// whose assertions already passed. Any other error — and every failure on
+// POSIX, where these locks do not occur — still throws.
+const TRANSIENT_RM_CODES = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY']);
+
+/** Remove a makeWorkspace dir; tolerates transient Windows lock errors. */
+export async function removeWorkspace(dir: string): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (process.platform === 'win32' && code !== undefined && TRANSIENT_RM_CODES.has(code)) {
+      console.warn(`e2e cleanup: workspace still locked (${code}), leaving for OS temp cleanup: ${dir}`);
+      return;
+    }
+    throw err;
+  }
 }
 
 /** Subset of the run manifest fields asserted by this suite (#399). */

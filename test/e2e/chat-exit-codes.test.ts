@@ -23,7 +23,7 @@ import { afterEach, beforeAll, describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIST_ENTRY,
@@ -31,6 +31,7 @@ import {
   describeRun,
   lastManifest,
   makeWorkspace,
+  removeWorkspace,
   runCli,
   type CliRunResult,
   type RunManifestShape,
@@ -78,7 +79,7 @@ async function setupRun(
   const provider = await startMockProvider(Array.isArray(script) ? scriptedCompletions(script) : script);
   cleanups.push(provider.close);
   const ws = await makeWorkspace({ baseUrl: provider.baseUrl, stream: opts.stream, prompt: opts.prompt });
-  cleanups.push(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 }));
+  cleanups.push(() => removeWorkspace(ws));
   return {
     ws,
     provider,
@@ -148,7 +149,7 @@ describe('sc chat headless — exit code contract', () => {
   test('unreadable --prompt-file → generic error exit 1', async () => {
     // Usage/config-class failure: exits before loadConfig, no provider needed.
     const ws = await makeWorkspace({ baseUrl: 'http://127.0.0.1:1/v1' });
-    cleanups.push(() => rm(ws, { recursive: true, force: true }));
+    cleanups.push(() => removeWorkspace(ws));
 
     const result = await runCli({
       args: ['chat', '-q', '--prompt-file', 'does-not-exist.md'],
