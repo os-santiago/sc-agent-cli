@@ -213,8 +213,8 @@ Failover contract fields (#425):
 
 - `resolution` — `"completed"` on success; otherwise mirrors `exit_reason`
 - `provider` — `provider/model` label of the failover candidate that served the run (the configured model unless the cascade advanced; see `SC_FAILOVER`)
-- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
-- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`)
+- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), `"engine_protocol"` when the chain died on a self-inflicted protocol rejection (malformed `tool_calls[].function.arguments`, #537 — distinct from provider outages), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
+- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`, `engine_protocol`)
 - `attempts` — per-candidate attempt log: `[{candidate, attempt, errorClass, retryable, status, error, durationMs}]`
 
 ```json

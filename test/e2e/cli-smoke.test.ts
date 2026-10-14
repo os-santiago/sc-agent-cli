@@ -7,7 +7,6 @@
 import { afterEach, beforeAll, describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIST_ENTRY,
@@ -15,6 +14,7 @@ import {
   chatEnv,
   describeRun,
   makeWorkspace,
+  removeWorkspace,
   runCli,
 } from './helpers/run-cli.js';
 import { startMockProvider } from './helpers/mock-provider.js';
@@ -56,7 +56,7 @@ describe('offline CLI paths', () => {
     const provider = await startMockProvider(() => ({ kind: 'message', content: 'ok' }));
     cleanups.push(provider.close);
     const ws = await makeWorkspace({ baseUrl: provider.baseUrl });
-    cleanups.push(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 }));
+    cleanups.push(() => removeWorkspace(ws));
 
     // model.baseUrl is project-scope privileged (#469) — the mock endpoint
     // reaches the child through SC_BASE_URL, not .sc-agent.json.
@@ -77,7 +77,7 @@ describe('offline CLI paths', () => {
     await provider.close(); // released ephemeral port → guaranteed ECONNREFUSED
 
     const ws = await makeWorkspace({ baseUrl: deadBaseUrl });
-    cleanups.push(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 }));
+    cleanups.push(() => removeWorkspace(ws));
 
     const result = await runCli({ args: ['doctor'], cwd: ws, env: chatEnv(ws, { SC_BASE_URL: deadBaseUrl }) });
 

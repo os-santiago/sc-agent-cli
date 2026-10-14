@@ -161,6 +161,9 @@ local option (`sc profile use ollama`).
   (`(Closes #N)`).
 - Keep PRs focused on a single feature or fix, and explain the *why* in the
   description, not just the *what*.
+- **Reviewers**: `.github/CODEOWNERS` auto-requests the owning reviewer —
+  security-sensitive surfaces (permission gate, sandbox, provider/credential
+  handling, MCP, workflows) always require the code owner's review.
 - Update user-facing docs (`README.md`, `docs/`, `AGENTS.md`) and add a
   `CHANGELOG.md` entry under `Unreleased` when the change is user-visible.
 

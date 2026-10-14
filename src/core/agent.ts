@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { Message, StreamDelta, AgentCallbacks } from './types.js';
+import type { Message, StreamDelta, AgentCallbacks, ToolCall } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
 import { resolveFailoverChain } from './failover.js';
 import type { CandidateAttempt } from './failover.js';
@@ -7,7 +7,7 @@ import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS } from './roles.js';
 import type { AgentRole, PhaseRecord, RoleResolution } from './roles.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
-import { autoCorrectMessageSequence } from './message-validator.js';
+import { autoCorrectMessageSequence, sanitizeToolCallArguments } from './message-validator.js';
 import { detectShell } from '../utils/shell-env.js';
 import type { ShellInfo } from '../utils/shell-env.js';
 import { renderInline } from '../utils/markdown-renderer.js';
@@ -70,6 +70,15 @@ import { classifyRunOutcome, summarizeRunOutcome } from './agent/run-outcome.js'
 // keeps working (#493).
 export { compressOldMessages, pruneMessageHistory, limitMessageHistory } from './agent/message-history.js';
 export type { AgentOptions, AgentRunPhaseOptions } from './agent/options.js';
+
+// #537: the history copy must also be wire-valid — a malformed arguments
+// string left in `messages` makes the provider reject every later request
+// with a deterministic 400. Sanitizing replaces it with the placeholder
+// marker (execution below still uses the raw response and reports the
+// args-parse failure as a tool error, so the model can retry).
+function historyToolCall(call: ToolCall): ToolCall {
+  return sanitizeToolCallArguments(redactToolCall(call));
+}
 
 export class Agent {
   private provider: OpenAICompatibleProvider;
@@ -504,7 +513,7 @@ export class Agent {
       const assistantMessage: Message = {
         role: 'assistant',
         content: typeof response.content === 'string' ? redactSecrets(response.content) : response.content,
-        tool_calls: response.tool_calls?.map(redactToolCall),
+        tool_calls: response.tool_calls?.map(historyToolCall),
       };
       messages.push(assistantMessage);
 
@@ -561,7 +570,7 @@ export class Agent {
           const recovered = recoverEmbeddedToolCalls(response.content);
           if (recovered.length > 0) {
             response.tool_calls = recovered;
-            assistantMessage.tool_calls = recovered.map(redactToolCall);
+            assistantMessage.tool_calls = recovered.map(historyToolCall);
             if (!this.options.quiet) {
               this.log(chalk.yellow(`\n  │ ♻️  Recovered ${recovered.length} tool call(s) from markup in content`));
             }

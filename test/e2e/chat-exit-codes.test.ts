@@ -23,7 +23,7 @@ import { afterEach, beforeAll, describe, test } from 'vitest';
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DIST_ENTRY,
@@ -31,6 +31,7 @@ import {
   describeRun,
   lastManifest,
   makeWorkspace,
+  removeWorkspace,
   runCli,
   type CliRunResult,
   type RunManifestShape,
@@ -78,7 +79,7 @@ async function setupRun(
   const provider = await startMockProvider(Array.isArray(script) ? scriptedCompletions(script) : script);
   cleanups.push(provider.close);
   const ws = await makeWorkspace({ baseUrl: provider.baseUrl, stream: opts.stream, prompt: opts.prompt });
-  cleanups.push(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 }));
+  cleanups.push(() => removeWorkspace(ws));
   return {
     ws,
     provider,
@@ -148,7 +149,7 @@ describe('sc chat headless — exit code contract', () => {
   test('unreadable --prompt-file → generic error exit 1', async () => {
     // Usage/config-class failure: exits before loadConfig, no provider needed.
     const ws = await makeWorkspace({ baseUrl: 'http://127.0.0.1:1/v1' });
-    cleanups.push(() => rm(ws, { recursive: true, force: true }));
+    cleanups.push(() => removeWorkspace(ws));
 
     const result = await runCli({
       args: ['chat', '-q', '--prompt-file', 'does-not-exist.md'],
@@ -305,6 +306,70 @@ describe('sc chat headless — exit code contract', () => {
     const manifest = lastManifest(result.stdout);
     assert.equal(manifest.exit_reason, 'error');
     assert.equal(manifest.terminalResolution, 'loop_abort');
+  });
+
+  test('malformed tool-call args → history repaired on the wire, run survives (#537)', async () => {
+    // The #537 failure shape: the model emits function.arguments that is not
+    // a valid JSON object string (invalid escape here). The args-parse
+    // failure becomes a tool error — and the history copy sent on the next
+    // request must carry a wire-valid placeholder, not the raw malformed
+    // string, so providers that validate tool_calls on every request (NIM)
+    // do not kill the run with a deterministic 400.
+    const { provider, run } = await setupRun(
+      [
+        {
+          kind: 'message',
+          toolCalls: [{ name: 'read_file', arguments: '{"path": "badescape"}' }],
+        },
+        { kind: 'message', content: 'The read_file call had invalid arguments — nothing to change.' },
+      ],
+      { prompt: 'Triage this issue and report its actionability.' },
+    );
+
+    const result = await run(['chat', '-q', '-y', '--prompt-file', 'prompt.md']);
+
+    assert.equal(result.code, 10, describeRun(result));
+    const reqs = chatRequests(provider);
+    assert.equal(reqs.length, 2, 'run survives the malformed call — the second request reaches the provider');
+    const body = reqs[1].json as { messages?: Array<{ role?: string; tool_calls?: Array<{ function: { arguments: string } }> }> };
+    const assistant = body.messages?.find((m) => m.role === 'assistant' && m.tool_calls?.length);
+    assert.ok(assistant, 'second request must carry the assistant tool_call from history');
+    const args = assistant!.tool_calls![0].function.arguments;
+    const parsed = JSON.parse(args); // itself a valid JSON object string
+    assert.ok('__sc_malformed_tool_args__' in parsed, `expected repair marker in ${args}`);
+    // The paired tool result still reports the parse failure to the model.
+    const toolResult = body.messages?.find((m) => m.role === 'tool');
+    assert.match(toolResult?.content as string, /Invalid tool arguments JSON/);
+  });
+
+  test('provider 400 on malformed tool-call args → exit 24 + engine_protocol (#537)', async () => {
+    // Terminal-path coverage for the same signature: when the provider
+    // itself rejects tool_calls[].function.arguments (e.g. a payload that
+    // slipped sanitization), the exhausted chain is self-inflicted — the
+    // manifest must not bucket it with provider outages.
+    const { provider, run } = await setupRun([
+      {
+        kind: 'http',
+        status: 400,
+        body: {
+          error: {
+            message:
+              '400 Validation: messages[52].tool_calls[0].function.arguments must be a valid JSON object string: invalid escape at line 1 column 841',
+          },
+        },
+      },
+    ]);
+
+    const result = await run(['chat', '-q', '-y', '--prompt-file', 'prompt.md']);
+
+    assert.equal(result.code, 24, describeRun(result));
+    const manifest = lastManifest(result.stdout);
+    assert.equal(manifest.exit_reason, 'error');
+    assert.equal(manifest.terminalResolution, 'engine_protocol');
+    assert.equal(manifest.errorClass, 'engine_protocol');
+    assert.equal(manifest.attempts?.length, 1, 'engine_protocol is non-retryable — deterministic with the same context');
+    assert.equal(manifest.attempts?.[0].status, 400);
+    assert.equal(chatRequests(provider).length, 1, 'no retries burned on a self-inflicted 400');
   });
 
   test('provider chain exhausted on HTTP 401 → exit 24', async () => {

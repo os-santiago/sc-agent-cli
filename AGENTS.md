@@ -18,12 +18,12 @@
 - **`src/core/types.ts`**: TypeScript type definitions (messages, tools, config)
 - **`src/core/config.ts`**: Configuration loading/saving with profile support; workspace trust boundary (#469) — config files whose realpath resolves inside the workspace get project scope: `mcp.servers`, `plugins`, `settings.formatters`, `model.baseUrl`/`apiKey`, `profiles.*.baseUrl`/`apiKey`, and `permissions.autoApprove` are dropped (stderr warning per key + `config.privileged_key_blocked` audit event under `--audit-log`), `permissions.denyPaths`/`denyCommands` merge additively, and project `sandbox.*` keys that would weaken an enabled baseline are dropped
 - **`src/core/provider.ts`**: OpenAI-compatible API client with streaming + failover contract (dual timeouts, bounded retry, provider/model cascade)
-- **`src/core/failover.ts`**: Failover contract — timeout resolution, transient-error classification, backoff, SC_FAILOVER chain resolution, ProviderFailoverError
+- **`src/core/failover.ts`**: Failover contract — timeout resolution, transient-error classification (incl. `engine_protocol` for provider 400/422s rejecting the engine's own malformed `tool_calls[].function.arguments` payload, #537), backoff, SC_FAILOVER chain resolution, ProviderFailoverError
 - **`src/core/roles.ts`**: Multi-model orchestration (#424) — `planner`/`executor`/`reviewer` role routing for headless runs via `config.roles` (`provider/model` aliases), `PhaseTracker` append-only segment log, per-phase read-only policy and completion-guard suppression, `--role`/`SC_ROLE` single-phase pin; #462 adds the reviewer/judge consensus loop — `VERDICT:` marker parsing (`approve`/`request_changes`), `request_changes` → bounded executor rework (`SC_ROLE_MAX_FIXES`, default 3), one-time same-provider diversity warning, manifest `review` block
 - **`src/core/agent.ts`**: Main agent loop — orchestration only (#493). Subsystems live in `src/core/agent/`: `options.ts` (run/phase options), `system-prompt.ts` (default prompt), `message-history.ts` (compress/prune/limit, tool-result compression + redaction, synthesis nudge), `context-injection.ts` (system-prompt assembly + context-budget reporting), `audit.ts` (`RunAudit` event emission), `tool-execution.ts` (per-call dispatch, read-only phase gate, concurrency-capped parallel runner), `guards.ts` (empty-response/livelock/self-heal/zero-mutation/Harmony completion guards), `checkpointing.ts` (auto-save cadence), `run-outcome.ts` (outcome classification + summary), `events.ts` (`AgentEvents` quiet/callback surface). `agent.ts` re-exports the history helpers + option types so existing imports keep working
 - **`src/core/project-context.ts`**: Loads project-specific context from `AGENTS.md|SC-AGENT.md|CLAUDE.md` (+ `settings.policyFile`)
 - **`src/core/repo-map.ts`**: Skeleton context mode (#461) — `context.mode: 'skeleton'` / `SC_CONTEXT_MODE=skeleton` injects a generated repo map (per-file symbols + import edges, ~60 lines/file cap, bounded per repo) as the `repo_map` budget source instead of whole-file `project_context`; bodies pulled on demand via `read_file`
-- **`src/core/message-validator.ts`**: Auto-corrects message sequence errors
+- **`src/core/message-validator.ts`**: Auto-corrects message sequence errors + repairs malformed `tool_calls[].function.arguments` in history copies (#537 — placeholder marker `__sc_malformed_tool_args__`, raw execution path unaffected)
 - **`src/core/devcontainer.ts`**: Optional `--devcontainer` execution — `devcontainer up` + `devcontainer exec` with `devcontainer_unavailable` host fallback
 - **`src/core/repo-probe/`**: Repo toolchain/command detection (`sc probe`); reports `devcontainer` + `devcontainerPath` when `.devcontainer.json`/`.devcontainer/devcontainer.json` exists
 
@@ -139,6 +139,7 @@
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
 - **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
+- **Engine-protocol class (#537)**: a provider 400/422 rejecting malformed `tool_calls[].function.arguments` classifies as `engine_protocol` (non-retryable, cascades) — distinct terminal bucket `terminalResolution: "engine_protocol"` (still exit 24) separates self-inflicted failures from provider outages; malformed args are repaired to a `__sc_malformed_tool_args__` placeholder before entering history/the wire so runs survive
 - **Embedded tool-call markup recovery**: models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) can leak invocations into `content` as `tool_call`/`invoke`/`function*` tags or Harmony channel markup — `utils/embedded-tool-calls.ts` recovers them into real tool calls, the agent re-prompts (max 2) on unrecoverable markup, and aborts with a format-incompatibility error if the model persists (#533, extends #417). The provider also normalizes non-canonical wire shapes: non-array or index-less `tool_calls`, the legacy `function_call` field, message-shaped stream chunks, and `tool_use` content parts
 
 ### Long-Running Execution (100+ iterations)
@@ -244,7 +245,7 @@ sc-agent profile use my-custom
 - **chalk**: Terminal colors
 - **commander**: CLI framework
 - **diff**: Unified diff patching
-- **fast-glob**: Fast file globbing
+- **tinyglobby**: Fast file globbing
 - **ignore**: .gitignore-style pattern matching
 - **prompts**: Interactive prompts
 
