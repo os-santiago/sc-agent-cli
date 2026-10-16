@@ -11,6 +11,8 @@
  * fallback notice instead of failing, so `if: always()` steps stay green.
  */
 
+/* global console, process */
+
 import { readFileSync } from 'node:fs';
 
 const idx = process.argv.indexOf('--file');

@@ -72,6 +72,7 @@ export function resolveWebFetchPolicy(config: WebFetchConfig | undefined): WebFe
     } catch (err) {
       throw new Error(
         `Invalid webFetch.allowlist: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
   }
@@ -139,6 +140,7 @@ export async function assertFetchTargetAllowed(
   } catch (err) {
     throw new Error(
       `DNS lookup failed for ${hostname}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
   if (addresses.length === 0) {
