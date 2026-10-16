@@ -8,6 +8,7 @@ import {
   ProviderTimeoutError,
   classifyProviderError,
   computeRetryDelay,
+  isMalformedToolArgsRejection,
   resolveFailoverChain,
   resolveProviderTimeouts,
 } from './failover.js';
@@ -140,6 +141,49 @@ test('classifyProviderError: 401/403 → auth non-retryable; 400 → client non-
   const badModel = classifyProviderError(new ProviderHttpError(400, 'model "x" is not supported'));
   assert.equal(badModel.errorClass, 'client');
   assert.equal(badModel.retryable, false);
+});
+
+// ---------------------------------------------------------------------------
+// #537 — engine_protocol: provider rejects our own serialized payload
+// ---------------------------------------------------------------------------
+
+const NVIDIA_ARGS_REJECTION =
+  'messages[52].tool_calls[0].function.arguments must be a valid JSON object string: invalid escape at line 1 column 841';
+
+test('isMalformedToolArgsRejection matches the observed provider signature', () => {
+  assert.equal(isMalformedToolArgsRejection(`400 Validation: ${NVIDIA_ARGS_REJECTION}`), true);
+  assert.equal(isMalformedToolArgsRejection(NVIDIA_ARGS_REJECTION), true);
+  // Alternate phrasings carrying the same cues.
+  assert.equal(
+    isMalformedToolArgsRejection('tool_calls[0].function.arguments: invalid JSON'),
+    true,
+  );
+  // Missing one cue → not the malformed-args signature.
+  assert.equal(isMalformedToolArgsRejection('model "x" is not supported'), false);
+  assert.equal(isMalformedToolArgsRejection('messages[3].content must be a valid JSON string'), false);
+  assert.equal(isMalformedToolArgsRejection('invalid JSON in request body'), false);
+});
+
+test('classifyProviderError: 400/422 rejecting malformed tool-call args → engine_protocol', () => {
+  for (const status of [400, 422]) {
+    const info = classifyProviderError(new ProviderHttpError(status, NVIDIA_ARGS_REJECTION));
+    assert.equal(info.errorClass, 'engine_protocol', `${status}`);
+    assert.equal(info.retryable, false, `${status}`);
+    assert.equal(info.status, status);
+  }
+});
+
+test('classifyProviderError: signature gate — status and body must both match', () => {
+  // Same body on other statuses keeps the generic class.
+  const on500 = classifyProviderError(new ProviderHttpError(500, NVIDIA_ARGS_REJECTION));
+  assert.equal(on500.errorClass, 'server_error');
+  const on404 = classifyProviderError(new ProviderHttpError(404, NVIDIA_ARGS_REJECTION));
+  assert.equal(on404.errorClass, 'client');
+  const on401 = classifyProviderError(new ProviderHttpError(401, NVIDIA_ARGS_REJECTION));
+  assert.equal(on401.errorClass, 'auth');
+  // A generic 400 without the full signature stays `client`.
+  const generic = classifyProviderError(new ProviderHttpError(400, 'function.arguments is required'));
+  assert.equal(generic.errorClass, 'client');
 });
 
 test('classifyProviderError: timeout expiry → retryable transport failure', () => {

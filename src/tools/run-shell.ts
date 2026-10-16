@@ -102,15 +102,24 @@ export const runShellTool: Tool = {
     }
 
     return new Promise((resolve, reject) => {
+      // `detached` makes the child a process-group leader on POSIX so a
+      // timeout kill can signal the whole group — commands run via `shell:
+      // true` (or a sandbox wrapper) may fork grandchildren that would
+      // otherwise be orphaned and keep the stdio pipes open, so 'close'
+      // never fires and the timeout never settles. Windows has no
+      // process-group signal — taskkill /T is used there instead.
+      const detached = process.platform !== 'win32';
       const child: ChildProcess = spec.shell
         ? spawn(spec.file, [], {
             shell: true,
             cwd: ctx.workspaceRoot,
             env: spec.env,
+            detached,
           })
         : spawn(spec.file, spec.argv, {
             cwd: ctx.workspaceRoot,
             env: spec.env,
+            detached,
             stdio: spec.seccompFd !== undefined ? ['ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
           });
 
@@ -137,13 +146,28 @@ export const runShellTool: Tool = {
       let stderr = '';
       let timedOut = false;
 
+      // Kill the whole tree, not just the direct child: a killed shell/cmd
+      // leaves forked grandchildren running with the pipes open.
+      const killTree = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+        if (child.pid === undefined) return;
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).unref();
+          } catch { /* best effort — the tree may already be gone */ }
+          return;
+        }
+        try {
+          process.kill(-child.pid, signal); // detached: child's own process group
+        } catch {
+          try { child.kill(signal); } catch { /* already dead */ }
+        }
+      };
+
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killTree('SIGTERM');
         // Give process 2s to exit gracefully, then force kill
-        setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
-        }, 2000);
+        setTimeout(() => killTree('SIGKILL'), 2000).unref();
       }, timeout);
 
       const appendOutput = (data: Buffer, target: 'stdout' | 'stderr') => {
@@ -155,7 +179,7 @@ export const runShellTool: Tool = {
         }
         const total = Buffer.byteLength(stdout, 'utf-8') + Buffer.byteLength(stderr, 'utf-8');
         if (total > MAX_OUTPUT_BYTES) {
-          child.kill('SIGTERM');
+          killTree('SIGTERM');
           clearTimeout(timer);
           reject(new Error(`Output exceeded ${MAX_OUTPUT_BYTES / 1024 / 1024} MB limit`));
         }

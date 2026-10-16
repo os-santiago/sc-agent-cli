@@ -1,111 +1,182 @@
-// edit_file tool coverage (#545, parent #544): execute() — arg validation,
-// the requestPermission gate (deny + approve), a real unified-diff apply via
-// the `diff` package, and the two failure disambiguations the tool makes:
-// malformed patch vs. patch/context mismatch. Real fs under a tmp workspace.
-
-import { test, describe, vi, beforeAll, beforeEach, afterAll } from 'vitest';
+import { test, vi, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ProjectConfig } from '../core/types.js';
+import path from 'node:path';
+import { requestPermission } from '../utils/permissions.js';
+import { editFileTool } from './edit-file.js';
 import type { ToolContext } from './tool.js';
+import type { ProjectConfig } from '../core/types.js';
 
-// Same mock shapes as registry.test.ts — prompts approves by default.
-vi.mock('prompts', () => ({ default: vi.fn().mockResolvedValue({ choice: 'yes', approved: true }) }));
-vi.mock('chalk', () => ({ default: new Proxy({}, { get: () => (s: string) => s }) }));
-vi.mock('../utils/box-drawing.js', () => ({
-  boxHeader: () => '',
-  boxFooter: () => '',
+// Mocked permission layer — tests drive approval/denial explicitly instead of
+// hitting the interactive prompt or the real config store.
+vi.mock('../utils/permissions.js', () => ({
+  requestPermission: vi.fn(async () => true),
 }));
 
-import prompts from 'prompts';
-import { editFileTool } from './edit-file.js';
-import { clearSessionPermissions } from '../utils/permissions.js';
+const requestPermissionMock = vi.mocked(requestPermission);
 
-let dir: string;
-
-function makeConfig(): ProjectConfig {
-  return {
-    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'test' },
-    permissions: { autoApprove: [] },
-  };
-}
-
-function ctx(autoApprove = true): ToolContext {
-  return { workspaceRoot: dir, config: makeConfig(), autoApprove };
-}
-
-const VALID_PATCH = [
-  '--- a/f.txt',
-  '+++ b/f.txt',
-  '@@ -1,3 +1,3 @@',
-  ' alpha',
-  '-beta',
-  '+BETA',
-  ' gamma',
-  '',
-].join('\n');
-
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sc-editfile-'));
-});
-
-afterAll(() => {
-  rmSync(dir, { recursive: true, force: true });
-});
+let ws: string;
 
 beforeEach(() => {
-  clearSessionPermissions();
-  vi.clearAllMocks();
-  writeFileSync(join(dir, 'f.txt'), 'alpha\nbeta\ngamma\n');
+  ws = mkdtempSync(path.join(tmpdir(), 'sc-edit-file-'));
+  requestPermissionMock.mockReset();
+  requestPermissionMock.mockResolvedValue(true);
 });
 
-describe('edit_file', () => {
-  test('requires path and patch', async () => {
-    await assert.rejects(editFileTool.execute({}, ctx()), /Missing required arguments: path, patch/);
-    await assert.rejects(editFileTool.execute({ path: 'f.txt' }, ctx()), /Missing required arguments/);
-  });
+afterEach(() => {
+  rmSync(ws, { recursive: true, force: true });
+});
 
-  test('a denied prompt rejects before touching the file', async () => {
-    const context = ctx(false);
-    vi.mocked(prompts).mockResolvedValueOnce({ choice: 'no' });
-    await assert.rejects(
-      editFileTool.execute({ path: 'f.txt', patch: VALID_PATCH }, context),
-      /Permission denied by user/,
-    );
-    assert.equal(readFileSync(join(dir, 'f.txt'), 'utf-8'), 'alpha\nbeta\ngamma\n');
-  });
+function makeCtx(overrides: Partial<ProjectConfig> = {}): ToolContext {
+  const config: ProjectConfig = {
+    model: {
+      provider: 'openai-compatible',
+      baseUrl: 'http://provider.test/v1',
+      model: 'test-model',
+    },
+    ...overrides,
+  };
+  return { workspaceRoot: ws, config };
+}
 
-  test('an approved unified diff is applied and persisted', async () => {
-    const out = await editFileTool.execute({ path: 'f.txt', patch: VALID_PATCH }, ctx());
-    assert.match(out, /Patch applied successfully: f\.txt/);
-    assert.equal(readFileSync(join(dir, 'f.txt'), 'utf-8'), 'alpha\nBETA\ngamma\n');
-  });
+const exec = (args: Record<string, unknown>, ctx?: ToolContext) =>
+  editFileTool.execute(args, ctx ?? makeCtx());
 
-  test('a well-formed patch that does not match reports "does not match"', async () => {
-    writeFileSync(join(dir, 'mismatch.txt'), 'zzz\nyyy\nxxx\n');
-    await assert.rejects(
-      editFileTool.execute({ path: 'mismatch.txt', patch: VALID_PATCH }, ctx()),
-      /Patch does not match file content in mismatch\.txt/,
-    );
-  });
+// ---------------------------------------------------------------------------
+// Happy paths
+// ---------------------------------------------------------------------------
 
-  test('a patch without @@ -a,b +c,d @@ headers reports "invalid unified diff format"', async () => {
-    // `@@ -1 +1 @@` is a spec-valid hunk header (counts default to 1) that the
-    // `diff` package parses but cannot apply to mismatched content — while the
-    // tool's stricter header regex (requiring counts) does not match it.
-    const noCountsPatch = ['--- a/f.txt', '+++ b/f.txt', '@@ -1 +1 @@', '-zzz', '+new', ''].join('\n');
-    await assert.rejects(
-      editFileTool.execute({ path: 'f.txt', patch: noCountsPatch }, ctx()),
-      /invalid unified diff format/,
-    );
-  });
+test('edit_file applies a unified diff patch', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'one\ntwo\nthree\n');
+  const patch = '@@ -1,3 +1,3 @@\n one\n-two\n+dos\n three\n';
+  const out = await exec({ path: 'f.txt', patch });
+  assert.equal(out, 'Patch applied successfully: f.txt');
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'one\ndos\nthree\n');
+  assert.equal(requestPermissionMock.mock.calls.length, 1);
+  assert.equal(requestPermissionMock.mock.calls[0][0].toolName, 'edit_file');
+});
 
-  test('a missing target file surfaces the fs error', async () => {
-    await assert.rejects(
-      editFileTool.execute({ path: 'ghost.txt', patch: VALID_PATCH }, ctx()),
-      /ENOENT|no such file/i,
-    );
-  });
+test('edit_file applies a patch with ---/+++ file headers', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'alpha\nbeta\n');
+  const patch = '--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-alpha\n+ALPHA\n beta\n';
+  const out = await exec({ path: 'f.txt', patch });
+  assert.equal(out, 'Patch applied successfully: f.txt');
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'ALPHA\nbeta\n');
+});
+
+// ---------------------------------------------------------------------------
+// Denied-path — mocked permission layer
+// ---------------------------------------------------------------------------
+
+test('denied-path: edit_file aborts when the permission layer denies', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'original\n');
+  requestPermissionMock.mockResolvedValue(false);
+  await assert.rejects(
+    exec({ path: 'f.txt', patch: '@@ -1,1 +1,1 @@\n-original\n+changed\n' }),
+    /Permission denied by user/,
+  );
+  // Denial leaves the file untouched.
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'original\n');
+  assert.equal(requestPermissionMock.mock.calls.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Path security (resolveSafePath)
+// ---------------------------------------------------------------------------
+
+test('edit_file rejects deny-listed paths', async () => {
+  mkdirSync(path.join(ws, 'secrets'));
+  writeFileSync(path.join(ws, 'secrets', 'key.pem'), 'x\n');
+  const ctx = makeCtx({ permissions: { denyPaths: ['secrets/**'] } });
+  await assert.rejects(
+    exec({ path: 'secrets/key.pem', patch: '@@ -1,1 +1,1 @@\n-x\n+y\n' }, ctx),
+    /matches a deny pattern/,
+  );
+  assert.equal(readFileSync(path.join(ws, 'secrets', 'key.pem'), 'utf-8'), 'x\n');
+});
+
+test('edit_file rejects paths outside the workspace', async () => {
+  await assert.rejects(
+    exec({ path: '../outside.txt', patch: '@@ -1,1 +1,1 @@\n-a\n+b\n' }),
+    /outside the workspace/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Diff-patching error paths
+// ---------------------------------------------------------------------------
+
+test('edit_file reports a malformed patch without @@ hunk headers', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'a\nb\n');
+  // parsePatch accepts the '@@' marker but yields a hunk with NaN anchors —
+  // applyPatch returns false and the tool classifies it as a format error.
+  await assert.rejects(
+    exec({ path: 'f.txt', patch: '@@ broken hunk header\n-a\n+b\n' }),
+    /invalid unified diff format/,
+  );
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'a\nb\n');
+});
+
+test('edit_file reports a content mismatch when the patch cannot apply', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'alpha\nbeta\ngamma\n');
+  const patch = '@@ -1,3 +1,3 @@\n alpha\n-omega\n+delta\n gamma\n';
+  await assert.rejects(
+    exec({ path: 'f.txt', patch }),
+    (err: Error) => {
+      assert.match(err.message, /Patch does not match file content/);
+      assert.match(err.message, /First lines of patch/);
+      assert.match(err.message, /-omega/);
+      return true;
+    },
+  );
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'alpha\nbeta\ngamma\n');
+});
+
+test('edit_file resolves an ambiguous hunk at the position nearest its header', async () => {
+  // The hunk body fits at both line 1 and line 3; the declared start (line 3)
+  // is tried first, so only the second pair is patched.
+  writeFileSync(path.join(ws, 'f.txt'), 'x\ny\nx\ny\n');
+  const out = await exec({ path: 'f.txt', patch: '@@ -3,2 +3,2 @@\n x\n-y\n+z\n' });
+  assert.equal(out, 'Patch applied successfully: f.txt');
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'x\ny\nx\nz\n');
+});
+
+test('edit_file fails when competing hunks leave no valid position', async () => {
+  // Hunk 1 anchors at the "a\nc" pair (line 4); hunk 2's "a\nb" body also fits
+  // at line 2, but patch hunks must not overlap already-claimed text, so the
+  // ambiguous match surfaces as a failure instead of a corrupt apply.
+  writeFileSync(path.join(ws, 'f.txt'), 'q\na\nb\na\nc\n');
+  const patch = [
+    '@@ -4,2 +4,2 @@',
+    ' a',
+    '-c',
+    '+X',
+    '@@ -3,2 +3,2 @@',
+    ' a',
+    '-b',
+    '+Y',
+    '',
+  ].join('\n');
+  await assert.rejects(
+    exec({ path: 'f.txt', patch }),
+    /Patch does not match file content/,
+  );
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'q\na\nb\na\nc\n');
+});
+
+// ---------------------------------------------------------------------------
+// Argument & filesystem errors
+// ---------------------------------------------------------------------------
+
+test('edit_file requires path and patch', async () => {
+  await assert.rejects(exec({}), /Missing required arguments: path, patch/);
+  await assert.rejects(exec({ path: 'f.txt' }), /Missing required arguments: path, patch/);
+});
+
+test('edit_file propagates a missing-file error', async () => {
+  await assert.rejects(
+    exec({ path: 'ghost.txt', patch: '@@ -1,1 +1,1 @@\n-a\n+b\n' }),
+    /ENOENT/,
+  );
 });

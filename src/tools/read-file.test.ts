@@ -1,99 +1,141 @@
-// read_file tool coverage (#545, parent #544): the execute() body — arg
-// validation, safe-path resolution, the size cap, offset/limit slicing and
-// the "lines shown / total" trailer — against real fixture files in a tmp
-// workspace. read_file is read-only: it does not pass through
-// requestPermission, so no prompt mocks are needed here.
-
-import { test, describe, beforeAll, afterAll } from 'vitest';
+import { test, vi, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ProjectConfig } from '../core/types.js';
-import type { ToolContext } from './tool.js';
+import path from 'node:path';
+import { requestPermission } from '../utils/permissions.js';
 import { readFileTool } from './read-file.js';
+import type { ToolContext } from './tool.js';
+import type { ProjectConfig } from '../core/types.js';
 
-let dir: string;
+// Mocked permission layer — read_file is auto-approved by design, so it never
+// consults requestPermission; the mock proves that contract rather than driving
+// prompts or touching the real config store.
+vi.mock('../utils/permissions.js', () => ({
+  requestPermission: vi.fn(async () => true),
+}));
 
-function makeConfig(maxReadFileBytes?: number): ProjectConfig {
-  return {
-    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'test' },
-    ...(maxReadFileBytes !== undefined ? { settings: { maxReadFileBytes } } : {}),
+const requestPermissionMock = vi.mocked(requestPermission);
+
+let ws: string;
+
+beforeEach(() => {
+  ws = mkdtempSync(path.join(tmpdir(), 'sc-read-file-'));
+  requestPermissionMock.mockReset();
+  requestPermissionMock.mockResolvedValue(true);
+});
+
+afterEach(() => {
+  rmSync(ws, { recursive: true, force: true });
+});
+
+function makeCtx(overrides: Partial<ProjectConfig> = {}): ToolContext {
+  const config: ProjectConfig = {
+    model: {
+      provider: 'openai-compatible',
+      baseUrl: 'http://provider.test/v1',
+      model: 'test-model',
+    },
+    ...overrides,
   };
+  return { workspaceRoot: ws, config };
 }
 
-function ctx(config: ProjectConfig = makeConfig()): ToolContext {
-  return { workspaceRoot: dir, config };
-}
+const exec = (args: Record<string, unknown>, ctx?: ToolContext) =>
+  readFileTool.execute(args, ctx ?? makeCtx());
 
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sc-readfile-'));
-  // No trailing newline — split('\n') must count exactly 5 lines.
-  writeFileSync(join(dir, 'five.txt'), 'a\nb\nc\nd\ne');
+// ---------------------------------------------------------------------------
+// Happy paths
+// ---------------------------------------------------------------------------
+
+test('read_file returns contents with a total line count', async () => {
+  writeFileSync(path.join(ws, 'notes.txt'), 'alpha\nbeta\ngamma');
+  const out = await exec({ path: 'notes.txt' });
+  assert.equal(out, 'alpha\nbeta\ngamma\n\n[3 lines total]');
 });
 
-afterAll(() => {
-  rmSync(dir, { recursive: true, force: true });
+test('read_file paginates with offset and limit', async () => {
+  writeFileSync(path.join(ws, 'log.txt'), 'l1\nl2\nl3\nl4\nl5');
+  const out = await exec({ path: 'log.txt', offset: 2, limit: 2 });
+  assert.match(out, /^l2\nl3/);
+  assert.match(out, /\[2 lines shown, 5 total\. Use offset=4&limit=2 to read more\.\]/);
 });
 
-describe('read_file', () => {
-  test('requires path', async () => {
-    await assert.rejects(readFileTool.execute({}, ctx()), /Missing required argument: path/);
-  });
+test('read_file reads from an offset to EOF when limit is omitted', async () => {
+  writeFileSync(path.join(ws, 'log.txt'), 'l1\nl2\nl3\nl4\nl5');
+  const out = await exec({ path: 'log.txt', offset: 4 });
+  assert.match(out, /^l4\nl5/);
+  assert.match(out, /2 lines shown, 5 total/);
+});
 
-  test('reads a whole file and reports the total line count', async () => {
-    const out = await readFileTool.execute({ path: 'five.txt' }, ctx());
-    assert.match(out, /^a\nb\nc\nd\ne/);
-    assert.match(out, /\[5 lines total\]$/);
-  });
+// ---------------------------------------------------------------------------
+// Denied-path — mocked permission layer
+// ---------------------------------------------------------------------------
 
-  test('offset + limit slice the file and append a pagination hint', async () => {
-    const out = await readFileTool.execute({ path: 'five.txt', offset: 2, limit: 2 }, ctx());
-    assert.match(out, /^b\nc/);
-    assert.match(out, /\[2 lines shown, 5 total\. Use offset=4&limit=2 to read more\.\]$/);
-  });
+test('denied-path: read_file surfaces Access denied under a denying permission layer', async () => {
+  requestPermissionMock.mockResolvedValue(false);
+  writeFileSync(path.join(ws, '.env'), 'SECRET=x');
+  // The documented denied-result shape for this tool is the path-security
+  // error — requestPermission is never consulted (auto-approved by design).
+  await assert.rejects(
+    exec({ path: '.env' }, makeCtx({ permissions: { denyPaths: ['.env'] } })),
+    /matches a deny pattern/,
+  );
+  assert.equal(requestPermissionMock.mock.calls.length, 0);
+});
 
-  test('limit alone starts at line 1', async () => {
-    const out = await readFileTool.execute({ path: 'five.txt', limit: 2 }, ctx());
-    assert.match(out, /^a\nb/);
-    assert.match(out, /\[2 lines shown, 5 total\./);
-  });
+// ---------------------------------------------------------------------------
+// Path security (resolveSafePath)
+// ---------------------------------------------------------------------------
 
-  test('offset below 1 is rejected', async () => {
-    // offset=0 would collapse to 1 via `|| 1`; only a negative value reaches
-    // the `offset < 1` guard.
-    await assert.rejects(
-      readFileTool.execute({ path: 'five.txt', offset: -1 }, ctx()),
-      /offset must be >= 1/,
-    );
-  });
+test('read_file rejects deny-listed paths', async () => {
+  writeFileSync(path.join(ws, 'secrets.txt'), 'x');
+  await assert.rejects(
+    exec({ path: 'secrets.txt' }, makeCtx({ permissions: { denyPaths: ['secrets.txt'] } })),
+    /Access denied/,
+  );
+});
 
-  test('offset past the end is rejected with the file length', async () => {
-    await assert.rejects(
-      readFileTool.execute({ path: 'five.txt', offset: 99 }, ctx()),
-      /Offset 99 exceeds file length \(5 lines\)/,
-    );
-  });
+test('read_file rejects paths outside the workspace', async () => {
+  const outsideDir = mkdtempSync(path.join(tmpdir(), 'sc-readfile-out-'));
+  try {
+    const target = path.join(outsideDir, 'outside.txt');
+    writeFileSync(target, 'outside');
+    await assert.rejects(exec({ path: target }), /outside the workspace/);
+  } finally {
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
 
-  test('files larger than maxReadFileBytes are rejected before reading', async () => {
-    writeFileSync(join(dir, 'big.bin'), 'x'.repeat(64));
-    await assert.rejects(
-      readFileTool.execute({ path: 'big.bin' }, ctx(makeConfig(10))),
-      /File too large.*Maximum read size/,
-    );
-  });
+// ---------------------------------------------------------------------------
+// Argument, pagination & size validation
+// ---------------------------------------------------------------------------
 
-  test('paths outside the workspace are refused by resolveSafePath', async () => {
-    await assert.rejects(
-      readFileTool.execute({ path: '../../../../etc/hostname' }, ctx()),
-      /outside the workspace/,
-    );
-  });
+test('read_file requires a path', async () => {
+  await assert.rejects(exec({}), /Missing required argument: path/);
+});
 
-  test('a missing file surfaces the fs error', async () => {
-    await assert.rejects(
-      readFileTool.execute({ path: 'ghost.txt' }, ctx()),
-      /ENOENT|no such file/i,
-    );
-  });
+test('read_file rejects an offset below 1', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'a\nb\n');
+  await assert.rejects(exec({ path: 'f.txt', offset: -1 }), /offset must be >= 1/);
+});
+
+test('read_file rejects an offset beyond the file length', async () => {
+  writeFileSync(path.join(ws, 'f.txt'), 'a\nb\nc');
+  await assert.rejects(
+    exec({ path: 'f.txt', offset: 10 }),
+    /Offset 10 exceeds file length \(3 lines\)/,
+  );
+});
+
+test('read_file enforces maxReadFileBytes', async () => {
+  writeFileSync(path.join(ws, 'big.txt'), '0123456789');
+  await assert.rejects(
+    exec({ path: 'big.txt' }, makeCtx({ settings: { maxReadFileBytes: 4 } })),
+    /File too large/,
+  );
+});
+
+test('read_file propagates a missing-file error', async () => {
+  await assert.rejects(exec({ path: 'ghost.txt' }), /ENOENT/);
 });

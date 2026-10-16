@@ -8,6 +8,9 @@ on:
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
+  # Manual trigger so scan-range fixes can be verified on demand without
+  # waiting for the daily cron (#535).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,26 +24,28 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
       - name: Install dependencies
         run: npm ci
 
+      # Gate: fails the job on high/critical advisories. Moderate/low stay
+      # visible in the job output and JSON report but do not block CI.
       - name: Run npm audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
+        run: npm audit --audit-level=high
 
       - name: Generate audit report
-        run: npm audit --json > npm-audit.json
-        continue-on-error: true
+        if: always()
+        run: npm audit --json > npm-audit.json || true
 
       - name: Upload audit results
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: npm-audit-report
           path: npm-audit.json
@@ -55,19 +60,19 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: javascript-typescript
           queries: security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:javascript-typescript"
 
@@ -77,7 +82,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0  # needed for the base diff on pull_request
 
@@ -151,16 +156,21 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0  # Full history for comprehensive scan
 
+      # base/head are intentionally unset: with no explicit range the action
+      # derives it from the event — push scans github.event.before..after
+      # (empty base → full history when `before` is the zero SHA), pull_request
+      # scans base.sha..head.sha, and schedule/workflow_dispatch scan the full
+      # repository. The old `base: main`/`head: HEAD` resolved to the same
+      # commit on push and scheduled runs, failing with "BASE and HEAD commits
+      # are the same" (#535).
       - name: TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85  # v3.97.9
         with:
           path: ./
-          base: main
-          head: HEAD
           extra_args: --debug --only-verified
 
   supply-chain-security:
@@ -169,10 +179,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -180,20 +190,36 @@ jobs:
         run: |
           echo "🔍 Checking for dependency confusion attacks..."
 
-          # Check if package.json has suspicious package names
-          if grep -E "^  \"(@.+/)?[A-Z]" package.json; then
-            echo "⚠️  WARNING: Suspicious package names with capital letters"
-            exit 1
-          fi
-
-          # Check for packages with unusual version formats
-          if grep -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json; then
-            echo "⚠️  WARNING: Packages installed from unusual sources"
-            grep -n -E "\"[^\"]+\": \"(git\+|http:\/\/|https:\/\/github\.com(?!\/npm\/))" package.json
-            exit 1
-          fi
-
-          echo "✅ No supply chain issues detected"
+          # Validate declared dependency entries: npm package names must be
+          # lowercase/URL-safe, and every version spec must resolve through the
+          # registry (semver range). Anything else — uppercase names, git/http/
+          # file/workspace specs, or owner/repo shorthand — is flagged for
+          # manual review as a dependency-confusion / integrity risk.
+          node <<'EOF'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const NAME_RE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+          const NON_REGISTRY = /^(?:git\+|https?:|file:|link:|workspace:|github:|[\w.-]+\/[\w.-]+)/;
+          const groups = ['dependencies', 'devDependencies', 'optionalDependencies'];
+          const findings = [];
+          for (const group of groups) {
+            for (const [name, spec] of Object.entries(pkg[group] || {})) {
+              if (!NAME_RE.test(name)) {
+                findings.push(`${group}.${name}: invalid package name (uppercase/illegal chars)`);
+              }
+              if (NON_REGISTRY.test(String(spec))) {
+                findings.push(`${group}.${name}: non-registry source "${spec}"`);
+              }
+            }
+          }
+          if (findings.length) {
+            console.error('⚠️  Suspicious dependency entries detected:');
+            findings.forEach(f => console.error(` - ${f}`));
+            process.exit(1);
+          }
+          const total = groups.reduce((n, g) => n + Object.keys(pkg[g] || {}).length, 0);
+          console.log(`✅ ${total} dependency entries verified (registry sources, valid names)`);
+          EOF
 
       - name: Check package integrity
         run: |
@@ -206,10 +232,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
 
@@ -233,7 +259,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Run ESLint security rules
         run: |

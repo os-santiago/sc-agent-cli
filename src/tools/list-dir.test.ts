@@ -1,79 +1,109 @@
-// list_dir tool coverage (#545, parent #544): execute() — default path,
-// whitespace fallback, '~' expansion, [DIR]/[FILE] formatting and the empty
-// directory marker — against a real tmp workspace. Read-only tool: no
-// permission gate.
-
-import { test, describe, beforeAll, afterAll } from 'vitest';
+import { test, vi, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ProjectConfig } from '../core/types.js';
-import type { ToolContext } from './tool.js';
+import path from 'node:path';
+import { requestPermission } from '../utils/permissions.js';
 import { listDirTool } from './list-dir.js';
+import type { ToolContext } from './tool.js';
+import type { ProjectConfig } from '../core/types.js';
 
-let dir: string;
-let emptyDir: string;
+// Mocked permission layer — list_dir is auto-approved by design, so it never
+// consults requestPermission; the mock proves that contract rather than driving
+// prompts or touching the real config store.
+vi.mock('../utils/permissions.js', () => ({
+  requestPermission: vi.fn(async () => true),
+}));
 
-function makeConfig(): ProjectConfig {
-  return {
-    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'test' },
+const requestPermissionMock = vi.mocked(requestPermission);
+
+let ws: string;
+
+beforeEach(() => {
+  ws = mkdtempSync(path.join(tmpdir(), 'sc-list-dir-'));
+  requestPermissionMock.mockReset();
+  requestPermissionMock.mockResolvedValue(true);
+});
+
+afterEach(() => {
+  rmSync(ws, { recursive: true, force: true });
+});
+
+function makeCtx(overrides: Partial<ProjectConfig> = {}): ToolContext {
+  const config: ProjectConfig = {
+    model: {
+      provider: 'openai-compatible',
+      baseUrl: 'http://provider.test/v1',
+      model: 'test-model',
+    },
+    ...overrides,
   };
+  return { workspaceRoot: ws, config };
 }
 
-function ctx(): ToolContext {
-  return { workspaceRoot: dir, config: makeConfig() };
-}
+const exec = (args: Record<string, unknown>, ctx?: ToolContext) =>
+  listDirTool.execute(args, ctx ?? makeCtx());
 
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sc-listdir-'));
-  writeFileSync(join(dir, 'alpha.txt'), 'x');
-  mkdirSync(join(dir, 'sub'));
-  emptyDir = mkdtempSync(join(tmpdir(), 'sc-listdir-empty-'));
+// ---------------------------------------------------------------------------
+// Happy paths
+// ---------------------------------------------------------------------------
+
+test('list_dir formats entries with DIR/FILE markers', async () => {
+  mkdirSync(path.join(ws, 'subdir'));
+  writeFileSync(path.join(ws, 'a.txt'), 'x');
+  const out = await exec({ path: '.' });
+  assert.match(out, /\[DIR\] subdir/);
+  assert.match(out, /\[FILE\] a\.txt/);
 });
 
-afterAll(() => {
-  rmSync(dir, { recursive: true, force: true });
-  rmSync(emptyDir, { recursive: true, force: true });
+test('list_dir lists the workspace root for ".", missing, or blank paths', async () => {
+  writeFileSync(path.join(ws, 'marker.txt'), 'x');
+  for (const args of [{ path: '.' }, { path: '' }, { path: '   ' }, {}]) {
+    assert.match(await exec(args), /marker\.txt/);
+  }
 });
 
-describe('list_dir', () => {
-  test('defaults to "." and formats files vs directories', async () => {
-    const out = await listDirTool.execute({}, ctx());
-    assert.match(out, /\[FILE\] alpha\.txt/);
-    assert.match(out, /\[DIR\] sub/);
-  });
+test('list_dir reports an empty directory', async () => {
+  mkdirSync(path.join(ws, 'empty'));
+  assert.equal(await exec({ path: 'empty' }), '(empty directory)');
+});
 
-  test('a blank path falls back to "."', async () => {
-    const out = await listDirTool.execute({ path: '   ' }, ctx());
-    assert.match(out, /\[FILE\] alpha\.txt/);
-  });
+// ---------------------------------------------------------------------------
+// Denied-path — mocked permission layer
+// ---------------------------------------------------------------------------
 
-  test('a subdirectory path lists that directory', async () => {
-    writeFileSync(join(dir, 'sub', 'inside.txt'), 'y');
-    const out = await listDirTool.execute({ path: 'sub' }, ctx());
-    assert.match(out, /\[FILE\] inside\.txt/);
-  });
+test('denied-path: list_dir surfaces Access denied under a denying permission layer', async () => {
+  requestPermissionMock.mockResolvedValue(false);
+  mkdirSync(path.join(ws, 'protected'));
+  // The documented denied-result shape for this tool is the path-security
+  // error — requestPermission is never consulted (auto-approved by design).
+  await assert.rejects(
+    exec({ path: 'protected' }, makeCtx({ permissions: { denyPaths: ['protected'] } })),
+    /matches a deny pattern/,
+  );
+  assert.equal(requestPermissionMock.mock.calls.length, 0);
+});
 
-  test('empty directories report the marker', async () => {
-    const out = await listDirTool.execute(
-      { path: '.' },
-      { workspaceRoot: emptyDir, config: makeConfig() },
-    );
-    assert.equal(out, '(empty directory)');
-  });
+// ---------------------------------------------------------------------------
+// Path security (resolveSafePath)
+// ---------------------------------------------------------------------------
 
-  test('"~" resolves to the home directory — which is outside the workspace and refused', async () => {
-    const home = process.env.HOME || process.env.USERPROFILE;
-    if (home) {
-      await assert.rejects(
-        listDirTool.execute({ path: '~' }, ctx()),
-        /outside the workspace/,
-      );
-    } else {
-      // No HOME/USERPROFILE → '~' collapses to '' → the '.' fallback lists the workspace.
-      const out = await listDirTool.execute({ path: '~' }, ctx());
-      assert.match(out, /\[FILE\] alpha\.txt/);
-    }
-  });
+test('list_dir rejects paths outside the workspace', async () => {
+  await assert.rejects(exec({ path: '..' }), /outside the workspace/);
+});
+
+// "~" expands to HOME/USERPROFILE, which never resolves inside the temp
+// workspace — deterministic "Access denied" unless the host has no home var.
+const hasHome = Boolean(process.env.HOME || process.env.USERPROFILE);
+test.skipIf(!hasHome)('list_dir resolves "~" to a home dir outside the workspace', async () => {
+  await assert.rejects(exec({ path: '~' }), /Access denied/);
+});
+
+// ---------------------------------------------------------------------------
+// Filesystem errors
+// ---------------------------------------------------------------------------
+
+test('list_dir propagates readdir errors for non-directories', async () => {
+  writeFileSync(path.join(ws, 'file.txt'), 'x');
+  await assert.rejects(exec({ path: 'file.txt' }), /ENOTDIR|not a directory/);
 });

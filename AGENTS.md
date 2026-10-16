@@ -18,12 +18,12 @@
 - **`src/core/types.ts`**: TypeScript type definitions (messages, tools, config)
 - **`src/core/config.ts`**: Configuration loading/saving with profile support; workspace trust boundary (#469) — config files whose realpath resolves inside the workspace get project scope: `mcp.servers`, `plugins`, `settings.formatters`, `model.baseUrl`/`apiKey`, `profiles.*.baseUrl`/`apiKey`, and `permissions.autoApprove` are dropped (stderr warning per key + `config.privileged_key_blocked` audit event under `--audit-log`), `permissions.denyPaths`/`denyCommands` merge additively, and project `sandbox.*` keys that would weaken an enabled baseline are dropped
 - **`src/core/provider.ts`**: OpenAI-compatible API client with streaming + failover contract (dual timeouts, bounded retry, provider/model cascade)
-- **`src/core/failover.ts`**: Failover contract — timeout resolution, transient-error classification, backoff, SC_FAILOVER chain resolution, ProviderFailoverError
+- **`src/core/failover.ts`**: Failover contract — timeout resolution, transient-error classification (incl. `engine_protocol` for provider 400/422s rejecting the engine's own malformed `tool_calls[].function.arguments` payload, #537), backoff, SC_FAILOVER chain resolution, ProviderFailoverError
 - **`src/core/roles.ts`**: Multi-model orchestration (#424) — `planner`/`executor`/`reviewer` role routing for headless runs via `config.roles` (`provider/model` aliases), `PhaseTracker` append-only segment log, per-phase read-only policy and completion-guard suppression, `--role`/`SC_ROLE` single-phase pin; #462 adds the reviewer/judge consensus loop — `VERDICT:` marker parsing (`approve`/`request_changes`), `request_changes` → bounded executor rework (`SC_ROLE_MAX_FIXES`, default 3), one-time same-provider diversity warning, manifest `review` block
-- **`src/core/agent.ts`**: Main agent loop with parallel tool execution & memory injection
+- **`src/core/agent.ts`**: Main agent loop — orchestration only (#493). Subsystems live in `src/core/agent/`: `options.ts` (run/phase options), `system-prompt.ts` (default prompt), `message-history.ts` (compress/prune/limit, tool-result compression + redaction, synthesis nudge), `context-injection.ts` (system-prompt assembly + context-budget reporting), `audit.ts` (`RunAudit` event emission), `tool-execution.ts` (per-call dispatch, read-only phase gate, concurrency-capped parallel runner), `guards.ts` (empty-response/livelock/self-heal/zero-mutation/Harmony completion guards), `checkpointing.ts` (auto-save cadence), `run-outcome.ts` (outcome classification + summary), `events.ts` (`AgentEvents` quiet/callback surface). `agent.ts` re-exports the history helpers + option types so existing imports keep working
 - **`src/core/project-context.ts`**: Loads project-specific context from `AGENTS.md|SC-AGENT.md|CLAUDE.md` (+ `settings.policyFile`)
 - **`src/core/repo-map.ts`**: Skeleton context mode (#461) — `context.mode: 'skeleton'` / `SC_CONTEXT_MODE=skeleton` injects a generated repo map (per-file symbols + import edges, ~60 lines/file cap, bounded per repo) as the `repo_map` budget source instead of whole-file `project_context`; bodies pulled on demand via `read_file`
-- **`src/core/message-validator.ts`**: Auto-corrects message sequence errors
+- **`src/core/message-validator.ts`**: Auto-corrects message sequence errors + repairs malformed `tool_calls[].function.arguments` in history copies (#537 — placeholder marker `__sc_malformed_tool_args__`, raw execution path unaffected)
 - **`src/core/devcontainer.ts`**: Optional `--devcontainer` execution — `devcontainer up` + `devcontainer exec` with `devcontainer_unavailable` host fallback
 - **`src/core/repo-probe/`**: Repo toolchain/command detection (`sc probe`); reports `devcontainer` + `devcontainerPath` when `.devcontainer.json`/`.devcontainer/devcontainer.json` exists
 
@@ -65,7 +65,7 @@
 
 ### Commands
 
-- **`src/commands/chat-session.ts`**: Interactive REPL with /commands (/help, /memory, /model, /permissions, /profile, /storage, /reload, /clear, /info)
+- **`src/commands/chat-session.ts`**: Interactive REPL — session setup, banner, batch/headless run, run-manifest emission, and the loop shell. Slash commands and the multi-line editor live in `src/commands/session/` (#493): `types.ts` (`SessionContext` — the loop snapshots mutable state in, handlers mutate, loop copies back), `input.ts` (multi-line editor + autocomplete), `index.ts` (`dispatchSlashCommand` ordered handler table), `help.ts`, `history.ts` (/clear, /undo, /rollback + `persistSessionHistory`), `session-io.ts` (/session export|import|info), `checkpoint.ts`, `hud.ts`, `info.ts` (/env, /probe, /config, /info), `memory.ts` (/memory, /remember), `permissions.ts` (/permissions, /profile, /pre-approved-commands), `config.ts` (/storage, /reload, /model)
 - **`src/commands/profile.ts`**: Profile management (list, add, use, remove)
 - **`src/commands/init-command.ts`**: Project initialization with AGENTS.md
 
@@ -127,6 +127,7 @@
 - Session tracking: "Ask once" mode remembers per session
 - User can override with `-y` flag (auto-approve all)
 - **Unattended git guard**: under `-y`/`--permissions unlimited`, `run_shell` refuses git-mutating commands (`git checkout/restore/reset/clean/stash/add/commit/push/...`) — the dedicated `git` tool owns repo state; interactive mode is unaffected (#464)
+- **Normalized matching**: `denyCommands` and the git-mutation guard both run on `normalizeCommand()` (#474) — quoting/`$IFS`/`env`/`VAR=x`/`{a,b}` braces/wrappers/git global flags/path-prefixed binaries/`eval`/substitution are folded before matching. Opaque commands match deny rules only when every rule word remains literal; the git guard rejects unresolved subcommands (`git $OP` → `git <dynamic>`)
 - **Child-env scrub** (#471): `run_shell`/`mcp_validate`/MCP stdio children get an allowlisted env (`utils/env-scrub.ts` — PATH/HOME/shell basics + `run_shell.allowedEnvVars` names); credential-shaped names (`SC_*`, `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_KEY*`, `*_PASSWORD`, `*_AUTH`, `*_CREDENTIALS`, `BEARER`) are stripped unconditionally. `run_shell` output is redacted for known secret values (`***`). Shipped `denyCommands` defaults block `cat .env`-style credential reads — `denyPaths` does NOT constrain `run_shell` (best-effort parity; the sandbox is the hard boundary).
 - **"Always" scope cap** (#477): the permission prompt's "Always" persists to the global config only for non-mutating tools — for `run_shell`/`git`/`memory_write`/`write_file`/`edit_file` it is capped at session scope (nothing is written to `~/.sc-agent/config.json`)
 - **External tools share the gate** (#485): `registerPluginTools` wraps every plugin module (#400) and MCP server tool (#401) `execute` with `requestPermission` — external code cannot self-gate, so autoApprove lists, `-y`, session grants and prompts apply to `mcp__*`/plugin tools exactly like built-ins
@@ -138,6 +139,8 @@
 - Auto-retry with alternative approaches suggested
 - Three failed attempts → alert user
 - **Zero-mutation completion guard**: in unattended runs (`-y`/`--permissions unlimited`), a mutation-scoped prompt cannot end its turn with zero mutating tool calls — the agent re-prompts up to `SC_ZERO_MUTATION_REPROMPTS` times (default 2, 0 disables), honoring explicit no-change verdicts and real worktree deltas
+- **Engine-protocol class (#537)**: a provider 400/422 rejecting malformed `tool_calls[].function.arguments` classifies as `engine_protocol` (non-retryable, cascades) — distinct terminal bucket `terminalResolution: "engine_protocol"` (still exit 24) separates self-inflicted failures from provider outages; malformed args are repaired to a `__sc_malformed_tool_args__` placeholder before entering history/the wire so runs survive
+- **Embedded tool-call markup recovery**: models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) can leak invocations into `content` as `tool_call`/`invoke`/`function*` tags or Harmony channel markup — `utils/embedded-tool-calls.ts` recovers them into real tool calls, the agent re-prompts (max 2) on unrecoverable markup, and aborts with a format-incompatibility error if the model persists (#533, extends #417). The provider also normalizes non-canonical wire shapes: non-array or index-less `tool_calls`, the legacy `function_call` field, message-shaped stream chunks, and `tool_use` content parts
 
 ### Long-Running Execution (100+ iterations)
 
@@ -244,7 +247,7 @@ sc-agent profile use my-custom
 - **chalk**: Terminal colors
 - **commander**: CLI framework
 - **diff**: Unified diff patching
-- **fast-glob**: Fast file globbing
+- **tinyglobby**: Fast file globbing
 - **ignore**: .gitignore-style pattern matching
 - **prompts**: Interactive prompts
 

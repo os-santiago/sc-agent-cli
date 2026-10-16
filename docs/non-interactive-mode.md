@@ -213,8 +213,8 @@ Failover contract fields (#425):
 
 - `resolution` — `"completed"` on success; otherwise mirrors `exit_reason`
 - `provider` — `provider/model` label of the failover candidate that served the run (the configured model unless the cascade advanced; see `SC_FAILOVER`)
-- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
-- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`)
+- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), `"engine_protocol"` when the chain died on a self-inflicted protocol rejection (malformed `tool_calls[].function.arguments`, #537 — distinct from provider outages), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
+- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`, `engine_protocol`)
 - `attempts` — per-candidate attempt log: `[{candidate, attempt, errorClass, retryable, status, error, durationMs}]`
 
 ```json
@@ -544,6 +544,7 @@ In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests wo
 - **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
 - **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
+- **Embedded tool-call recovery:** models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) may deliver invocations as `tool_call`/`invoke`/`function*` markup inside `content` — or as non-canonical wire shapes (non-array/index-less `tool_calls`, legacy `function_call`, `tool_use` content parts). The provider normalizes those payloads and the agent recovers markup calls, so they count as real mutations instead of ending the turn empty (#533).
 
 ## Unattended Git Guard
 

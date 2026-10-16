@@ -1,112 +1,142 @@
-// repo_probe tool coverage (#545, parent #544): execute() — default vs.
-// explicit path resolution through resolveSafePath, the refresh flag's cache
-// contract ({forceRefresh, useCache}), json/summary output selection and the
-// "[ERROR] Failed to probe repository" containment.
+// Unit coverage for the repo_probe tool (#543). The probe pipeline
+// (probeRepo + both formatters) is mocked, so these tests pin the adapter
+// contract: workspace-root defaulting, refresh/format flags, path sandboxing
+// via resolveSafePath, and the [ERROR]-string (not thrown) failure shape.
 //
-// probeRepo itself is mocked (it has its own suite under core/repo-probe/);
-// the real formatRepoProfile{JSON,ForPrompt} run on a canned RepoProfile so
-// the output is identical on every runner.
+// repo_probe is an auto-approved read-only tool — it has no in-tool
+// permission gate, so there is no denied path to exercise here (the agent's
+// permission matrix covers read-only tools; see permissions-matrix.test.ts).
 
-import { test, describe, vi, beforeAll, beforeEach, afterAll } from 'vitest';
+import { test, describe, vi, beforeEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ProjectConfig } from '../core/types.js';
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
 import type { ToolContext } from './tool.js';
-import type { RepoProfile } from '../core/repo-probe/index.js';
+import type { RepoProfile } from '../core/repo-probe/types.js';
 
-vi.mock('../core/repo-probe/index.js', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../core/repo-probe/index.js')>();
-  return { ...mod, probeRepo: vi.fn() };
-});
+const mocks = vi.hoisted(() => ({
+  probeRepo: vi.fn(),
+  formatRepoProfileForPrompt: vi.fn(),
+  formatRepoProfileJSON: vi.fn(),
+}));
+
+vi.mock('../core/repo-probe/index.js', () => mocks);
 
 import { repoProbeTool } from './repo-probe-tool.js';
-import { probeRepo } from '../core/repo-probe/index.js';
+
+const WS = process.cwd();
+const WS_REAL = realpathSync(WS);
 
 const PROFILE: RepoProfile = {
   version: '1.1.0',
-  timestamp: 1700000000000,
-  root: '/ws/demo',
+  timestamp: 0,
+  root: WS_REAL,
   ecosystems: ['node'],
   confidence: 'high',
-  toolchains: [{ name: 'node', version: '22.0.0' }],
+  toolchains: [{ name: 'node', version: '20.x' }],
   packageManagers: [{ name: 'npm', lockfile: 'package-lock.json' }],
   frameworks: [{ name: 'vitest', category: 'test' }],
-  commands: { test: 'npm test', build: 'npm run build' },
+  commands: { test: 'npm test' },
   ci: { providers: [], workflows: [], minedVerifyCommands: [] },
   devcontainer: false,
   manifests: ['package.json'],
 };
 
-let dir: string;
-
-function makeConfig(): ProjectConfig {
+function makeCtx(configOverrides: Partial<ToolContext['config']> = {}): ToolContext {
   return {
-    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'test' },
+    workspaceRoot: WS,
+    config: {
+      model: { provider: 'openai-compatible', baseUrl: 'http://provider.test/v1', model: 'test-model' },
+      ...configOverrides,
+    },
   };
 }
 
-function ctx(): ToolContext {
-  return { workspaceRoot: dir, config: makeConfig() };
-}
-
-beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sc-probetool-'));
-  mkdirSync(join(dir, 'sub'));
-});
-
-afterAll(() => {
-  rmSync(dir, { recursive: true, force: true });
-});
+const exec = (args: Record<string, unknown>, ctx: ToolContext = makeCtx()) =>
+  repoProbeTool.execute(args, ctx);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(probeRepo).mockResolvedValue(PROFILE);
+  mocks.probeRepo.mockResolvedValue(PROFILE);
+  mocks.formatRepoProfileJSON.mockReturnValue('JSON_PROFILE');
+  mocks.formatRepoProfileForPrompt.mockReturnValue('SUMMARY_MD');
 });
 
-describe('repo_probe', () => {
-  test('defaults: workspace root, json output, cache allowed', async () => {
-    const out = await repoProbeTool.execute({}, ctx());
-    const parsed = JSON.parse(out);
-    assert.deepEqual(parsed.ecosystems, ['node']);
-    assert.equal(parsed.commands.test, 'npm test');
-
-    const call = vi.mocked(probeRepo).mock.calls.at(-1)!;
-    assert.equal(call[0], realpathSync(dir));
-    assert.deepEqual(call[1], { forceRefresh: false, useCache: true });
+describe('repo_probe — happy path', () => {
+  test('defaults probe the real workspace root and return the JSON profile', async () => {
+    const out = await exec({});
+    assert.equal(out, 'JSON_PROFILE');
+    assert.equal(mocks.probeRepo.mock.calls.length, 1);
+    assert.equal(mocks.probeRepo.mock.calls[0][0], WS_REAL);
+    assert.deepEqual(mocks.probeRepo.mock.calls[0][1], { forceRefresh: false, useCache: true });
+    assert.deepEqual(mocks.formatRepoProfileJSON.mock.calls[0], [PROFILE]);
+    assert.equal(mocks.formatRepoProfileForPrompt.mock.calls.length, 0);
   });
 
-  test('format: "summary" returns the markdown profile', async () => {
-    const out = await repoProbeTool.execute({ format: 'summary' }, ctx());
-    assert.match(out, /## Repository Profile/);
-    assert.match(out, /node/);
-    assert.match(out, /npm test/);
+  test('format "summary" returns the prompt-format rendering', async () => {
+    const out = await exec({ format: 'summary' });
+    assert.equal(out, 'SUMMARY_MD');
+    assert.equal(mocks.formatRepoProfileForPrompt.mock.calls.length, 1);
+    assert.deepEqual(mocks.formatRepoProfileForPrompt.mock.calls[0], [PROFILE]);
+    assert.equal(mocks.formatRepoProfileJSON.mock.calls.length, 0);
   });
 
-  test('path + refresh: resolves the subpath and bypasses the cache', async () => {
-    await repoProbeTool.execute({ path: 'sub', refresh: true, format: 'json' }, ctx());
-    const call = vi.mocked(probeRepo).mock.calls.at(-1)!;
-    assert.equal(call[0], realpathSync(join(dir, 'sub')));
-    assert.deepEqual(call[1], { forceRefresh: true, useCache: false });
+  test('refresh bypasses the cache', async () => {
+    await exec({ refresh: true });
+    assert.deepEqual(mocks.probeRepo.mock.calls[0][1], { forceRefresh: true, useCache: false });
   });
 
-  test('a blank path falls back to the workspace root', async () => {
-    await repoProbeTool.execute({ path: '   ' }, ctx());
-    assert.equal(vi.mocked(probeRepo).mock.calls.at(-1)![0], realpathSync(dir));
+  test('a relative path resolves inside the workspace', async () => {
+    // A nonexistent subdir keeps realpathSync out of the expected value —
+    // resolveSafePath falls back to the lexically resolved path.
+    await exec({ path: 'sub/dir' });
+    assert.equal(mocks.probeRepo.mock.calls[0][0], path.resolve(WS_REAL, 'sub/dir'));
   });
 
-  test('paths outside the workspace are refused before probing', async () => {
-    await assert.rejects(
-      repoProbeTool.execute({ path: '../../../../' }, ctx()),
-      /outside the workspace/,
-    );
-    assert.equal(vi.mocked(probeRepo).mock.calls.length, 0);
+  test('the probed profile object is handed to the formatter verbatim', async () => {
+    const other = { ...PROFILE, ecosystems: ['rust'], confidence: 'low' as const };
+    mocks.probeRepo.mockResolvedValue(other);
+    await exec({});
+    assert.equal(mocks.formatRepoProfileJSON.mock.calls[0][0], other);
+  });
+});
+
+describe('repo_probe — argument and error contract', () => {
+  test('a path escaping the workspace is rejected before any probing', async () => {
+    await assert.rejects(exec({ path: '../outside' }), /Access denied/);
+    assert.equal(mocks.probeRepo.mock.calls.length, 0);
   });
 
-  test('a probe failure is contained as an [ERROR] result', async () => {
-    vi.mocked(probeRepo).mockRejectedValueOnce(new Error('boom'));
-    const out = await repoProbeTool.execute({}, ctx());
-    assert.match(out, /\[ERROR\] Failed to probe repository: boom/);
+  test('denyPaths in config are enforced before probing', async () => {
+    const ctx = makeCtx({ permissions: { denyPaths: ['blocked/**'] } });
+    await assert.rejects(exec({ path: 'blocked/thing' }, ctx), /deny pattern/);
+    assert.equal(mocks.probeRepo.mock.calls.length, 0);
+  });
+
+  test('probe failures return an [ERROR] string instead of throwing', async () => {
+    mocks.probeRepo.mockRejectedValue(new Error('disk gone'));
+    const out = await exec({});
+    assert.equal(out, '[ERROR] Failed to probe repository: disk gone');
+  });
+
+  test('formatter failures are reported the same way', async () => {
+    mocks.formatRepoProfileJSON.mockImplementation(() => {
+      throw new Error('render broke');
+    });
+    const out = await exec({});
+    assert.equal(out, '[ERROR] Failed to probe repository: render broke');
+  });
+
+  test('a non-string or blank path falls back to the workspace root', async () => {
+    await exec({ path: 42 });
+    assert.equal(mocks.probeRepo.mock.calls[0][0], WS_REAL);
+    await exec({ path: '   ' });
+    assert.equal(mocks.probeRepo.mock.calls[1][0], WS_REAL);
+  });
+
+  test('an unrecognized format falls back to JSON', async () => {
+    const out = await exec({ format: 'xml' });
+    assert.equal(out, 'JSON_PROFILE');
+    assert.equal(mocks.formatRepoProfileJSON.mock.calls.length, 1);
   });
 });
