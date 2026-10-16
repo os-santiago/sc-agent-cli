@@ -8,14 +8,18 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Scoped to src/: parserOptions.project only covers tsconfig's include
-    // (src/**/*), so applying it to test/ or tooling files breaks parsing.
+    // Scoped to src/: parserOptions.project only covers the tsconfig's
+    // include (src/**/*), so applying it to test/ or tooling files breaks
+    // parsing. Type-aware linting uses tsconfig.eslint.json: the build
+    // tsconfig excludes src/**/*.test.ts so tests are never emitted to
+    // dist/, but they still must resolve under the lint project.
     files: ['src/**/*.ts'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
       parserOptions: {
-        projectService: true,
+        project: './tsconfig.eslint.json',
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
