@@ -50,6 +50,16 @@ jobs:
 
       - run: npm test
 
+        # #544 — opt-in bwrap integration suite (test/sandbox/). Runs on the
+        # Linux legs only; every test self-skips via hasBwrap() +
+        # describe.skipIf when bubblewrap/userns is unavailable, so the step
+        # never requires root or a bwrap install.
+      - name: Sandbox integration tests
+        if: runner.os == 'Linux'
+        env:
+          SC_SANDBOX_TESTS: '1'
+        run: npm run test:sandbox
+
       - run: npm run test:e2e
 
       - run: npm run test:coverage
