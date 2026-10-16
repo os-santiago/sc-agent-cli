@@ -141,7 +141,10 @@ describe('git tool', () => {
     // `git add <absent path>` fails before touching the index — safe to run.
     await assert.rejects(
       gitTool.execute({ operation: 'add', paths: 'sc-test-definitely-absent-file' }, ctx()),
-      /did not match|Git error|exited with code/i,
+      // `fatal:` is emitted literally by git's die() in every locale — the
+      // localized "did not match" wording is not reliable on non-English
+      // machines.
+      /fatal:|did not match|Git error|exited with code/i,
     );
   });
 
