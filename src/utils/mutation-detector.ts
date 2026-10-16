@@ -1,6 +1,23 @@
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Message } from '../core/types.js';
+
+/**
+ * Canonicalize a filesystem path for comparison against git-reported paths.
+ * `git rev-parse --show-toplevel` resolves symlinks (and Windows 8.3 short
+ * names), so a lexical `resolve(workspaceRoot, ...)` path — e.g. a tmpdir
+ * reached through `/var` → `/private/var` on macOS or `RUNNER~1` on
+ * Windows — never equals the same file's repo-root-relative resolution.
+ * realpath with a lexical fallback covers paths that do not exist yet (#449).
+ */
+export function canonicalizePath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 export interface WorkspaceGitState {
   status: string;
@@ -94,10 +111,11 @@ export function hasWorktreeChangesExcluding(
   if (excludeAbsPaths.length === 0) {
     return before.status !== after.status;
   }
-  const excluded = new Set(excludeAbsPaths);
+  const excluded = new Set(excludeAbsPaths.map(canonicalizePath));
   const stripArtifacts = (state: WorkspaceGitState): string => {
     const root = state.root;
     if (!root) return state.status;
+    const canonicalRoot = canonicalizePath(root);
     return state.status
       .split('\n')
       .filter(line => {
@@ -106,7 +124,7 @@ export function hasWorktreeChangesExcluding(
         if (!raw) return true;
         const target = raw.includes(' -> ') ? raw.split(' -> ')[1].trim() : raw;
         const unquoted = target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
-        return !excluded.has(resolve(root, unquoted));
+        return !excluded.has(canonicalizePath(resolve(canonicalRoot, unquoted)));
       })
       .join('\n');
   };

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Message } from '../core/types.js';
+import { canonicalizePath } from './mutation-detector.js';
 import type { WorkspaceGitState, MutationDetectionResult } from './mutation-detector.js';
 import { EXIT_CODES } from './exit-codes.js';
 
@@ -50,12 +51,16 @@ export function countFilesChanged(
   excludePaths?: string[]
 ): number {
   const changedFiles = new Set<string>();
-  const excluded = new Set((excludePaths ?? []).map(p => resolve(p)));
+  // Excluded paths and roots are canonicalized: git reports the realpath'd
+  // top-level while callers hand in lexical paths — under a symlinked/8.3
+  // workspace root (macOS /var→/private/var, Windows short names) a lexical
+  // match can never exclude the artifact it names (#449).
+  const excluded = new Set((excludePaths ?? []).map(canonicalizePath));
 
   // Porcelain status paths and `git diff --name-only` output are
   // repo-root-relative; write_file/edit_file args are workspace-relative.
-  const repoRoot = afterGitState?.root || beforeGitState?.root || workspaceRoot || process.cwd();
-  const wsRoot = workspaceRoot || repoRoot;
+  const repoRoot = canonicalizePath(afterGitState?.root || beforeGitState?.root || workspaceRoot || process.cwd());
+  const wsRoot = canonicalizePath(workspaceRoot || repoRoot);
 
   const addPath = (absPath: string) => {
     if (!excluded.has(absPath)) changedFiles.add(absPath);
@@ -71,11 +76,21 @@ export function countFilesChanged(
 
   // 1. Git status after session — the real worktree diff. Session artifacts
   //    (files the model wrote then reverted, or claimed in tool args) do not
-  //    appear here and must not be counted (#464).
+  //    appear here and must not be counted (#464). Entries that were already
+  //    dirty in the pre-run snapshot are not run mutations either — engine
+  //    startup side-effects (tool-probe config files under HOME, pre-existing
+  //    local edits) must not flip the terminal resolution to "completed"
+  //    (#449/#556).
+  const preExisting = new Set(
+    (beforeGitState?.status ?? '')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+  );
   if (afterGitState?.status) {
     const lines = afterGitState.status.split('\n');
     for (const line of lines) {
-      if (!line.trim()) continue;
+      if (!line.trim() || preExisting.has(line.trim())) continue;
       addRepoPath(line.slice(3));
     }
   }

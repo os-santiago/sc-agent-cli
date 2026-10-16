@@ -250,6 +250,31 @@ test('countFilesChanged: falls back to tool-call paths when git state is unavail
   assert.equal(count, 2);
 });
 
+test('countFilesChanged: does not attribute files already dirty before the run (#556)', () => {
+  // Engine startup side-effects (e.g. tool-probe config files under HOME when
+  // HOME resolves inside the worktree) or a user's pre-existing local edits
+  // appear in BOTH status snapshots — they are not files the run changed.
+  const count = countFilesChanged(
+    { status: '?? .config/containers/containers.conf\n M src/old.ts', head: 'h1', root: '/repo' },
+    { status: '?? .config/containers/containers.conf\n M src/old.ts\n M src/a.ts\n?? src/b.ts', head: 'h1', root: '/repo' },
+    undefined,
+    '/repo'
+  );
+
+  assert.equal(count, 2); // only src/a.ts and src/b.ts
+});
+
+test('countFilesChanged: a workspace dirty only before the run reports 0 (#556)', () => {
+  const count = countFilesChanged(
+    { status: '?? .config/containers/containers.conf', head: 'h1', root: '/repo' },
+    { status: '?? .config/containers/containers.conf', head: 'h1', root: '/repo' },
+    undefined,
+    '/repo'
+  );
+
+  assert.equal(count, 0);
+});
+
 test('detectSessionResolution: reports no_changes when only engine artifacts differ (#464)', () => {
   const history: Message[] = [
     { role: 'user', content: 'Summarize the repo' },
@@ -352,6 +377,28 @@ test('detectSessionResolution: stalls do not override legitimate verdicts or rea
   });
   assert.equal(completed.resolution, 'completed');
   assert.equal(completed.exit_code, EXIT_CODES.SUCCESS);
+});
+
+test('detectSessionResolution: a pre-existing dirty file does not mask a zero-mutation stall (#556)', () => {
+  // CI failure shape: an engine side-effect file (tool-probe config under
+  // HOME) sat in the worktree before and after the run. countFilesChanged
+  // used to count it anyway → resolution "completed" → SCC_NO_CHANGES/10
+  // instead of the stall terminal.
+  const res = detectSessionResolution({
+    history: [
+      { role: 'user', content: 'Create greeting.txt with a hello.' },
+      { role: 'assistant', content: 'The file has been updated.' },
+    ],
+    beforeGitState: { status: '?? .config/containers/containers.conf', head: 'h1', root: '/repo' },
+    afterGitState: { status: '?? .config/containers/containers.conf', head: 'h1', root: '/repo' },
+    workspaceRoot: '/repo',
+    zeroMutationStalls: 1,
+  });
+
+  assert.equal(res.files_changed, 0);
+  assert.equal(res.resolution, 'zero_mutations');
+  assert.equal(res.exit_code, EXIT_CODES.ZERO_MUTATIONS);
+  assert.equal(res.stdout_marker, 'SCC_ZERO_MUTATIONS');
 });
 
 test('detectSessionResolution: zeroMutationStalls 0/undefined keeps the plain no_changes terminal (#449)', () => {

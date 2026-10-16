@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 export type ShellType = 'cmd' | 'powershell' | 'bash' | 'git-bash' | 'wsl' | 'unknown';
 
@@ -26,9 +28,28 @@ export interface ShellInfo {
   tools: ToolsAvailable;
 }
 
+// Version probes run against a scratch HOME inside the engine state dir:
+// several CLIs materialize $HOME/.config/* on first invocation (podman
+// writes ~/.config/containers/*, gh/npm touch their own config dirs). When
+// HOME is inside the workspace — e2e fixtures, sandboxed workers — those
+// files become untracked worktree entries that defeat the git-based
+// zero-mutation detection (#449/#556).
+function toolCheckEnv(): NodeJS.ProcessEnv {
+  const scratch = join(homedir(), '.sc-agent', 'tool-env');
+  return {
+    ...process.env,
+    HOME: scratch,
+    USERPROFILE: scratch,
+    XDG_CONFIG_HOME: join(scratch, '.config'),
+    XDG_CACHE_HOME: join(scratch, '.cache'),
+    XDG_DATA_HOME: join(scratch, '.local', 'share'),
+    XDG_STATE_HOME: join(scratch, '.local', 'state'),
+  };
+}
+
 function checkTool(cmd: string, args: string = '--version'): boolean {
   try {
-    execSync(`${cmd} ${args}`, { encoding: 'utf-8', timeout: 2000, stdio: 'ignore' });
+    execSync(`${cmd} ${args}`, { encoding: 'utf-8', timeout: 2000, stdio: 'ignore', env: toolCheckEnv() });
     return true;
   } catch {
     return false;

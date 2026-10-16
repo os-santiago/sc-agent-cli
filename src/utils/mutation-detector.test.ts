@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,7 @@ import {
   countMutatingToolCalls,
   getWorkspaceGitState,
   hasWorktreeChanges,
+  hasWorktreeChangesExcluding,
   detectSessionMutations,
   expectsWorkspaceMutation,
   declaresNoChangesNeeded,
@@ -456,3 +457,40 @@ test('getWorkspaceGitState and hasWorktreeChanges work on actual git repo', () =
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// Symlinked workspace roots: `git rev-parse --show-toplevel` reports the
+// realpath while callers hand in lexical paths — an engine artifact resolved
+// against the lexical workspace root could never match the same file's
+// repo-root-resolved porcelain entry, so the exclusion silently failed on
+// macOS (/var → /private/var) and Windows (8.3 short names) and a run-owned
+// audit log counted as a worktree mutation (#449/#556). Windows symlink
+// creation needs privileges — this regression runs on POSIX only.
+test.skipIf(process.platform === 'win32')(
+  'hasWorktreeChangesExcluding matches excluded artifacts under a symlinked workspace root (#449)',
+  () => {
+    const real = mkdtempSync(join(tmpdir(), 'sc-symlink-real-'));
+    const link = join(tmpdir(), `sc-symlink-link-${process.pid}`);
+    try {
+      symlinkSync(real, link, 'dir');
+      spawnSync('git', ['init', '-b', 'main'], { cwd: real });
+
+      const before = getWorkspaceGitState(link);
+      assert.ok(before?.root);
+      // Sanity check the premise: git reports the canonical top-level, not
+      // the symlinked cwd it was invoked with.
+      assert.notEqual(before.root, link);
+
+      writeFileSync(join(real, 'audit.jsonl'), '{}');
+      const after = getWorkspaceGitState(link);
+
+      assert.equal(hasWorktreeChangesExcluding(before, after), true);
+      assert.equal(
+        hasWorktreeChangesExcluding(before, after, [join(link, 'audit.jsonl')]),
+        false,
+      );
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
+  },
+);

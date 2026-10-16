@@ -1,4 +1,4 @@
-import { test, vi } from 'vitest';
+import { afterEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,14 @@ function makeGitWorkspace(): string {
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
   return tmp;
 }
+
+// Restore every spy after each test — several tests spy on the shared
+// `writeFileTool` object, so a leaked spy (assert thrown before the inline
+// mockRestore runs) accumulates calls into the next test's spy and fails it
+// with a misleading count.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 test('Agent.run forwards configured non-streaming mode to the provider', async () => {
   const agent = new Agent({
