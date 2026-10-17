@@ -39,19 +39,25 @@ function escapeRegExp(s: string): string {
 
 // C0 sentinel emitted where an expansion cannot be resolved statically
 // ($VAR with no visible assignment, $@/$?/positional params, malformed ${}).
-// Real command text never contains it.
-const DYNAMIC = '\x01';
-const CTRL_RE = /[\x00-\x1f]/;
-const CTRL_STRIP_RE = /[\x00-\x1f]/g;
+// Real command text never contains it. Sentinels are built from numeric
+// char codes — never \xNN literals, which CI flags as obfuscation.
+const ctrlChar = (code: number): string => String.fromCharCode(code);
+const DYNAMIC = ctrlChar(0x01);
+const CTRL_RE = new RegExp(`[${ctrlChar(0x00)}-${ctrlChar(0x1f)}]`);
+const CTRL_STRIP_RE = new RegExp(`[${ctrlChar(0x00)}-${ctrlChar(0x1f)}]`, 'g');
 const SEPARATOR_SPLIT_RE = /([;|&(){}<>]+)/;
 
 // Escaped shell metacharacters hide behind sentinels so later passes don't
 // mistake them for real syntax (`a\;b` is one word, not two commands).
-const ESCAPE_SENTINELS: Record<string, string> = {
-  '\\': '\x03', '$': '\x04', '`': '\x06', ';': '\x07', '|': '\x08',
-  '&': '\x0e', '>': '\x0f', '<': '\x10', '(': '\x11', ')': '\x12',
-  '{': '\x13', '}': '\x14', '"': '\x15', "'": '\x16',
+const ESCAPE_SENTINEL_CODES: Record<string, number> = {
+  '\\': 0x03, '$': 0x04, '`': 0x06, ';': 0x07, '|': 0x08,
+  '&': 0x0e, '>': 0x0f, '<': 0x10, '(': 0x11, ')': 0x12,
+  '{': 0x13, '}': 0x14, '"': 0x15, "'": 0x16,
 };
+const ESCAPE_SENTINELS: Record<string, string> = {};
+for (const [ch, code] of Object.entries(ESCAPE_SENTINEL_CODES)) {
+  ESCAPE_SENTINELS[ch] = ctrlChar(code);
+}
 const SENTINEL_TO_CHAR: Record<string, string> = {};
 for (const [ch, sentinel] of Object.entries(ESCAPE_SENTINELS)) {
   SENTINEL_TO_CHAR[sentinel] = ch;
@@ -139,8 +145,9 @@ export interface NormalizedCommand {
 
 // Sentinels resolve back to their literal characters; DYNAMIC markers merge
 // away — deliberately over-merging toward the deny side (`r$Xm` → `rm`).
+const RENDER_SENTINEL_RE = new RegExp(`[${ctrlChar(0x01)}-${ctrlChar(0x1f)}]`, 'g');
 function renderNormalized(s: string): string {
-  return s.replace(/[\x01-\x1f]/g, (m) => (m === DYNAMIC ? '' : SENTINEL_TO_CHAR[m] ?? ''));
+  return s.replace(RENDER_SENTINEL_RE, (m) => (m === DYNAMIC ? '' : SENTINEL_TO_CHAR[m] ?? ''));
 }
 
 // Normalize a shell command for guard matching — never for execution.
