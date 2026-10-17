@@ -23,6 +23,10 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # trufflehog's repo is AGPL-3.0, but it runs as a CI-time secret
+          # scanner and is never distributed with the npm package. Exempt
+          # only this action's purl — copyleft stays denied for real deps.
+          allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
           comment-summary-in-pr: always
 
   code-diff-analysis:
