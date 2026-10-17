@@ -54,7 +54,12 @@ const EXT_PATTERNS: Record<string, { class: RegExp; method: RegExp; comment: Reg
 function removeComments(code: string, lang: string): string {
   const ext = EXT_PATTERNS[lang];
   if (!ext) return code;
-  return code.replace(ext.comment, '');
+  return code.replace(ext.comment, (m) => m.replace(/[^\n]/g, ' '));
+}
+
+function matchLine(clean: string, match: RegExpExecArray): number {
+  const start = match.index + match[0].length - match[0].trimStart().length;
+  return clean.substring(0, start).split('\n').length;
 }
 
 function parseMethods(code: string, lang: string): ParsedMethod[] {
@@ -68,7 +73,7 @@ function parseMethods(code: string, lang: string): ParsedMethod[] {
 
   const re = new RegExp(ext.method.source, ext.method.flags.includes('g') ? 'gm' : 'm');
   while ((match = re.exec(clean)) !== null) {
-    const lineIndex = clean.substring(0, match.index).split('\n').length;
+    const lineIndex = matchLine(clean, match);
     const originalLine = lines[lineIndex - 1] || '';
     const line = lineIndex;
 
@@ -129,7 +134,7 @@ function parseClasses(code: string, lang: string): ParsedClass[] {
   const classRegex = new RegExp(ext.class.source, 'gm');
 
   while ((match = classRegex.exec(clean)) !== null) {
-    const lineIndex = clean.substring(0, match.index).split('\n').length;
+    const lineIndex = matchLine(clean, match);
     const line = lineIndex;
 
     if (lang === '.ts' || lang === '.js') {
@@ -257,7 +262,7 @@ export const codeQueryTool: Tool = {
       return await analyzeCode(filePath);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to analyze code: ${msg}`);
+      throw new Error(`Failed to analyze code: ${msg}`, { cause: err });
     }
   },
 };

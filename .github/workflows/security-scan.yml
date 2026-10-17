@@ -8,6 +8,9 @@ on:
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
+  # Manual trigger so scan-range fixes can be verified on demand without
+  # waiting for the daily cron (#535).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,6 +21,7 @@ jobs:
   dependency-scan:
     name: Dependency Vulnerability Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -25,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: npm ci
@@ -49,6 +53,7 @@ jobs:
   codeql-analysis:
     name: CodeQL Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       security-events: write
       actions: read
@@ -58,39 +63,120 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: javascript-typescript
           queries: security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:javascript-typescript"
+
+  malware-scan:
+    name: Malware & Backdoor Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0  # needed for the base diff on pull_request
+
+      - name: Scan for suspicious patterns
+        run: |
+          echo "🔍 Scanning for malicious patterns..."
+
+          # On PRs, scan only lines ADDED by the change — same convention as
+          # pr-security-checks.yml's backdoor-detection job. Whole-repo greps
+          # flag pre-existing legitimate identifiers (`untracked`,
+          # `token-tracker`, `track()` socket bookkeeping) on every PR.
+          # push/schedule still scan the full tree.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SCAN_INPUT=$(git diff -U0 origin/${{ github.base_ref }}...HEAD -- '*.ts' '*.js' | grep '^+' | grep -v '^+++' | grep -vE '^\+\s*(//|\*|/\*)' || true)
+            SCOPE_DESC="added lines"
+          else
+            SCAN_INPUT=$(cat $(find src/ -name '*.ts' -o -name '*.js') 2>/dev/null || true)
+            SCOPE_DESC="full tree"
+          fi
+          echo "Scan scope: ${SCOPE_DESC}"
+          scan_grep() { echo "${SCAN_INPUT}" | grep -n -E "$1"; }
+
+          # Check for tracking/telemetry code. Concrete telemetry/beacon
+          # indicators only — bare `track` matched `token-tracker`,
+          # `untracked` and `track()` socket bookkeeping.
+          if scan_grep "(analytics|telemetry|phone.?home|sendBeacon|tracking.?pixel|mixpanel|amplitude|posthog|matomo|gtag|google.?analytics|hotjar|fullstory|sentry)"; then
+            echo "⚠️  WARNING: Potential tracking code detected"
+            exit 1
+          fi
+
+          # Check for data exfiltration patterns. Word boundaries keep
+          # substring false positives out (requestPermission, 'web_fetch',
+          # fetchByUrl); real fetch/axios/request/http.get/http.post calls
+          # with a URL literal still match.
+          if scan_grep "\\b(fetch|axios|request|http\.get|http\.post)\\b.*http(s)?://" | grep -v "api.openai.com" | grep -v "integrate.api.nvidia.com" | grep -v "api.anthropic.com"; then
+            echo "⚠️  WARNING: Suspicious HTTP requests detected"
+            exit 1
+          fi
+
+          # Check for base64 encoded strings (potential obfuscation)
+          if scan_grep "atob|btoa|Buffer\.from.*base64"; then
+            echo "⚠️  WARNING: Base64 encoding/decoding detected (potential obfuscation)"
+            scan_grep "atob|btoa|Buffer\.from.*base64"
+            exit 1
+          fi
+
+          # Check for eval() usage
+          if scan_grep "eval\("; then
+            echo "⚠️  WARNING: eval() usage detected (security risk)"
+            scan_grep "eval\("
+            exit 1
+          fi
+
+          # Check for credential harvesting patterns
+          if scan_grep "(password|token|secret|key|credential).*=.*process\.env" | grep -E "(send|post|fetch|upload)"; then
+            echo "⚠️  WARNING: Potential credential exfiltration detected"
+            exit 1
+          fi
+
+          # Check for crypto mining patterns
+          if scan_grep "(crypto.?miner|coinhive|monero|bitcoin|mining.?pool)"; then
+            echo "⚠️  WARNING: Cryptocurrency mining code detected"
+            exit 1
+          fi
+
+          echo "✅ No suspicious patterns detected"
 
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0  # Full history for comprehensive scan
 
+      # base/head are intentionally unset: with no explicit range the action
+      # derives it from the event — push scans github.event.before..after
+      # (empty base → full history when `before` is the zero SHA), pull_request
+      # scans base.sha..head.sha, and schedule/workflow_dispatch scan the full
+      # repository. The old `base: main`/`head: HEAD` resolved to the same
+      # commit on push and scheduled runs, failing with "BASE and HEAD commits
+      # are the same" (#535).
       - name: TruffleHog Secret Scan
         uses: trufflesecurity/trufflehog@b2b0a92070f206ab7b5a1105d82a7f2f48d92341 # v3.99.0
         with:
           path: ./
-          base: main
-          head: HEAD
           extra_args: --debug --only-verified
 
   supply-chain-security:
     name: Supply Chain Security
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -98,7 +184,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Check for dependency confusion
         run: |
@@ -143,6 +229,7 @@ jobs:
   license-compliance:
     name: License Compliance Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -150,7 +237,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: npm ci
@@ -169,6 +256,7 @@ jobs:
   static-analysis:
     name: Static Code Analysis (Bandit)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

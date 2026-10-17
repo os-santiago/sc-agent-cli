@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Message } from '../core/types.js';
 import { ProviderFailoverError, type CandidateAttempt } from '../core/failover.js';
@@ -10,6 +9,8 @@ import type { RoleTokenUsage } from './token-tracker.js';
 import type { ResolutionResult } from './resolution-detector.js';
 import type { ContextBudgetReport } from './context-budget.js';
 import { verboseError } from './verbose-logger.js';
+import { writeFileSecureSync } from './secure-fs.js';
+import { redactDeep } from './secret-redaction.js';
 
 /**
  * Terminal reason for a non-interactive (batch) run. Part of the
@@ -98,7 +99,7 @@ export interface RunManifest {
   provider: string | null;
   /** Terminal resolution for machine consumers: 'completed' on success, else the exit reason. */
   resolution: string;
-  /** Error classification on failure exits (provider_error|auth_error|loop_abort|error). */
+  /** Error classification on failure exits (provider_error|engine_protocol|auth_error|loop_abort|error). */
   terminalResolution?: string;
   /** ProviderErrorClass + per-candidate attempt trace when the failover chain exhausted. */
   errorClass?: string;
@@ -215,7 +216,13 @@ export function buildRunManifest(input: RunManifestInput): RunManifest {
 
 function errorFields(err: unknown): Pick<RunManifest, 'terminalResolution' | 'errorClass' | 'attempts'> {
   if (err instanceof ProviderFailoverError) {
-    return { terminalResolution: 'provider_error', errorClass: err.errorClass, attempts: err.attempts };
+    // #537: an exhausted chain whose terminal class is `engine_protocol`
+    // (provider rejected our own serialized payload — malformed
+    // tool_calls[].function.arguments) is self-inflicted, not a provider
+    // outage — give it a distinct terminal bucket so run ledgers and
+    // postmortem runbooks dedup it away from transport/quota failures.
+    const terminalResolution = err.errorClass === 'engine_protocol' ? 'engine_protocol' : 'provider_error';
+    return { terminalResolution, errorClass: err.errorClass, attempts: err.attempts };
   }
   return { terminalResolution: TERMINAL_RESOLUTIONS[classifyError(err)] ?? 'error' };
 }
@@ -230,15 +237,19 @@ export function emitRunManifest(
   manifest: RunManifest,
   options: { files?: Array<string | undefined>; onStdoutFlushed?: () => void } = {},
 ): void {
+  // #472: the manifest is a persisted artifact + stdout contract — redact
+  // every string field (final_message, error, attempt traces) once here so
+  // both the file writes and the stdout line carry the masked copy.
+  const safe = redactDeep(manifest);
   for (const outPath of options.files ?? []) {
     if (!outPath) continue;
     try {
-      writeFileSync(resolve(outPath), JSON.stringify(manifest, null, 2));
+      writeFileSecureSync(resolve(outPath), JSON.stringify(safe, null, 2));
     } catch (e) {
       verboseError(`manifest write failed (${outPath}): ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  const line = JSON.stringify(manifest) + '\n';
+  const line = JSON.stringify(safe) + '\n';
   if (options.onStdoutFlushed) {
     process.stdout.write(line, options.onStdoutFlushed);
   } else {

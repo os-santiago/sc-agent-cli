@@ -224,6 +224,57 @@ test('Agent.run recovers after a single empty response', async () => {
   mock.mockRestore();
 });
 
+// --- Malformed tool-call args → sanitized history copy (#537) ---
+// The model's malformed arguments must not re-enter the provider context
+// verbatim: the history copy is repaired to a wire-valid placeholder while
+// execution still reports the args-parse failure as a tool error.
+
+test('Agent.run sanitizes malformed tool_call arguments in the history copy', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'bad1',
+          type: 'function' as const,
+          function: { name: 'read_file', arguments: `{"path": "bad${String.fromCharCode(31)}escape"}` },
+        }],
+      };
+    }
+    return { content: 'Understood — that call had invalid arguments.' };
+  });
+
+  const result = await agent.run('test');
+
+  assert.equal(callCount, 2);
+  const assistant = result.find(m => m.role === 'assistant' && m.tool_calls?.length);
+  const args = assistant!.tool_calls![0].function.arguments;
+  // Wire-valid: parses to a JSON object carrying the repair marker.
+  const parsed = JSON.parse(args);
+  assert.ok('__sc_malformed_tool_args__' in parsed);
+  // The raw response still drove execution — the tool result reports the
+  // parse failure so the model can retry.
+  const toolResult = result.find(m => m.role === 'tool' && m.tool_call_id === 'bad1');
+  assert.match(toolResult!.content, /Invalid tool arguments JSON/);
+
+  mock.mockRestore();
+});
+
 // --- Zero-mutation completion guard (#448) ---
 // Failure signature scc:zero-mutations:auto/best-coding: in unattended runs
 // the model completed its turn with a prose answer and zero mutating tool
@@ -434,6 +485,73 @@ test('Agent.run does not count memory_write as a workspace mutation for the guar
 
   mock.mockRestore();
   memSpy.mockRestore();
+});
+
+test('Agent.run: a #464-refused run_shell git mutation does not satisfy the zero-mutation guard (#485)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'test-model',
+      }
+    }
+  });
+
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // The model tries to revert files via run_shell — refused by the
+      // unattended git guard (#464) before it can touch the worktree.
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'g1',
+          type: 'function' as const,
+          function: { name: 'run_shell', arguments: JSON.stringify({ command: 'git checkout -- .' }) },
+        }],
+      };
+    }
+    if (callCount === 2) {
+      // Neutral acknowledgement prose: no future-intention phrasing (would
+      // trip self-heal instead), no no-changes verdict.
+      return { content: 'The git mutation was refused by the permission gate.' };
+    }
+    if (callCount === 3) {
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'w1',
+          type: 'function' as const,
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'x.ts', content: 'y' }) },
+        }],
+      };
+    }
+    return { content: 'Done.' };
+  });
+
+  const result = await agent.run('Fix the parser bug');
+
+  // The refusal surfaces as a tool-result error carrying the guard message.
+  const refused = result.find(m => m.role === 'tool' && m.tool_call_id === 'g1');
+  assert.ok(refused, 'expected a tool result for the refused run_shell call');
+  assert.match(refused!.content, /refused in unattended mode/);
+
+  // A refused call is a failure, not a mutation — the #448 guard still
+  // re-prompts once, then the write_file call satisfies it.
+  const reprompts = result.filter(m => m.role === 'user' && m.content.includes('ZERO-MUTATION'));
+  assert.equal(reprompts.length, 1);
+  assert.equal(writeSpy.mock.calls.length, 1);
+  assert.equal(callCount, 4);
+
+  mock.mockRestore();
+  writeSpy.mockRestore();
 });
 
 // ---------------------------------------------------------------------------
@@ -797,4 +915,107 @@ test('Agent.run accounts tool output context spend in the budget report', async 
     if (prev === undefined) delete process.env.SC_CONTEXT_BUDGET_TOKENS;
     else process.env.SC_CONTEXT_BUDGET_TOKENS = prev;
   }
+});
+
+// --- Embedded tool-call markup recovery (#533) ---
+// Failure signature scc:zero-mutations:devin/swe-2-high: tag-structured
+// models emit a <summary> envelope plus the invocation as in-content
+// markup instead of a structured tool_calls field. Unhandled, the agent
+// treats the text as the final answer and the turn ends with zero
+// workspace mutations (SCC_NO_CHANGES); the agent must recover the call
+// and execute it, and re-prompt when markup is present but unrecoverable.
+
+test('Agent.run recovers a tool call embedded as <tool_call> markup in content (swe-2 shape, #533)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'devin/swe-2-high',
+      }
+    }
+  });
+
+  const { writeFileTool } = await import('../tools/write-file.js');
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // The #533 failure shape: a <summary> report plus the invocation
+      // embedded as markup — no structured tool_calls field.
+      return {
+        content:
+          '<summary>\n## Overview\nApplying the requested fix to parser.ts.\n</summary>\n' +
+          '<tool_call>{"name":"write_file","arguments":{"path":"parser.ts","content":"patched"}}</tool_call>',
+      };
+    }
+    return { content: 'The fix has been applied to parser.ts.' };
+  });
+
+  const result = await agent.run('Fix the null check in parser.ts');
+
+  assert.equal(callCount, 2);
+  assert.equal(writeSpy.mock.calls.length, 1);
+  assert.deepEqual(writeSpy.mock.calls[0][0], { path: 'parser.ts', content: 'patched' });
+  const assistant = result.find(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0);
+  assert.ok(assistant, 'the recovered call should be recorded on the assistant message');
+  assert.equal(assistant!.tool_calls![0].function.name, 'write_file');
+  assert.ok(!result.some(m => m.role === 'user' && m.content.includes('MALFORMED TOOL CALL')));
+
+  mock.mockRestore();
+  writeSpy.mockRestore();
+});
+
+test('Agent.run re-prompts on unrecoverable action markup, then executes the structured call (#533)', async () => {
+  const agent = new Agent({
+    workspaceRoot: process.cwd(),
+    autoApprove: true,
+    quiet: true,
+    config: {
+      model: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://test.api/v1',
+        model: 'devin/swe-2-high',
+      }
+    }
+  });
+
+  const { writeFileTool } = await import('../tools/write-file.js');
+  const writeSpy = vi.spyOn(writeFileTool, 'execute').mockResolvedValue('ok');
+
+  let callCount = 0;
+  const mock = vi.spyOn(agent.provider, 'chatCompletion').mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // Markup tag present but no parseable name/payload — the agent
+      // re-prompts for a structured tool_calls field instead of ending
+      // the turn with zero mutations.
+      return { content: '<tool_call>}{ not json and no usable name</tool_call>' };
+    }
+    if (callCount === 2) {
+      return {
+        content: '',
+        tool_calls: [{
+          id: 'w1',
+          type: 'function' as const,
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'parser.ts', content: 'x' }) },
+        }],
+      };
+    }
+    return { content: 'The fix has been applied.' };
+  });
+
+  const result = await agent.run('Fix the null check in parser.ts');
+
+  assert.equal(callCount, 3);
+  assert.equal(writeSpy.mock.calls.length, 1);
+  assert.equal(result.filter(m => m.role === 'user' && m.content.includes('MALFORMED TOOL CALL')).length, 1);
+
+  mock.mockRestore();
+  writeSpy.mockRestore();
 });

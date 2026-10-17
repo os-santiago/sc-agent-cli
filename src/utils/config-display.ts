@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { ProjectConfig } from '../core/types.js';
+import { getGlobalConfigPath } from '../core/config.js';
 import { getTerminalWidth } from './box-drawing.js';
 import { formatBytes } from './storage-limit.js';
 import { checkStorageLimit } from './storage-limit.js';
@@ -26,7 +27,12 @@ function list(name: string, items: string[]): void {
     console.log(` ${chalk.white(name.padEnd(18))} ${chalk.dim('(none)')}`);
     return;
   }
-  console.log(` ${chalk.white(name.padEnd(18))} ${items.join(', ')}`);
+  // Keep long lists on one logical line — the shipped denyCommands defaults
+  // (#471) are ~20 entries and would otherwise flood the display.
+  const MAX_SHOWN = 8;
+  const shown = items.slice(0, MAX_SHOWN).join(', ');
+  const suffix = items.length > MAX_SHOWN ? `, … +${items.length - MAX_SHOWN} more` : '';
+  console.log(` ${chalk.white(name.padEnd(18))} ${shown}${suffix}`);
 }
 
 export async function showConfig(
@@ -137,6 +143,19 @@ export async function showConfig(
     field('Deny rules', 'permissions.denyPaths/denyCommands still apply (deny wins)', chalk.gray);
   }
 
+  // ── web_fetch egress policy (#470) ──
+  section('web_fetch');
+  const webFetch = config.webFetch;
+  const allowlist = webFetch?.allowlist ?? [];
+  if (webFetch?.allowPrivateHosts) {
+    field('Destinations', 'unrestricted (private hosts allowed)', chalk.yellow);
+  } else {
+    field('Destinations', 'public only (private/loopback/link-local blocked)', chalk.gray);
+  }
+  field('Allowlist', allowlist.length > 0 ? allowlist.join(', ') : '(none — all public hosts)',
+    allowlist.length > 0 ? chalk.cyan : chalk.gray);
+  field('Body cap', `${((webFetch?.maxBytes ?? 5 * 1024 * 1024) / 1024 / 1024).toFixed(1)} MB`, chalk.gray);
+
   // ── Context injection (#461) ──
   section('Context');
   const ctxMode = config.context?.mode ?? 'full';
@@ -185,7 +204,7 @@ export async function showConfig(
 
   // ── Config files ──
   section('Config Files');
-  console.log(` ${chalk.gray('  Global:  ~/.sc-agent/config.json')}`);
+  console.log(` ${chalk.gray(`  Global:  ${getGlobalConfigPath()}`)}`);
   console.log(` ${chalk.gray('  Project: .sc-agent.json (if exists)')}`);
   console.log(` ${chalk.gray('  Memory:  ~/.sc-agent/memory/memory.json')}`);
 

@@ -213,8 +213,8 @@ Failover contract fields (#425):
 
 - `resolution` — `"completed"` on success; otherwise mirrors `exit_reason`
 - `provider` — `provider/model` label of the failover candidate that served the run (the configured model unless the cascade advanced; see `SC_FAILOVER`)
-- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
-- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`)
+- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), `"engine_protocol"` when the chain died on a self-inflicted protocol rejection (malformed `tool_calls[].function.arguments`, #537 — distinct from provider outages), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
+- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`, `engine_protocol`)
 - `attempts` — per-candidate attempt log: `[{candidate, attempt, errorClass, retryable, status, error, durationMs}]`
 
 ```json
@@ -353,10 +353,11 @@ sc "analyze this code"
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | Error (API error, invalid prompt, etc.) |
+Batch runs terminate with the documented, machine-consumable contract in
+[`docs/exit-codes.md`](exit-codes.md) — `0` success, `1` generic error,
+`10`/`11` zero-mutation terminals, `20`–`24` failure classes, `130`/`143`
+signal exits. Wrappers should branch on `$?` alone; see the full table and
+marker contract there (section "Exit-Code Contract" below for usage).
 
 ---
 
@@ -515,22 +516,15 @@ Restores the checkpoint's conversation history and reuses its session id (checkp
 
 ## Exit-Code Contract (stable, machine-consumable)
 
-Batch runs terminate with a documented exit code — wrappers branch on `$?` alone:
+Batch runs terminate with a documented exit code — wrappers branch on `$?`
+alone. The canonical, normative contract lives in
+[`docs/exit-codes.md`](exit-codes.md): every code, its trigger paths, its
+stdout/stderr marker, and the failover nuance (HTTP failures — including a
+live `401` or `500` — surface as `24` provider-chain-exhausted, not `20`/`21`).
 
-| Code | Meaning | Marker on last stdout line |
-|------|---------|----------------------------|
-| `0`  | Success (changes produced, or interactive run) | — |
-| `1`  | Generic/unspecified error | `Error: …` |
-| `10` | Success, **zero mutations** — model refused / read-only / no tools executed | `SCC_NO_CHANGES` |
-| `20` | Provider error — network, timeout, 5xx, repeated empty responses | `Error: …` |
-| `21` | Auth error — 401/403, missing or invalid API key | `Error: …` |
-| `22` | Execution budget exhausted (`--max-steps`/`--max-seconds`/`--max-total-tokens`) | `SC_BUDGET_EXCEEDED <steps\|seconds\|tokens>` |
-| `23` | Agent-loop abort — tool livelock (`--livelock-threshold`), unrecoverable loop | `[SC_LIVELOCK] …` |
-| `24` | Provider chain exhausted — every `SC_FAILOVER` candidate failed (manifest carries `errorClass` + `attempts`) | `Error: …` |
-| `130` | Interrupted by `SIGINT` (batch only) | manifest `exit_reason: "interrupted"` |
-| `143` | Interrupted by `SIGTERM` (batch only, e.g. `timeout` kills) | manifest `exit_reason: "interrupted"` |
-
-Reserved: 2-9 clean terminals, 11-19 run outcomes, 25+ fatal. Codes are stable across releases.
+Reserved: 2-9 clean terminals, 12-19 run outcomes (`11` = not-actionable /
+blocked, `SCC_NOT_ACTIONABLE`/`SCC_BLOCKED`), 25+ fatal. Codes are stable
+across releases and asserted end-to-end by `test/e2e/chat-exit-codes.test.ts`.
 
 ```bash
 scc chat -yq --max-steps 50 'implement issue #42'
@@ -550,6 +544,7 @@ In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests wo
 - **Worktree check:** the guard also compares git status before/after the run, so writes made through unclassified shell paths still count as mutations and are never re-prompted.
 - **No-change verdict honored:** an explicit verdict ("no changes required", "already implemented", "nothing to commit") completes the turn immediately — `SCC_NO_CHANGES` / exit `10` remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
+- **Embedded tool-call recovery:** models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) may deliver invocations as `tool_call`/`invoke`/`function*` markup inside `content` — or as non-canonical wire shapes (non-array/index-less `tool_calls`, legacy `function_call`, `tool_use` content parts). The provider normalizes those payloads and the agent recovers markup calls, so they count as real mutations instead of ending the turn empty (#533).
 
 ## Unattended Git Guard
 

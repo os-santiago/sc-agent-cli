@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import type { Tool, ToolContext } from './tool.js';
 import { requestPermission } from '../utils/permissions.js';
 import { formatSandboxViolations } from '../utils/sandbox.js';
+import { buildChildEnv, collectSecretValues, redactSecrets } from '../utils/env-scrub.js';
 
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 
@@ -20,7 +21,7 @@ export const runShellTool: Tool = {
     type: 'function',
     function: {
       name: 'run_shell',
-      description: 'Execute a shell command (requires explicit permission). Git-mutating commands (checkout, restore, reset, clean, stash, add, commit, push, ...) are refused in unattended mode — use the dedicated git tool for repo state.',
+      description: 'Execute a shell command (requires explicit permission). Git-mutating commands (checkout, restore, reset, clean, stash, add, commit, push, ...) are refused in unattended mode — use the dedicated git tool for repo state. Runs with a scrubbed environment — provider credentials and other secrets are not forwarded to the child.',
       parameters: {
         type: 'object',
         properties: {
@@ -62,10 +63,19 @@ export const runShellTool: Tool = {
       throw new Error('Permission denied by user');
     }
 
+    // #471 — the child gets an allowlisted environment, never process.env:
+    // provider credentials (SC_API_KEY, OPENAI_API_KEY, GH_TOKEN, …) must not
+    // be readable via `env`/`printenv`/`/proc/self/environ`. Tool output is
+    // additionally redacted for known secret values before it reaches the
+    // model context / session history.
+    const childEnv = buildChildEnv(process.env, ctx.config.run_shell?.allowedEnvVars);
+    const secrets = collectSecretValues(process.env, ctx.config);
+    const redact = (text: string) => redactSecrets(text, secrets);
+
     // #423 — sandboxed execution. Failures preparing the sandbox fail closed:
     // the command is never silently run outside the requested boundary.
     const sandbox = ctx.sandbox?.enabled ? ctx.sandbox : undefined;
-    let spec: SpawnSpec = { file: command, argv: [], shell: true };
+    let spec: SpawnSpec = { file: command, argv: [], shell: true, env: childEnv };
     let violationMark = 0;
     if (sandbox) {
       violationMark = sandbox.violations.length;
@@ -85,20 +95,30 @@ export const runShellTool: Tool = {
           `[SANDBOX_VIOLATION] ${JSON.stringify({ rule: 'spawn', target: 'sandbox-setup' })}\n` +
             `Sandboxed execution unavailable: ${detail}\n` +
             `The command was NOT executed — the sandbox boundary could not be established.`,
+          { cause: err },
         );
       }
     }
 
     return new Promise((resolve, reject) => {
+      // `detached` makes the child a process-group leader on POSIX so a
+      // timeout kill can signal the whole group — commands run via `shell:
+      // true` (or a sandbox wrapper) may fork grandchildren that would
+      // otherwise be orphaned and keep the stdio pipes open, so 'close'
+      // never fires and the timeout never settles. Windows has no
+      // process-group signal — taskkill /T is used there instead.
+      const detached = process.platform !== 'win32';
       const child: ChildProcess = spec.shell
         ? spawn(spec.file, [], {
             shell: true,
             cwd: ctx.workspaceRoot,
             env: spec.env,
+            detached,
           })
         : spawn(spec.file, spec.argv, {
             cwd: ctx.workspaceRoot,
             env: spec.env,
+            detached,
             stdio: spec.seccompFd !== undefined ? ['ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
           });
 
@@ -119,13 +139,28 @@ export const runShellTool: Tool = {
       let stderr = '';
       let timedOut = false;
 
+      // Kill the whole tree, not just the direct child: a killed shell/cmd
+      // leaves forked grandchildren running with the pipes open.
+      const killTree = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+        if (child.pid === undefined) return;
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).unref();
+          } catch { /* best effort — the tree may already be gone */ }
+          return;
+        }
+        try {
+          process.kill(-child.pid, signal); // detached: child's own process group
+        } catch {
+          try { child.kill(signal); } catch { /* already dead */ }
+        }
+      };
+
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killTree('SIGTERM');
         // Give process 2s to exit gracefully, then force kill
-        setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
-        }, 2000);
+        setTimeout(() => killTree('SIGKILL'), 2000).unref();
       }, timeout);
 
       const appendOutput = (data: Buffer, target: 'stdout' | 'stderr') => {
@@ -137,7 +172,7 @@ export const runShellTool: Tool = {
         }
         const total = Buffer.byteLength(stdout, 'utf-8') + Buffer.byteLength(stderr, 'utf-8');
         if (total > MAX_OUTPUT_BYTES) {
-          child.kill('SIGTERM');
+          killTree('SIGTERM');
           clearTimeout(timer);
           reject(new Error(`Output exceeded ${MAX_OUTPUT_BYTES / 1024 / 1024} MB limit`));
         }
@@ -159,18 +194,20 @@ export const runShellTool: Tool = {
           seen.add(k);
           return true;
         });
-        return formatSandboxViolations(unique);
+        // Violation targets are extracted from stderr lines — a leaked secret
+        // could ride along in one, so redact them too.
+        return redact(formatSandboxViolations(unique));
       };
 
       child.on('close', (code) => {
         clearTimeout(timer);
         const violationBlock = collectViolations();
         if (timedOut) {
-          const trunc = (stdout + stderr).substring(0, 1000);
+          const trunc = redact((stdout + stderr).substring(0, 1000));
           reject(new Error(`Command timed out after ${timeout}ms\n${trunc}${violationBlock ? `\n${violationBlock}` : ''}`));
           return;
         }
-        const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
+        const output = redact(stdout + (stderr ? `\n[stderr]\n${stderr}` : ''));
         if (code !== 0) {
           reject(new Error(`Command exited with code ${code}\n${output}${violationBlock ? `\n${violationBlock}` : ''}`));
         } else {
@@ -184,7 +221,7 @@ export const runShellTool: Tool = {
       child.on('error', (err) => {
         clearTimeout(timer);
         const violationBlock = collectViolations();
-        reject(new Error(`Failed to execute command: ${err.message}${violationBlock ? `\n${violationBlock}` : ''}`));
+        reject(new Error(`Failed to execute command: ${redact(err.message)}${violationBlock ? `\n${violationBlock}` : ''}`));
       });
     });
   },

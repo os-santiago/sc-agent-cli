@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises';
 import path from 'node:path';
-import fg from 'fast-glob';
+import { glob } from 'tinyglobby';
 import ignore from 'ignore';
 import type { ProjectConfig } from './types.js';
 import { resolveSafePath } from '../utils/path-security.js';
@@ -214,7 +214,7 @@ const JVM: LanguageScanner = {
     // Kotlin: fun name(...) / fun Type.name(...)
     /^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:(?:public|private|protected|internal|open|override|suspend|inline|infix|operator|tailrec|external|abstract|final)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\s*\.\s*)?\w+\s*\(/,
     // Java-style methods: `public static void main(String[] a) {`
-    /^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public|protected|private)\s+(?:(?:static|final|abstract|synchronized|native|default|strictfp)\s+)*[\w<>\[\],.?]+\s+\w+\s*\([^;]*\)\s*(?:throws\s+[\w.,\s]+)?[{;]?\s*$/,
+    /^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public|protected|private)\s+(?:(?:static|final|abstract|synchronized|native|default|strictfp)\s+)*[\w<>[],.?]+\s+\w+\s*\([^;]*\)\s*(?:throws\s+[\w.,\s]+)?[{;]?\s*$/,
     // Scala/Groovy: `def name(`, `val name`, `var name`
     /^\s*(?:override\s+)?(?:def|val|var)\s+\w+/,
   ],
@@ -469,7 +469,7 @@ export async function generateRepoMap(
 
   let relPaths: string[];
   try {
-    relPaths = await fg('**/*', {
+    relPaths = await glob('**/*', {
       cwd: workspaceRoot,
       dot: true,
       onlyFiles: true,

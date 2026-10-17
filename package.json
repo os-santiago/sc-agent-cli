@@ -22,7 +22,9 @@
     "pretest:watch": "node scripts/ensure-deps.mjs vitest",
     "test:watch": "vitest",
     "pretest:coverage": "node scripts/ensure-deps.mjs vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "pretest:e2e": "node scripts/ensure-deps.mjs vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "lint-staged": {
     "*.ts": [
@@ -44,11 +46,11 @@
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "diff": "^5.2.0",
-    "fast-glob": "^3.3.0",
     "ignore": "^5.3.0",
     "marked": "^15.0.11",
     "marked-terminal": "^7.3.0",
-    "prompts": "^2.4.2"
+    "prompts": "^2.4.2",
+    "tinyglobby": "^0.2.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

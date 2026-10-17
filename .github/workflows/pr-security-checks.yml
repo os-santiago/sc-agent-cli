@@ -13,25 +13,28 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # TruffleHog (AGPL-3.0) is exempt from the license gate: it runs only in
+      # CI via security-scan.yml and is never shipped with the product. The
+      # version-less purl keeps the exemption valid across SHA re-pins; every
+      # other dependency stays fully checked.
       - name: Dependency Review
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
-          # trufflehog's repo is AGPL-3.0, but it runs as a CI-time secret
-          # scanner and is never distributed with the npm package. Exempt
-          # only this action's purl — copyleft stays denied for real deps.
           allow-dependencies-licenses: pkg:githubactions/trufflesecurity/trufflehog
           comment-summary-in-pr: always
 
   code-diff-analysis:
     name: Analyze Code Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -85,6 +88,7 @@ jobs:
   permission-changes:
     name: Check Permission Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -121,6 +125,7 @@ jobs:
   backdoor-detection:
     name: Backdoor Pattern Detection
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -175,6 +180,7 @@ jobs:
   data-exfiltration-check:
     name: Data Exfiltration Prevention
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

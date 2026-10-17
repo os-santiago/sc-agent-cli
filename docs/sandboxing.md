@@ -30,6 +30,13 @@ Add a `sandbox` block to `.sc-agent.json` (project) or
 | `seccomp` | bool | `false` | Enable the syscall denylist (Linux + bwrap + x86_64 only). |
 | `seccompProfile` | path | – | Raw cBPF blob (e.g. `seccomp_export_bpf` output) replacing the built-in denylist. |
 
+> **Workspace trust (#469):** a project `.sc-agent.json` may opt the sandbox
+> in or tighten it, but once trusted config enables it, project-scope
+> `sandbox.*` keys are dropped — a repo cannot disable the boundary
+> (`enabled:false`), widen `egressAllowlist`/`writablePaths`, or supply its
+> own `seccompProfile`. `SC_SANDBOX=0` still wins per-run because env vars
+> come from the operator, not the repo.
+
 ## Backends
 
 | Backend | When | Boundary |
@@ -76,6 +83,11 @@ Sandbox rules compose **additively** with `permissions.denyPaths` /
   (glob entries stay enforced by the file tools' `resolveSafePath`).
 - `writablePaths`/`readOnlyPaths` can widen the fs boundary but cannot un-deny
   a `denyPaths` entry.
+- The spawned command's environment is allowlist-scrubbed (#471): provider
+  credentials (`SC_API_KEY`, `*_API_KEY`, `*_TOKEN`, `*_SECRET`, …) are never
+  passed to the child — sandboxed or not. The egress-filter `*_PROXY`
+  variables are injected *after* scrubbing, so they always reach the sandboxed
+  command. `run_shell.allowedEnvVars` names operator-approved extras.
 
 ## Limits & notes
 
