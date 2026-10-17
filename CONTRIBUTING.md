@@ -190,6 +190,17 @@ local option (`sc profile use ollama`).
 If your change legitimately needs a flagged pattern, expect to justify it in
 review — the scans are intentional.
 
+### Branch protection on `main`
+
+`main` is a protected branch:
+
+- The required status checks `test (ubuntu-latest, node 20)` and
+  `test (ubuntu-latest, node 22)` must be green before a PR can merge.
+- Force-pushes and branch deletion are disabled.
+- All review conversations must be resolved before merging.
+
+Direct pushes to `main` are rejected — every change lands through a PR.
+
 
 ## Adding Features
 
