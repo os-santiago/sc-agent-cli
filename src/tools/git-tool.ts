@@ -21,7 +21,7 @@ function runGit(args: string[], cwd: string): string {
     throw new Error(stderr || `Git exited with code ${result.status}`);
   }
 
-  return (result.stdout || '').trim();
+  return (result.stdout || '').trimEnd();
 }
 
 export const gitTool: Tool = {

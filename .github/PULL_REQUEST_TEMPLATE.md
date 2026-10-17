@@ -18,7 +18,7 @@ Closes #
 
 ## Checklist
 
-- [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`) — PRs are squash-merged, so the title becomes the commit message on `main`
+- [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `ci:`, `refactor:`, `test:`, `chore:`, `security:`) — enforced by the `pr-title.yml` check; PRs are squash-merged, so the title becomes the commit message on `main`
 - [ ] Linked issue above uses `Closes #N` / `Fixes #N`
 - [ ] Tests added or updated for behavior changes (colocated `src/**/*.test.ts`, vitest)
 - [ ] User-facing docs updated (`README.md`, `docs/`, `AGENTS.md`) and a `CHANGELOG.md` entry added under `Unreleased` when the change is user-visible

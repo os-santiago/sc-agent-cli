@@ -213,8 +213,8 @@ Failover contract fields (#425):
 
 - `resolution` — `"completed"` on success; otherwise mirrors `exit_reason`
 - `provider` — `provider/model` label of the failover candidate that served the run (the configured model unless the cascade advanced; see `SC_FAILOVER`)
-- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
-- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`)
+- `terminalResolution` — present on error exits; `"provider_error"` when the provider chain was exhausted (exit 24), `"engine_protocol"` when the chain died on a self-inflicted protocol rejection (malformed `tool_calls[].function.arguments`, #537 — distinct from provider outages), otherwise mapped from the exit taxonomy (`auth_error`, `loop_abort`, `error`)
+- `errorClass` — failure class of the terminal candidate (`timeout`, `transport`, `rate_limit`, `server_error`, `auth`, `client`, `engine_protocol`)
 - `attempts` — per-candidate attempt log: `[{candidate, attempt, errorClass, retryable, status, error, durationMs}]`
 
 ```json
@@ -547,6 +547,7 @@ In unattended runs (`-y` / `--permissions unlimited`), a prompt that requests wo
 - **Stall escalation:** a turn that still closes with zero changes after the re-prompt budget is spent records a `zero_mutation_stall` audit event and is counted; the batch exit path then resolves the run as `resolution: "zero_mutations"` and exits `12` with `SCC_ZERO_MUTATIONS` — a failed terminal, not a clean no-op, so orchestrators never reach a verify/commit phase expecting a diff. A `VERDICT: COMPLETED` claim on a defeated guard does not defuse the escalation.
 - **Verdicts honored:** an explicit no-change verdict ("no changes required", "already implemented", "nothing to commit") or a terminal `VERDICT: NO_CHANGES`/`NOT_ACTIONABLE`/`BLOCKED` marker completes the turn immediately — `SCC_NO_CHANGES` / exit `10` (or `11` for not-actionable/blocked) remains the contract for genuine no-op runs.
 - **Scope:** only mutation-scoped prompts in unattended mode. Interactive sessions and read-only prompts (summarize, explain, list) complete without re-prompting.
+- **Embedded tool-call recovery:** models routed through non-OpenAI-protocol shims (devin/swe-2-class gateways, llama.cpp, Anthropic-style adapters) may deliver invocations as `tool_call`/`invoke`/`function*` markup inside `content` — or as non-canonical wire shapes (non-array/index-less `tool_calls`, legacy `function_call`, `tool_use` content parts). The provider normalizes those payloads and the agent recovers markup calls, so they count as real mutations instead of ending the turn empty (#533).
 
 ## Unattended Git Guard
 

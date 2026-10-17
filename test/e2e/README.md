@@ -75,6 +75,7 @@ test itself. No API keys, no real provider, no secrets — `SC_*` and
   `{code, signal, stdout, stderr, timedOut}` with ANSI stripped; `onSpawn`
   exposes the live child for mid-run signals),
   `makeWorkspace()` (temp cwd with `.sc-agent.json` + `prompt.md`),
+  `removeWorkspace()` (teardown that tolerates transient Windows dir locks),
   `cleanEnv()`/`chatEnv()` (hermetic child environment),
   `lastManifest()` (parse the manifest off stdout).
 - `cli-smoke.test.ts` — offline command coverage.

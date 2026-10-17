@@ -1,0 +1,47 @@
+name: PR Title
+
+# pull_request_target (not pull_request): the workflow definition comes from
+# the base branch, so a PR cannot weaken or disable the check it is subject
+# to, and fork PRs get a working read-only token. This is safe here ONLY
+# because the job never checks out or builds the PR's code — it reads the
+# title from the event payload. Do not add a checkout step (#491).
+on:
+  pull_request_target:
+    # `edited` is the load-bearing trigger — renaming the title re-runs the
+    # check so the blocking status follows the current title.
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Conventional-commit title
+        # v6.1.1 — pinned to a commit SHA, not a mutable tag, per repo
+        # supply-chain policy.
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Conventional Commits types accepted in PR titles — the upstream
+          # default set plus `security` (used for security fixes, e.g. #469).
+          # Squash-merged, the title becomes the main-line commit, so this
+          # list is the contract release automation will parse.
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+            security
