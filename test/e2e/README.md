@@ -38,6 +38,7 @@ test itself. No API keys, no real provider, no secrets — `SC_*` and
   | 11   | `VERDICT: NOT_ACTIONABLE` → `SCC_NOT_ACTIONABLE`      |
   | 11   | `VERDICT: BLOCKED` → `SCC_BLOCKED`                    |
   | 11   | not-actionable prose (heuristic, no marker)           |
+  | 12   | zero-mutation stall in a git worktree → `SCC_ZERO_MUTATIONS` (#449) |
   | 20   | consecutive empty responses → provider error          |
   | 21   | known-auth host with no API key (config check)        |
   | 22   | `--max-steps 1` → `SC_BUDGET_EXCEEDED steps`          |
@@ -52,7 +53,10 @@ test itself. No API keys, no real provider, no secrets — `SC_*` and
   non-failover provider failures such as the empty-response abort, and exit 21
   is asserted at the config-validation boundary (deterministic, no socket).
   Exit 11 is wired in `chat-session.ts` from the resolution detector's
-  `exit_code`/`stdout_marker` (#446 verdict semantics).
+  `exit_code`/`stdout_marker` (#446 verdict semantics); exit 12 escalates a
+  zero-mutation stall once `SC_ZERO_MUTATION_REPROMPTS` is exhausted on a
+  mutation-scoped prompt — the git worktree diff is the authority, so calls
+  that leave no trace count as zero (#449).
 - **Batch output contracts** — last-stdout-line run manifest
   (`exit_reason`/`terminalResolution`/`attempts`), `--output-format json`
   (manifest-only stdout), `--summary-file`.

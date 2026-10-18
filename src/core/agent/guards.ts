@@ -1,4 +1,4 @@
-import { isWorkspaceMutatingToolCall, expectsWorkspaceMutation, declaresNoChangesNeeded } from '../../utils/mutation-detector.js';
+import { isWorkspaceMutatingToolCall, expectsWorkspaceMutation, declaresNoChangesNeeded, declaresTerminalVerdict } from '../../utils/mutation-detector.js';
 import type { ToolUseRecord } from './tool-execution.js';
 
 /**
@@ -137,14 +137,17 @@ export function buildSelfHealReprompt(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Zero-mutation completion guard (#448): an unattended run whose prompt
-// requests workspace changes must not end its turn having executed zero
-// mutating tools — weak/auto-routed models narrate a plan or paste the fix
-// as prose and the run exits SCC_NO_CHANGES with nothing applied (failure
-// signature scc:zero-mutations:*). Re-prompt a bounded number of times;
-// afterwards the turn ends normally and the caller still gets the
-// documented no-changes exit contract. An explicit no-changes verdict is
-// honored.
+// Zero-mutation completion guard (#448, hardened #449): an unattended run
+// whose prompt requests workspace changes must not end its turn having
+// produced zero real workspace changes — weak/auto-routed models narrate a
+// plan or paste the fix as prose, and mutating calls that left no worktree
+// trace (no-op write, reverted edit, untracked path) count the same as no
+// calls at all (failure signature scc:zero-mutations:*). When git tracks
+// the workspace the status/HEAD delta is the authority; without git,
+// classified mutating tool calls are the only signal. Re-prompt a bounded
+// number of times; a turn that still closes with zero changes after the
+// budget is spent is a zero-mutation stall the batch exit path escalates
+// (SCC_ZERO_MUTATIONS). Explicit no-change/terminal verdicts are honored.
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_ZERO_MUTATION_REPROMPTS = 2;
@@ -175,27 +178,50 @@ export interface ZeroMutationCheck {
   mutatingCalls: number;
   userMessage: string;
   content: string;
-  /** hasWorktreeChanges(before, after) — computed by the caller. */
+  /** hasWorktreeChangesExcluding(before, after, engineArtifacts) — computed by the caller. */
   worktreeChanged: boolean;
+  /**
+   * git observed the workspace (before+after snapshots captured). When
+   * true the worktree diff is the mutation authority and `mutatingCalls`
+   * is only diagnostic; when false the classified call count is the only
+   * signal (#449).
+   */
+  gitTracked: boolean;
 }
 
-export function shouldRepromptZeroMutation(c: ZeroMutationCheck): boolean {
+/**
+ * Did this turn produce zero real workspace changes on a mutation-scoped
+ * prompt? (#449) With git tracking, the status/HEAD delta decides — a
+ * mutating call that left no trace is not a mutation. Without git,
+ * `mutatingCalls === 0` is the fallback signal. Explicit no-change and
+ * terminal verdicts (`NO_CHANGES`/`NOT_ACTIONABLE`/`BLOCKED`; a bare
+ * `VERDICT: COMPLETED` does not count) end the turn legitimately.
+ */
+export function isZeroMutationTurn(c: ZeroMutationCheck): boolean {
+  const zeroWorkspaceChanges = c.gitTracked ? !c.worktreeChanged : c.mutatingCalls === 0;
   return (
     !c.suppressGuards &&
     c.unattendedRun &&
-    c.repromptsUsed < c.repromptBudget &&
-    c.mutatingCalls === 0 &&
+    zeroWorkspaceChanges &&
     expectsWorkspaceMutation(c.userMessage) &&
     !declaresNoChangesNeeded(c.content) &&
-    !c.worktreeChanged
+    !declaresTerminalVerdict(c.content)
   );
 }
 
-export function buildZeroMutationReprompt(used: number, budget: number, iteration: number): string {
+export function shouldRepromptZeroMutation(c: ZeroMutationCheck): boolean {
+  return isZeroMutationTurn(c) && c.repromptsUsed < c.repromptBudget;
+}
+
+export function buildZeroMutationReprompt(used: number, budget: number, iteration: number, mutatingCalls = 0): string {
+  const detail = mutatingCalls === 0
+    ? `no write_file, edit_file, mutating git operation, or mutating run_shell command was executed`
+    : `mutating tool calls ran but the git worktree shows no file changes — the mutations did not land (no-op write, reverted edit, or a path outside the tracked tree)`;
   return (
     `[ZERO-MUTATION ${used}/${budget} — iteration ${iteration}] ` +
-    `The turn is about to end, but this run produced ZERO workspace changes — no write_file, edit_file, mutating git operation, or mutating run_shell command was executed. ` +
-    `The task requires modifying the workspace. Do NOT describe or paste the fix in prose — apply it now using the tools. ` +
+    `The turn is about to end, but this run produced ZERO workspace changes — ${detail}. ` +
+    `The task requires modifying the workspace. Do NOT describe or paste the fix in prose — apply it now using the tools, ` +
+    `then verify with git status/diff that the changes actually landed on disk. ` +
     `If the task is genuinely read-only, or the requested change is already present, state explicitly that no changes are required and explain why.`
   );
 }
