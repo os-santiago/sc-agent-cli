@@ -6,6 +6,13 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 30000,
     include: ['src/**/*.test.ts'],
+    // #574 — pin the C locale inside test workers so assertions on git/bwrap
+    // stderr stay deterministic on non-English developer machines. Spawned
+    // children inherit process.env (and run_shell's env scrub allowlists
+    // LC_ALL), so the pin reaches the tools whose output the tests match.
+    env: {
+      LC_ALL: 'C',
+    },
     coverage: {
       provider: 'v8',
       // Emit the coverage report even when tests fail — a red suite must not

@@ -254,7 +254,9 @@ describe('log', () => {
     git(['init', '-b', 'main'], empty);
     await assert.rejects(
       exec({ operation: 'log' }, makeCtx(empty)),
-      /does not have any commits yet|ambiguous argument|bad default revision/,
+      // git localizes the message body but never the `fatal:` prefix — keep
+      // it in the alternation as the locale-robust arm (#574).
+      /fatal:|does not have any commits yet|ambiguous argument|bad default revision/,
     );
   });
 });
@@ -294,7 +296,7 @@ describe('show', () => {
     git(['init', '-b', 'main'], empty);
     await assert.rejects(
       exec({ operation: 'show' }, makeCtx(empty)),
-      /ambiguous argument|unknown revision|does not have any commits/,
+      /fatal:|ambiguous argument|unknown revision|does not have any commits/,
     );
   });
 });
@@ -341,7 +343,7 @@ describe('add', () => {
   test('rejects a pathspec that matches nothing', async () => {
     await assert.rejects(
       exec({ operation: 'add', paths: 'no-such-file.txt' }, makeCtx(repo)),
-      /did not match any files/,
+      /did not match any files|fatal:/,
     );
   });
 });
@@ -519,10 +521,12 @@ describe('error paths', () => {
     ]) {
       // `git diff` outside a repo warns "Not a git repository" (capital N)
       // and exits 129 with a usage line; the others fail with the fatal
-      // "not a git repository" form — cover both shapes.
+      // "not a git repository" form — cover both shapes. The `fatal:` prefix
+      // and the `git diff` synopsis token survive translation (`warning:` /
+      // `usage:` do not), so they are the locale-robust arms (#574).
       await assert.rejects(
         exec(args, makeCtx(bare)),
-        /not a git repository|usage: git diff/i,
+        /not a git repository|fatal:|git diff/i,
         JSON.stringify(args),
       );
     }
