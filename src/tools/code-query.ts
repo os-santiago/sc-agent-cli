@@ -82,10 +82,17 @@ function parseMethods(code: string, lang: string): ParsedMethod[] {
       const visibilityMatch = originalLine.match(/^\s*(public|private|protected|export)/);
       const visibility = visibilityMatch?.[1] || 'public';
       const isAsync = groups[0]?.includes('async') ? 'async ' : '';
-      const name = groups[groups.length - 2];
-      const params = groups[groups.length - 1];
-      const returnType = groups[groups.length - 1]?.includes(':') ?
-        originalLine.split(':').pop()?.trim().replace(/\{.*/, '') || 'any' : 'any';
+      // Group layout differs per language: the .ts pattern is
+      // (modifiers)(async)(name)(params)(returnType) — five groups — while the
+      // .js pattern is (async)(name)(params) — three. Using tail indexing for
+      // .ts picks the params group as the name and mislabels every method.
+      const name = lang === '.ts' ? groups[2] : groups[groups.length - 2];
+      const params = lang === '.ts' ? groups[3] : groups[groups.length - 1];
+      const returnType = lang === '.ts'
+        ? groups[4]?.split('\n')[0].trim().replace(/;$/, '') || 'any'
+        : groups[groups.length - 1]?.includes(':')
+          ? originalLine.split(':').pop()?.trim().replace(/\{.*/, '') || 'any'
+          : 'any';
       if (name && name !== 'async' && name !== 'constructor') {
         methods.push({ name, params: params || '', returnType: returnType || 'any', visibility, line });
       }
@@ -114,7 +121,10 @@ function parseMethods(code: string, lang: string): ParsedMethod[] {
     } else if (lang === '.rs') {
       const name = match[3];
       const params = match[4] || '';
-      const returnType = match[5]?.trim().replace(/^->\s*/, '') || '()';
+      // A signature-only member (trait decl without a body) lets the return
+      // group run past the newline into following source — bound it to the
+      // member's own line and drop the trailing ';'.
+      const returnType = match[5]?.split('\n')[0].trim().replace(/^->\s*/, '').replace(/;$/, '') || '()';
       const visibility = originalLine.trim().startsWith('pub') ? 'pub' : 'private';
       if (name && name !== 'new') {
         methods.push({ name, params, returnType, visibility, line });
