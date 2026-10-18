@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -453,6 +453,66 @@ test('getWorkspaceGitState and hasWorktreeChanges work on actual git repo', () =
     assert.ok(afterCommit !== null);
     assert.equal(hasWorktreeChanges(after, afterCommit), true);
     assert.equal(hasWorktreeChanges(afterCommit, afterCommit), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Porcelain keeps the same ` M` code when an already-modified tracked file
+// is edited again — pre-digest snapshots were identical and the
+// zero-mutation guard read a real edit as "no changes" (#532 review).
+test('hasWorktreeChangesExcluding detects further edits to a pre-modified tracked file (#532)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-git-digest-'));
+  try {
+    spawnSync('git', ['init', '-b', 'main'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
+    writeFileSync(join(tmp, 'file.txt'), 'v1');
+    spawnSync('git', ['add', '.'], { cwd: tmp });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
+
+    // Dirty the file before the run snapshot: porcelain is ` M` in both.
+    writeFileSync(join(tmp, 'file.txt'), 'v2');
+    const before = getWorkspaceGitState(tmp);
+    assert.ok(before !== null);
+
+    writeFileSync(join(tmp, 'file.txt'), 'v3');
+    const after = getWorkspaceGitState(tmp);
+    assert.ok(after !== null);
+
+    assert.equal(before.status, after.status);
+    assert.equal(hasWorktreeChanges(before, after), true);
+    assert.equal(hasWorktreeChangesExcluding(before, after), true);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Content churn inside an excluded engine artifact must not flip the
+// digest comparison either — the artifact filter applies to digest lines
+// the same way it applies to status lines (#532 review).
+test('hasWorktreeChangesExcluding ignores digest churn in excluded artifacts', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-git-digest-artifact-'));
+  try {
+    spawnSync('git', ['init', '-b', 'main'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
+    writeFileSync(join(tmp, 'file.txt'), 'v1');
+    spawnSync('git', ['add', '.'], { cwd: tmp });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
+
+    writeFileSync(join(tmp, 'audit.jsonl'), '{}\n');
+    const before = getWorkspaceGitState(tmp);
+    assert.ok(before !== null);
+
+    appendFileSync(join(tmp, 'audit.jsonl'), '{}\n');
+    const after = getWorkspaceGitState(tmp);
+    assert.ok(after !== null);
+
+    assert.equal(
+      hasWorktreeChangesExcluding(before, after, [join(tmp, 'audit.jsonl')]),
+      false,
+    );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

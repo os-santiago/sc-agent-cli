@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Message } from '../core/types.js';
 
@@ -22,6 +22,13 @@ export function canonicalizePath(path: string): string {
 export interface WorkspaceGitState {
   status: string;
   head: string;
+  /** Content fingerprint of every path reported by `status`: one
+   *  `<repo-relative-path>\t<blob-sha>` line per porcelain entry, `DELETED`
+   *  for paths absent from disk. Catches edits to files whose porcelain
+   *  code is unchanged — e.g. a tracked file already ` M` in the pre-run
+   *  snapshot that is modified again (#532 review). Undefined when the
+   *  digest cannot be computed. */
+  digest?: string;
   /** Repo top-level from `git rev-parse --show-toplevel` — porcelain status
    *  paths are repo-root-relative and resolve against this. Undefined when the
    *  repo root cannot be determined. */
@@ -32,6 +39,52 @@ export interface MutationDetectionResult {
   hasMutations: boolean;
   mutatingToolCalls: number;
   worktreeChanged: boolean;
+}
+
+/**
+ * Extract the repo-relative target path from a porcelain v1 status line
+ * (`XY <path>`, or `XY <orig> -> <new>` for renames/copies). Shared by the
+ * artifact filter and the content digest so both tokenize identically.
+ */
+function porcelainTargetPath(line: string): string {
+  const raw = line.slice(3).trim();
+  if (!raw) return '';
+  const target = raw.includes(' -> ') ? raw.split(' -> ')[1].trim() : raw;
+  return target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
+}
+
+/**
+ * Fingerprint the working-tree content of every path in a porcelain status
+ * snapshot: `<path>\t<blob-sha>` lines in porcelain order, `DELETED` for
+ * paths absent from disk. `git hash-object` keeps blob semantics; any
+ * hashing failure marks the whole digest undefined so callers fall back to
+ * the status/head comparison (#532 review).
+ */
+function computeContentDigest(status: string, root: string): string | undefined {
+  const paths = status
+    .split('\n')
+    .map(porcelainTargetPath)
+    .filter(Boolean);
+  if (paths.length === 0) return '';
+
+  const present = paths.filter(p => existsSync(resolve(root, p)));
+  const hashes = new Map<string, string>();
+  if (present.length > 0) {
+    const res = spawnSync('git', ['hash-object', '--stdin-paths'], {
+      cwd: root,
+      input: present.join('\n') + '\n',
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    const out =
+      res.status === 0
+        ? (res.stdout || '').split('\n').filter(Boolean)
+        : [];
+    if (out.length !== present.length) return undefined;
+    present.forEach((p, i) => hashes.set(p, out[i]));
+  }
+  return paths.map(p => `${p}\t${hashes.get(p) ?? 'DELETED'}`).join('\n');
 }
 
 /**
@@ -65,10 +118,18 @@ export function getWorkspaceGitState(workspaceRoot: string): WorkspaceGitState |
     });
     const root = rootRes.status === 0 ? (rootRes.stdout || '').trim() : '';
 
+    // Strip only the trailing newline — a leading-trim would eat the
+    // worktree column of the first porcelain line (` M x` → `M x`) and
+    // `slice(3)` would then mangle its path for both the artifact filter
+    // and the content digest (#532 review).
+    const status = (statusRes.stdout || '').replace(/[\r\n]+$/, '');
+    const digest = root ? computeContentDigest(status, root) : undefined;
+
     return {
-      status: (statusRes.stdout || '').trim(),
+      status,
       head: headRes.status === 0 ? (headRes.stdout || '').trim() : '',
       ...(root ? { root } : {}),
+      ...(digest !== undefined ? { digest } : {}),
     };
   } catch {
     return null;
@@ -85,7 +146,11 @@ export function hasWorktreeChanges(
   if (!before || !after) {
     return false;
   }
-  return before.status !== after.status || before.head !== after.head;
+  return (
+    before.status !== after.status ||
+    before.head !== after.head ||
+    (before.digest ?? '') !== (after.digest ?? '')
+  );
 }
 
 /**
@@ -109,7 +174,10 @@ export function hasWorktreeChangesExcluding(
     return true;
   }
   if (excludeAbsPaths.length === 0) {
-    return before.status !== after.status;
+    return (
+      before.status !== after.status ||
+      (before.digest ?? '') !== (after.digest ?? '')
+    );
   }
   const excluded = new Set(excludeAbsPaths.map(canonicalizePath));
   const stripArtifacts = (state: WorkspaceGitState): string => {
@@ -119,16 +187,33 @@ export function hasWorktreeChangesExcluding(
     return state.status
       .split('\n')
       .filter(line => {
-        // porcelain v1: "XY <path>" (or "XY <orig> -> <new>" for renames).
-        const raw = line.slice(3).trim();
-        if (!raw) return true;
-        const target = raw.includes(' -> ') ? raw.split(' -> ')[1].trim() : raw;
-        const unquoted = target.startsWith('"') && target.endsWith('"') ? target.slice(1, -1) : target;
-        return !excluded.has(canonicalizePath(resolve(canonicalRoot, unquoted)));
+        const target = porcelainTargetPath(line);
+        if (!target) return true;
+        return !excluded.has(canonicalizePath(resolve(canonicalRoot, target)));
       })
       .join('\n');
   };
-  return stripArtifacts(before) !== stripArtifacts(after);
+  if (stripArtifacts(before) !== stripArtifacts(after)) {
+    return true;
+  }
+  // Porcelain codes do not change when an already-dirty file is edited
+  // again — compare content digests with the same artifact exclusions so
+  // a further edit to a pre-existing ` M` entry still counts (#532 review).
+  const stripDigestArtifacts = (state: WorkspaceGitState): string => {
+    if (!state.digest) return '';
+    const root = state.root;
+    if (!root) return state.digest;
+    const canonicalRoot = canonicalizePath(root);
+    return state.digest
+      .split('\n')
+      .filter(line => {
+        const sep = line.indexOf('\t');
+        const target = sep === -1 ? line : line.slice(0, sep);
+        return !!target && !excluded.has(canonicalizePath(resolve(canonicalRoot, target)));
+      })
+      .join('\n');
+  };
+  return stripDigestArtifacts(before) !== stripDigestArtifacts(after);
 }
 
 /**
