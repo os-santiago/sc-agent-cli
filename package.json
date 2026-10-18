@@ -47,7 +47,7 @@
     "commander": "^12.0.0",
     "diff": "^5.2.0",
     "ignore": "^5.3.0",
-    "marked": "^15.0.11",
+    "marked": "^18.1.0",
     "marked-terminal": "^7.3.0",
     "prompts": "^2.4.2",
     "tinyglobby": "^0.2.15"
@@ -69,5 +69,10 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "overrides": {
+    "marked-terminal": {
+      "marked": "$marked"
+    }
   }
 }
