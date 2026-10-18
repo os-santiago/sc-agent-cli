@@ -41,7 +41,7 @@ test('lint wiring: ci.yml runs `npm run lint`', () => {
   const ci = readRootFile('.github/workflows/ci.yml');
   assert.match(
     ci,
-    /npm run lint/,
+    /^\s*-\s+run:\s+npm run lint\s*$/m,
     'ci.yml must keep an `npm run lint` step'
   );
 });
