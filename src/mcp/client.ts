@@ -63,6 +63,13 @@ export class McpClient {
       if (this.stderrTail.length > 20) this.stderrTail.shift();
     });
     this.child.on('error', (e) => this.onDeath(new Error(`spawn failed: ${e.message}`)));
+    // A write racing a dying child emits an async EPIPE on the stdin stream;
+    // without an 'error' listener it escapes as an uncaught exception (vitest
+    // 5 fails the whole run on those — macOS CI leg). Treat a broken pipe as
+    // server death so pending requests reject through the normal path.
+    this.child.stdin!.on('error', (e: NodeJS.ErrnoException) =>
+      this.onDeath(new Error(`stdin pipe failed: ${e.message}`))
+    );
     this.child.on('close', (code) =>
       this.onDeath(new Error(`process exited (code ${code})${this.stderrTail.length ? ` — stderr: ${this.stderrTail.join('').slice(-400)}` : ''}`))
     );
