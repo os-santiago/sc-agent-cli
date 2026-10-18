@@ -19,13 +19,10 @@ export default defineConfig({
         'src/types/**',
         // #544 — the src/tools/** per-file floor below ignores files with no
         // executable surface: declaration files, pure type modules and pure
-        // barrel index.ts files. tool.ts is the Tool/ToolContext interface —
-        // `import type` + interfaces only, it compiles to `export {}` with
-        // zero coverable statements (#545).
+        // barrel index.ts files.
         'src/tools/**/*.d.ts',
         'src/tools/**/types.ts',
         'src/tools/**/index.ts',
-        'src/tools/tool.ts',
       ],
       thresholds: {
         statements: 40,
