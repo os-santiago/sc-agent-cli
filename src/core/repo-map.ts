@@ -1,7 +1,7 @@
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from 'tinyglobby';
-import ignore from 'ignore';
+import ignore from '../utils/ignore.js';
 import type { ProjectConfig } from './types.js';
 import { resolveSafePath } from '../utils/path-security.js';
 import { verbose } from '../utils/verbose-logger.js';

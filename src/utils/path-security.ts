@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
-import ignore from 'ignore';
+import ignore from './ignore.js';
 import { getGlobalConfigPath } from '../core/config.js';
 import type { ProjectConfig } from '../core/types.js';
 
