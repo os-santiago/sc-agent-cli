@@ -167,6 +167,32 @@ local option (`sc profile use ollama`).
 - Update user-facing docs (`README.md`, `docs/`, `AGENTS.md`) and add a
   `CHANGELOG.md` entry under `Unreleased` when the change is user-visible.
 
+### Releases
+
+Releases are automated by `release-please` (`.github/workflows/release-please.yml`,
+SHA-pinned like every other action):
+
+1. Every push to `main` runs the workflow, which maintains a standing release
+   PR — the diff bumps `package.json` to the computed next version and
+   prepends generated notes to `CHANGELOG.md`, derived from the
+   conventional-commit titles merged since the last tag. This is why PR titles
+   must stay conventional (`pr-title.yml` enforces it): they *are* the release
+   notes input.
+2. Merging the release PR tags `vX.Y.Z` and creates the GitHub Release — no
+   manual tagging, no manual release notes, and the tag version always equals
+   the `package.json` version.
+
+Distribution is **install-from-source only** — no `npm publish` step exists
+and none should be added without a maintainer decision on registry/token
+ownership. `package.json` is `private: true` and restricts `npm pack` output
+via a `files` whitelist (`bin`, `dist`, `README*`, `LICENSE*`); CI's
+`package-smoke` job packs the artifact, verifies the whitelist, and runs
+`node bin/sc.js --version` on the packed tree on every PR and `main` push.
+
+The pre-automation files `RELEASE-NOTES-v0.3.0.md` / `RELEASE-NOTES-v0.3.1.md`
+live under `docs/history/` as historical snapshots — the pipeline never reads
+them.
+
 ### What CI runs on your PR
 
 - **CI** (`ci.yml`): `npm ci` → `npm run build` → `npm test` on Ubuntu Node
