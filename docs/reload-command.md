@@ -307,6 +307,6 @@ reload  # Now picks up from $PROFILE
 
 ## See Also
 
-- [SETUP.md](../SETUP.md) - Initial setup guide
+- [SETUP.md](SETUP.md) - Initial setup guide
 - [README.md](../README.md) - Main documentation
 - [docs/available-models.md](available-models.md) - Model switching guide

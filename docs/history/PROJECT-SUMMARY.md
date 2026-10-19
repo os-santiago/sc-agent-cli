@@ -111,12 +111,12 @@ sc-cli/
 1. **README.md**: Main documentation (features, installation, usage)
 2. **QUICKSTART.md**: 5-minute start guide
 3. **INSTALL.md**: Detailed installation instructions
-4. **ARCHITECTURE.md**: Technical deep dive (diagrams, data flow, design decisions)
+4. **docs/ARCHITECTURE.md**: Technical deep dive (diagrams, data flow, design decisions)
 5. **AGENTS.md**: Project context for the agent itself (dogfooding)
 6. **CONTRIBUTING.md**: How to contribute (adding tools, commands, providers)
-7. **FAQ.md**: Common questions and troubleshooting
+7. **docs/FAQ.md**: Common questions and troubleshooting
 8. **docs/anthropic-setup.md**: Using Claude models via proxy
-9. **EXAMPLES.md**: Usage examples (currently minimal)
+9. **docs/EXAMPLES.md**: Usage examples (currently minimal)
 
 ## Supported Providers
 

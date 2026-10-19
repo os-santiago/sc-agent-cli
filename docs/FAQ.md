@@ -355,7 +355,7 @@ Open an issue on GitHub (or wherever this project is hosted).
 
 ### Will you add feature X?
 
-Maybe! Check [ARCHITECTURE.md](../ARCHITECTURE.md#roadmap-ideas) for planned features. Open an issue to discuss.
+Maybe! Check [ARCHITECTURE.md](ARCHITECTURE.md#roadmap-ideas) for planned features. Open an issue to discuss.
 
 ### Can I contribute?
 
@@ -368,5 +368,5 @@ Not planned in the core project, but could be added as a separate package (Elect
 ## Still have questions?
 
 - Read the full [README.md](../README.md)
-- Check [ARCHITECTURE.md](../ARCHITECTURE.md) for technical details
+- Check [ARCHITECTURE.md](ARCHITECTURE.md) for technical details
 - Open an issue on GitHub

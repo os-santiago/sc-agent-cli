@@ -135,10 +135,10 @@ Or close and reopen your terminal.
 
 ## Next Steps
 
-- See [README.md](README.md) for full documentation
-- See [QUICKSTART.md](QUICKSTART.md) for usage examples
-- See [docs/nvidia-nemotron-setup.md](docs/nvidia-nemotron-setup.md) for NVIDIA details
-- See [scripts/README.md](scripts/README.md) for setup script details
+- See [README.md](../README.md) for full documentation
+- See [QUICKSTART.md](../QUICKSTART.md) for usage examples
+- See [docs/nvidia-nemotron-setup.md](nvidia-nemotron-setup.md) for NVIDIA details
+- See [scripts/README.md](../scripts/README.md) for setup script details
 
 ## Changing API Keys
 

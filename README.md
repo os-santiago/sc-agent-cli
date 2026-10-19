@@ -1,3 +1,14 @@
+---
+lastVerified: 2026-10-19T01:57:18Z
+verifiedAgainst: 8430737505d306c3edf921eb5a1aa8a7ddfb4d77
+sources:
+  - package.json
+  - src/cli.ts
+  - src/core/
+  - src/tools/
+  - docs/
+freshnessWindowDays: 14
+---
 # SC-Agent CLI
 
 A provider-agnostic CLI agent with tool use, compatible with **any OpenAI-compatible API** (OpenAI, Ollama, LM Studio, Anthropic via proxy, Groq, Together, OpenRouter, vLLM, etc.).
