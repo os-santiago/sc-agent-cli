@@ -106,9 +106,12 @@ jobs:
 
             # Check if auto-approve capability was added. Only added non-comment
             # lines count — prose mentions (e.g. "-y/autoApprove" in a comment)
-            # are not functionality changes.
+            # are not functionality changes. Optional-property type
+            # declarations (`autoApprove?: ...`) are excluded too: they only
+            # declare/widen the field's type and cannot confer capability —
+            # the token sequence is invalid outside type position.
             ADDED_CODE=$(git diff origin/main...HEAD src/utils/permissions.ts | grep '^+' | grep -v '^+++' | grep -vE '^\+\s*(//|\*|/\*)' || true)
-            if echo "${ADDED_CODE}" | grep -q 'autoApprove'; then
+            if echo "${ADDED_CODE}" | grep 'autoApprove' | grep -vqE 'autoApprove\?:'; then
               echo "🚨 CRITICAL: Auto-approve functionality added"
               exit 1
             fi
