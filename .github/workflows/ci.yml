@@ -131,7 +131,9 @@ jobs:
         shell: bash
         run: |
           npm pack --dry-run
-          TARBALL=$(npm pack)
+          # Lifecycle banners (`prepare` → husky) can leak into stdout on some
+          # npm versions; the tarball name is always the LAST stdout line.
+          TARBALL=$(npm pack | tail -n1)
           # npm always adds package.json (+ README/LICENSE via the whitelist);
           # anything outside these prefixes means the `files` field drifted.
           BAD=$(tar -tzf "$TARBALL" | grep -vE '^package/(package\.json|bin/|dist/|README[^/]*$|LICENSE[^/]*$)' || true)
@@ -145,7 +147,7 @@ jobs:
       - name: Smoke-run the packed bin
         shell: bash
         run: |
-          TARBALL=$(npm pack)
+          TARBALL=$(npm pack | tail -n1)
           mkdir -p .pack-smoke
           tar -xzf "$TARBALL" -C .pack-smoke
           node .pack-smoke/package/bin/sc.js --version
