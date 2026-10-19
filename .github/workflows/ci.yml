@@ -107,3 +107,45 @@ jobs:
           name: coverage-report-${{ matrix.os }}-${{ matrix.node-version }}
           path: coverage/
           retention-days: 7
+
+  # #487 — the release artifact was never exercised: this packs exactly what a
+  # consumer would receive and runs the shipped bin, so a broken `files`
+  # whitelist or missing dist/ entry is caught before a release, not after.
+  package-smoke:
+    name: package smoke (npm pack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Pack artifact and verify contents whitelist
+        shell: bash
+        run: |
+          npm pack --dry-run
+          TARBALL=$(npm pack)
+          # npm always adds package.json (+ README/LICENSE via the whitelist);
+          # anything outside these prefixes means the `files` field drifted.
+          BAD=$(tar -tzf "$TARBALL" | grep -vE '^package/(package\.json|bin/|dist/|README[^/]*$|LICENSE[^/]*$)' || true)
+          if [ -n "$BAD" ]; then
+            echo "Packed artifact contains non-whitelisted files:"
+            echo "$BAD"
+            exit 1
+          fi
+          tar -tzf "$TARBALL"
+
+      - name: Smoke-run the packed bin
+        shell: bash
+        run: |
+          TARBALL=$(npm pack)
+          mkdir -p .pack-smoke
+          tar -xzf "$TARBALL" -C .pack-smoke
+          node .pack-smoke/package/bin/sc.js --version
