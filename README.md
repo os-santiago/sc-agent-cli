@@ -25,6 +25,11 @@ npm run build
 npm link  # Makes 'sc' available globally
 ```
 
+Release artifacts (`scc-<version>.tgz` + `bom.json` SBOM) published on each
+`v*.*.*` tag carry Sigstore attestations — verify with
+`gh attestation verify <asset> -R os-santiago/sc-agent-cli`. See
+[INSTALL.md](INSTALL.md#verifying-release-artifacts).
+
 ## Quick Start
 
 ### 1. Initialize configuration (first time only)
