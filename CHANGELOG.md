@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 📚 Documentation
 
 - Added `docs/wsl-pipes-fix.md` (187 lines) - WSL pipe syntax issue and solution
-- Added `TRACE-ANALYSIS-IMPROVEMENTS.md` (381 lines) - Complete trace analysis report
+- Added `docs/history/TRACE-ANALYSIS-IMPROVEMENTS.md` (381 lines) - Complete trace analysis report
 - Added `docs/wsl-integration.md` (500+ lines) - WSL integration guide
 - Added WSL pipe syntax examples in system prompt
 - Updated loop detection to exclude compatibility errors
@@ -116,6 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error classification: compatibility vs blocking vs expectable
 - Command normalization for accurate loop detection
 - Added tool arguments tracking for better error analysis
+
+### ⬆️ Upgrade notes
+
+- **No breaking changes** — all fixes are backwards compatible. New behavior to be aware of: WSL commands using pipes should be wrapped in `wsl bash -c "..."` (the system prompt now guides this automatically), task status may report "Task completed with warnings" for compatibility issues, and the agent runs a 5-step review before merging PRs.
+- Upgrade: `npm update sc-agent-cli`, or from source `git pull && npm install && npm run build`.
+- Fixes were validated against real trace data: WSL pipes (`head`, `tail`, `grep`, `find`, `jq`), loop detection across 10 mixed operations with no false positives, task-status classification (3 compatibility + 7 expected errors), and the PR review workflow across approved/blocked/conflict scenarios.
+
+_(Consolidated from the former root-level `RELEASE-NOTES-v0.3.1.md` — this CHANGELOG is now the single release-notes source.)_
 
 ---
 
@@ -162,6 +170,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Agent will NO LONGER use \`--admin\` without explicit permission
 - Agent will NO LONGER modify repository rulesets automatically
+
+### ⬆️ Upgrade notes (action required)
+
+- **Update immediately** — this release fixes 3 CRITICAL vulnerabilities. If you ran any version < 0.3.0, revoke all GitHub tokens at <https://github.com/settings/tokens> and generate new ones (tokens could be exposed in logs).
+- Audit your repositories: check `Settings → Rules` for unauthorized ruleset modifications and review recent commits for merges performed with `--admin`.
+- Automation that relied on automatic `--admin` merges or ruleset changes must be updated — those actions now require explicit user permission. Use the `gh` CLI for auth instead of embedding tokens in commands.
+- Upgrade: `npm update sc-agent-cli`, or from source `git pull && npm install && npm run build`.
+
+_(Consolidated from the former root-level `RELEASE-NOTES-v0.3.0.md` — this CHANGELOG is now the single release-notes source.)_
 
 ---
 

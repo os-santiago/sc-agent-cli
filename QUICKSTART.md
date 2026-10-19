@@ -73,7 +73,7 @@ Type `exit` or `quit` to end the session.
 
 - Read [README.md](README.md) for full documentation
 - See [INSTALL.md](INSTALL.md) for detailed installation instructions
-- Check [EXAMPLES.md](EXAMPLES.md) for usage examples
+- Check [EXAMPLES.md](docs/EXAMPLES.md) for usage examples
 - Read [AGENTS.md](AGENTS.md) to understand the codebase
 
 ## Troubleshooting

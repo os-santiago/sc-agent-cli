@@ -1,3 +1,17 @@
+---
+lastVerified: 2026-10-19T01:57:18Z
+verifiedAgainst: 8430737505d306c3edf921eb5a1aa8a7ddfb4d77
+sources:
+  - package.json
+  - tsconfig.json
+  - vitest.config.ts
+  - eslint.config.mjs
+  - .github/workflows/
+  - src/
+  - docs/
+  - CONTRIBUTING.md
+freshnessWindowDays: 14
+---
 # SC-Agent CLI - Agent Instructions
 
 ## Project Overview

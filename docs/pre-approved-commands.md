@@ -607,4 +607,4 @@ You: run all tests and report results
 
 - [permissions-command.md](permissions-command.md) - Permission modes
 - [README.md](../README.md) - Main documentation
-- [SETUP.md](../SETUP.md) - Initial setup guide
+- [SETUP.md](SETUP.md) - Initial setup guide

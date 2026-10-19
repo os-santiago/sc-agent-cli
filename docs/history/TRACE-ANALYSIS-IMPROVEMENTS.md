@@ -375,7 +375,7 @@ Created comprehensive docs:
 
 ## 📖 **See Also**
 
-- [wsl-integration.md](docs/wsl-integration.md) - WSL integration guide
-- [wsl-pipes-fix.md](docs/wsl-pipes-fix.md) - Pipe syntax fix details
-- [loop-detection.md](docs/loop-detection.md) - Loop detection system
-- [task-status-intelligence.md](docs/task-status-intelligence.md) - Error classification
+- [wsl-integration.md](../wsl-integration.md) - WSL integration guide
+- [wsl-pipes-fix.md](../wsl-pipes-fix.md) - Pipe syntax fix details
+- [loop-detection.md](../loop-detection.md) - Loop detection system
+- [task-status-intelligence.md](../task-status-intelligence.md) - Error classification

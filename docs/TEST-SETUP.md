@@ -199,16 +199,16 @@ scc profile use nvidia
 ## Need Help?
 
 1. Check [SETUP.md](SETUP.md) for setup instructions
-2. Check [scripts/README.md](scripts/README.md) for script details
-3. Check [docs/windows-sc-conflict.md](docs/windows-sc-conflict.md) for Windows issues
+2. Check [scripts/README.md](../scripts/README.md) for script details
+3. Check [docs/windows-sc-conflict.md](windows-sc-conflict.md) for Windows issues
 4. Open an issue on GitHub
 
 ## Next Steps After Successful Tests
 
 1. **Read the docs:**
-   - [README.md](README.md) - Full documentation
-   - [QUICKSTART.md](QUICKSTART.md) - Usage examples
-   - [docs/nvidia-nemotron-setup.md](docs/nvidia-nemotron-setup.md) - NVIDIA details
+   - [README.md](../README.md) - Full documentation
+   - [QUICKSTART.md](../QUICKSTART.md) - Usage examples
+   - [docs/nvidia-nemotron-setup.md](nvidia-nemotron-setup.md) - NVIDIA details
 
 2. **Try it out:**
    ```bash

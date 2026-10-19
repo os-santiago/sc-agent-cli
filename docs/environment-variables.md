@@ -791,5 +791,5 @@ ls -la ~/.bashrc
 ## See Also
 
 - [README.md](../README.md) - Main documentation
-- [SETUP.md](../SETUP.md) - Initial setup guide
+- [SETUP.md](SETUP.md) - Initial setup guide
 - [reload-command.md](reload-command.md) - Reloading configuration
