@@ -277,7 +277,7 @@ function getSummary(toolName: string, errorMsg: string, category: ErrorCategory)
                  '⚠️ Error';
 
   // Extract the most relevant part: first line or first 120 chars
-  const cleanMsg = errorMsg.split('\n')[0].substring(0, 120);
+  const cleanMsg = errorMsg.split('\n')[0]!.substring(0, 120);
   return `[${prefix}] ${toolName}: ${cleanMsg}`;
 }
 

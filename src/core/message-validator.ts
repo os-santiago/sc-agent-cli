@@ -90,7 +90,7 @@ export function validateMessageSequence(messages: Message[]): void {
   const pendingToolCalls = new Map<string, { index: number; name: string }>();
 
   for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
+    const msg = messages[i]!;
 
     // Rule 1: Messages with tool_call_id MUST have role 'tool', not 'assistant'
     if (msg.tool_call_id) {

@@ -168,7 +168,7 @@ export function buildDefaultSeccompProgram(
   ];
 
   for (let i = 0; i < D; i++) {
-    program.push(insn(BPF_JMP_JEQ_K, denied[i].nr, denyIdx - (5 + i + 1), 0));
+    program.push(insn(BPF_JMP_JEQ_K, denied[i]!.nr, denyIdx - (5 + i + 1), 0));
   }
 
   program.push(

@@ -36,7 +36,7 @@ const DEFAULT_SOCKET_TIMEOUT_MS = 120_000;
 /** Parse an authority-form target `host:port` or `[v6]:port`; missing port → 443. */
 export function parseAuthorityTarget(target: string): { host: string; port: number } | null {
   const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(target);
-  if (m) return { host: m[1].toLowerCase(), port: m[2] ? parseInt(m[2], 10) : 443 };
+  if (m) return { host: m[1]!.toLowerCase(), port: m[2] ? parseInt(m[2], 10) : 443 };
   const idx = target.lastIndexOf(':');
   if (idx === -1) return { host: target.toLowerCase(), port: 443 };
   const port = parseInt(target.slice(idx + 1), 10);
@@ -56,11 +56,11 @@ export function parseProxyRequest(head: string): {
   port: number;
   connect: boolean;
 } | null {
-  const requestLine = head.split('\r\n', 1)[0];
+  const requestLine = head.split('\r\n', 1)[0]!;
   const m = /^([^\s]+)\s+(\S+)\s+HTTP\/\d(?:\.\d)?$/i.exec(requestLine);
   if (!m) return null;
-  const method = m[1].toUpperCase();
-  const rawTarget = m[2];
+  const method = m[1]!.toUpperCase();
+  const rawTarget = m[2]!;
 
   if (method === 'CONNECT') {
     const dest = parseAuthorityTarget(rawTarget);
@@ -120,7 +120,7 @@ export class EgressFilterProxy {
   private started = false;
   private port: number | null = null;
   private readonly opts: Required<Omit<EgressFilterProxyOptions, 'dial' | 'onViolation' | 'socketTimeoutMs'>> & {
-    onViolation?: (v: EgressViolation) => void;
+    onViolation?: ((v: EgressViolation) => void) | undefined;
     socketTimeoutMs: number;
     dial: (port: number, host: string) => net.Socket;
   };
@@ -242,7 +242,7 @@ export class EgressFilterProxy {
         // Rewrite the request line to origin form; the rest of the head is
         // forwarded verbatim so headers/trailers survive untouched.
         const lines = head.split('\r\n');
-        lines[0] = `${req.method} ${req.target} ${lines[0].split(' ')[2] ?? 'HTTP/1.1'}`;
+        lines[0] = `${req.method} ${req.target} ${lines[0]!.split(' ')[2] ?? 'HTTP/1.1'}`;
         upstream.write(lines.join('\r\n') + '\r\n\r\n');
         if (rest.length > 0) upstream.write(rest);
       }

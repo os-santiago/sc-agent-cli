@@ -24,7 +24,7 @@ export interface ChatCompletionOptions {
   messages: Message[];
   tools?: ToolDefinition[];
   stream?: boolean;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
 }
 
@@ -38,10 +38,10 @@ export interface ProviderUsage {
 
 export interface ChatCompletionResponse {
   content: string;
-  tool_calls?: ToolCall[];
+  tool_calls?: ToolCall[] | undefined;
   /** Real token counts when the provider reports them (non-streamed always;
    *  streamed when the provider honors stream_options.include_usage). */
-  usage?: ProviderUsage;
+  usage?: ProviderUsage | undefined;
 }
 
 /**
@@ -53,9 +53,9 @@ const SYNTHETIC_INDEX_BASE = 1_000_000;
 
 /** A tool call as decoded from the wire, before slot/index semantics apply. */
 interface WireToolCall {
-  index?: number;
-  id?: string;
-  function?: { name?: string; arguments?: string };
+  index?: number | undefined;
+  id?: string | undefined;
+  function?: { name?: string | undefined; arguments?: string | undefined } | undefined;
 }
 
 /**
@@ -201,11 +201,11 @@ export class OpenAICompatibleProvider {
     let lastError: unknown;
 
     for (let ci = startIdx; ci < this.chain.length; ci++) {
-      const candidate = this.chain[ci];
+      const candidate = this.chain[ci]!;
       try {
         const response = await this.callCandidate(candidate, options, onChunk, attempts);
         if (ci !== this.candidateCursor) {
-          this.logFailover(`now using ${candidate.id} (was ${this.chain[this.candidateCursor].id})`);
+          this.logFailover(`now using ${candidate.id} (was ${this.chain[this.candidateCursor]!.id})`);
         }
         this.candidateCursor = ci;
         this.lastUsed = candidate;

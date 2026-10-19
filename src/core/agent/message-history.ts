@@ -45,7 +45,7 @@ export function compressOldMessages(
 export function pruneMessageHistory(messages: Message[], keepCount: number = 10, maxLength: number = 600): Message[] {
   let toolMessageCount = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'tool') {
+    if (messages[i]!.role === 'tool') {
       toolMessageCount++;
     }
   }
@@ -83,7 +83,7 @@ export function limitMessageHistory(messages: Message[], maxMessages: number = 6
   // We want to slice right before an 'assistant' or 'user' message to avoid orphaning tool results.
   let safeIndex = targetStartIndex;
   while (safeIndex > 0) {
-    const role = messages[safeIndex].role;
+    const role = messages[safeIndex]!.role;
     if (role === 'assistant' || role === 'user') {
       break;
     }
@@ -105,7 +105,7 @@ export function limitMessageHistory(messages: Message[], maxMessages: number = 6
   // If the first message in the sliced segment is not a user message, we prepend
   // the user's original query. This guarantees the conversation starts with a 'user'
   // role (after the system prompt), which is a strict requirement for some API gateways.
-  if (firstUserMessage && sliced[0].role !== 'user') {
+  if (firstUserMessage && sliced[0]!.role !== 'user') {
     if (sliced[0] !== firstUserMessage) {
       result.push(firstUserMessage);
     }

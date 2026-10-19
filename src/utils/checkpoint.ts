@@ -86,7 +86,7 @@ export function findLatestCheckpoint(workspaceRoot: string): CheckpointData | nu
   const all = listCheckpoints().filter(c => c.workspaceRoot === workspaceRoot);
   if (all.length === 0) return null;
   all.sort((a, b) => b.timestamp - a.timestamp);
-  return all[0];
+  return all[0] ?? null;
 }
 
 const MAX_CHECKPOINT_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -121,7 +121,7 @@ export function cleanOldCheckpoints(): void {
   if (checkpoints.length > MAX_CHECKPOINT_COUNT) {
     checkpoints.sort((a, b) => b.timestamp - a.timestamp); // newest first
     for (let i = MAX_CHECKPOINT_COUNT; i < checkpoints.length; i++) {
-      try { unlinkSync(checkpoints[i].path); } catch { /* ignore */ }
+      try { unlinkSync(checkpoints[i]!.path); } catch { /* ignore */ }
     }
   }
 }

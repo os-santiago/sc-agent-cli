@@ -24,11 +24,11 @@ export interface DetectResolutionOptions {
   history: Message[];
   exitReason?: string;
   agentError?: unknown;
-  budgetExceeded?: string | null;
+  budgetExceeded?: string | null | undefined;
   mutations?: MutationDetectionResult;
   beforeGitState?: WorkspaceGitState | null;
   afterGitState?: WorkspaceGitState | null;
-  workspaceRoot?: string;
+  workspaceRoot?: string | undefined;
   /** Engine-owned artifact paths (e.g. --summary-file/--output-file/--audit-log
    *  written inside the worktree) excluded from files_changed (#464). */
   excludePaths?: string[];
@@ -170,7 +170,7 @@ export function detectSessionResolution(options: DetectResolutionOptions): Resol
   const verdictMarkerRegex = /(?:\[|\b)(?:VERDICT|RESOLUTION)\s*:\s*(NOT_ACTIONABLE|BLOCKED|COMPLETED|NO_CHANGES)(?:\]|\b)[ \t]*[:\-]?\s*(.*)/i;
   const match = text.match(verdictMarkerRegex);
   if (match) {
-    const verdictType = match[1].toUpperCase();
+    const verdictType = match[1]!.toUpperCase();
     const explicitReason = match[2] ? match[2].trim() : '';
 
     if (verdictType === 'NOT_ACTIONABLE') {

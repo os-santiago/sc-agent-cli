@@ -26,7 +26,7 @@ export function hasHarmonyMarkup(content: string | undefined | null): boolean {
  */
 function toolNameFromChannel(channel: string): string | null {
   const m = channel.match(/to\s*=\s*(?:functions\.)?([A-Za-z_][\w.-]*)/);
-  return m ? m[1] : null;
+  return m ? m[1]! : null;
 }
 
 /**

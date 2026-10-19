@@ -42,14 +42,14 @@ export function parseTomlSafe(content: string): Record<string, any> {
 
   const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
+    let line = lines[i]!.trim();
     // Remove full-line comments or trim inline comments (handling quotes simply)
     if (!line || line.startsWith('#')) continue;
 
     // Check table headers: [[array_table]] or [table]
     const arrayTableMatch = line.match(/^\[\[\s*([a-zA-Z0-9_.-]+)\s*\]\]$/);
     if (arrayTableMatch) {
-      const pathParts = arrayTableMatch[1].split('.');
+      const pathParts = arrayTableMatch[1]!.split('.');
       if (pathParts.some(isUnsafeKey)) {
         // Detached sink: pairs under a hostile header are dropped instead of
         // bleeding into the previous section or writing to Object.prototype.
@@ -58,11 +58,11 @@ export function parseTomlSafe(content: string): Record<string, any> {
       }
       let obj = result;
       for (let p = 0; p < pathParts.length - 1; p++) {
-        const part = pathParts[p];
+        const part = pathParts[p]!;
         if (!obj[part] || typeof obj[part] !== 'object') obj[part] = {};
         obj = obj[part];
       }
-      const lastPart = pathParts[pathParts.length - 1];
+      const lastPart = pathParts[pathParts.length - 1]!;
       if (!Array.isArray(obj[lastPart])) {
         obj[lastPart] = [];
       }
@@ -74,7 +74,7 @@ export function parseTomlSafe(content: string): Record<string, any> {
 
     const tableMatch = line.match(/^\[\s*([a-zA-Z0-9_.-]+)\s*\]$/);
     if (tableMatch) {
-      const pathParts = tableMatch[1].split('.');
+      const pathParts = tableMatch[1]!.split('.');
       if (pathParts.some(isUnsafeKey)) {
         currentTarget = {};
         continue;
@@ -93,13 +93,13 @@ export function parseTomlSafe(content: string): Record<string, any> {
     // Key-value pair: key = value
     const kvMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*=\s*(.*)$/);
     if (kvMatch) {
-      const key = kvMatch[1].trim();
+      const key = kvMatch[1]!.trim();
       if (isUnsafeKey(key)) continue;
-      let rawVal = kvMatch[2].trim();
+      let rawVal = kvMatch[2]!.trim();
 
       // Handle inline comments outside strings
       if (rawVal.includes('#') && !rawVal.startsWith('"') && !rawVal.startsWith("'")) {
-        rawVal = rawVal.split('#')[0].trim();
+        rawVal = rawVal.split('#')[0]!.trim();
       }
 
       // Parse value
@@ -141,7 +141,7 @@ function parseTomlValue(
     let idx = currentIdx;
     while (!arrayStr.includes(']') && idx + 1 < lines.length) {
       idx++;
-      arrayStr += ' ' + lines[idx].trim();
+      arrayStr += ' ' + lines[idx]!.trim();
     }
     advanceIdx(idx);
 
@@ -222,7 +222,7 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
   let runBlockIndent = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
+    const rawLine = lines[i]!;
     const trimmed = rawLine.trim();
 
     // Check multi-line run block collection
@@ -249,7 +249,7 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
     // Workflow top-level name
     const topNameMatch = rawLine.match(/^name:\s*(['"]?)(.+?)\1\s*$/);
     if (topNameMatch && !currentJobName) {
-      result.name = topNameMatch[2].trim();
+      result.name = topNameMatch[2]!.trim();
       continue;
     }
 
@@ -269,7 +269,7 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
     // Job header: e.g. "  build:" or "  test:"
     const jobHeaderMatch = rawLine.match(/^ {2,4}([a-zA-Z0-9_-]+):\s*$/);
     if (jobHeaderMatch) {
-      const jobName = jobHeaderMatch[1];
+      const jobName = jobHeaderMatch[1]!;
       // Unsafe names resolve to inherited members on result.jobs — '__proto__'
       // writes through the prototype, 'constructor' reads back as Function.
       currentJobName = isUnsafeKey(jobName) ? null : jobName;
@@ -288,12 +288,12 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
     const stepStartMatch = rawLine.match(/^\s*-\s+(name|uses|run):\s*(.*)$/);
     if (stepStartMatch) {
       inWith = false;
-      const key = stepStartMatch[1];
-      let val = stepStartMatch[2].trim().replace(/^['"]|['"]$/g, '');
+      const key = stepStartMatch[1]!;
+      let val = stepStartMatch[2]!.trim().replace(/^['"]|['"]$/g, '');
 
       currentStep = {};
       if (currentJobName && result.jobs[currentJobName]) {
-        result.jobs[currentJobName].steps.push(currentStep);
+        result.jobs[currentJobName]!.steps.push(currentStep);
       }
       result.steps.push(currentStep);
 
@@ -318,8 +318,8 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
     if (currentStep) {
       const stepPropMatch = rawLine.match(/^\s+(name|uses|run|with):\s*(.*)$/);
       if (stepPropMatch) {
-        const prop = stepPropMatch[1];
-        let val = stepPropMatch[2].trim().replace(/^['"]|['"]$/g, '');
+        const prop = stepPropMatch[1]!;
+        let val = stepPropMatch[2]!.trim().replace(/^['"]|['"]$/g, '');
 
         if (prop === 'name') {
           currentStep.name = val;
@@ -347,8 +347,8 @@ export function parseCiWorkflowYaml(content: string): RawWorkflow {
       // Key-value inside `with:` block
       if (inWith && currentStep.with) {
         const withKvMatch = rawLine.match(/^\s+([a-zA-Z0-9_.-]+):\s*(['"]?)(.+?)\2\s*$/);
-        if (withKvMatch && !isUnsafeKey(withKvMatch[1])) {
-          currentStep.with[withKvMatch[1]] = withKvMatch[3];
+        if (withKvMatch && !isUnsafeKey(withKvMatch[1]!)) {
+          currentStep.with[withKvMatch[1]!] = withKvMatch[3]!;
           continue;
         }
       }
@@ -377,8 +377,8 @@ export function parseXmlProperties(content: string): Record<string, string> {
   const tagRegex = /<([a-zA-Z0-9_.-]+)>([^<]+)<\/\1>/g;
   let match: RegExpExecArray | null;
   while ((match = tagRegex.exec(content)) !== null) {
-    const tagName = match[1];
-    const val = match[2].trim();
+    const tagName = match[1]!;
+    const val = match[2]!.trim();
     if (!isUnsafeKey(tagName)) properties[tagName] = val;
   }
   return properties;
@@ -400,7 +400,7 @@ export function parseMakefileTargets(content: string): Record<string, string[]> 
     // Makefile target definition: `target: dependencies`
     const targetMatch = line.match(/^([a-zA-Z0-9_.-]+)\s*:(?!=)/);
     if (targetMatch && !line.startsWith('\t') && !line.startsWith('  ')) {
-      const name = targetMatch[1];
+      const name = targetMatch[1]!;
       // Unsafe names resolve to inherited members — targets['__proto__'] reads
       // Object.prototype and .push() below would throw (#478).
       currentTarget = isUnsafeKey(name) ? null : name;
@@ -416,7 +416,7 @@ export function parseMakefileTargets(content: string): Record<string, string[]> 
     if (currentTarget && (line.startsWith('\t') || line.startsWith('  '))) {
       const command = line.trim().replace(/^@/, '');
       if (command) {
-        targets[currentTarget].push(command);
+        targets[currentTarget]!.push(command);
       }
     } else if (currentTarget && line.search(/\S/) === 0) {
       // Reached another top-level construct

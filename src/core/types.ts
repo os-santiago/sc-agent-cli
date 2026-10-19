@@ -5,7 +5,7 @@ export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 export interface Message {
   role: MessageRole;
   content: string;
-  tool_calls?: ToolCall[];
+  tool_calls?: ToolCall[] | undefined;
   tool_call_id?: string; // for tool responses
   name?: string; // for tool responses
   timestamp?: string;
@@ -33,7 +33,7 @@ export interface ToolDefinition {
 export interface ModelConfig {
   provider: 'openai-compatible';
   baseUrl: string;
-  apiKey?: string; // Optional for local models (Ollama, LM Studio)
+  apiKey?: string | undefined; // Optional for local models (Ollama, LM Studio)
   model: string;
   temperature?: number;
   maxTokens?: number | null; // null = no limit (let provider decide)
@@ -150,7 +150,7 @@ export interface ProjectConfig {
   run_shell?: RunShellConfig; // Child-environment hardening for shell commands (#471)
   webFetch?: WebFetchConfig; // web_fetch SSRF/egress policy (#470)
   profiles?: Record<string, Partial<ModelConfig>>; // Named profiles
-  activeProfile?: string;
+  activeProfile?: string | undefined;
   /**
    * Per-phase model routing for headless runs (#424): planner, executor and
    * reviewer/judge each map to a "provider/model" alias. All roles optional —
@@ -180,19 +180,19 @@ export interface ProjectConfig {
 }
 
 export interface StreamDelta {
-  role?: MessageRole;
-  content?: string;
-  tool_calls?: ToolCallDelta[];
+  role?: MessageRole | undefined;
+  content?: string | undefined;
+  tool_calls?: ToolCallDelta[] | undefined;
 }
 
 export interface ToolCallDelta {
   index: number;
-  id?: string;
-  type?: 'function';
+  id?: string | undefined;
+  type?: 'function' | undefined;
   function?: {
-    name?: string;
-    arguments?: string; // partial JSON
-  };
+    name?: string | undefined;
+    arguments?: string | undefined; // partial JSON
+  } | undefined;
 }
 
 /**
@@ -221,8 +221,8 @@ export interface ProgressEvent extends AgentEvent {
   type: 'progress';
   data: {
     status: string;
-    step?: number;
-    total?: number;
+    step?: number | undefined;
+    total?: number | undefined;
   };
 }
 

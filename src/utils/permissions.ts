@@ -13,7 +13,7 @@ export interface PermissionContext {
   toolName: string;
   args: Record<string, unknown>;
   config: ProjectConfig;
-  autoApprove?: boolean; // Override from CLI flag
+  autoApprove?: boolean | undefined; // Override from CLI flag
 }
 
 // Track session-level permissions (reset when process ends)
@@ -71,7 +71,7 @@ for (const [ch, sentinel] of Object.entries(ESCAPE_SENTINELS)) {
 function basenameOf(token: string): string {
   const clean = token.replace(CTRL_STRIP_RE, '');
   const parts = clean.split(/[\\/]/);
-  return parts[parts.length - 1];
+  return parts[parts.length - 1]!;
 }
 
 interface WrapperSpec {
@@ -173,12 +173,12 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
         const code = parseInt(esc.slice(1), 16);
         return code === 0 ? ' ' : String.fromCharCode(code);
       }
-      if (/^[0-7]$/.test(esc[0])) {
+      if (/^[0-7]$/.test(esc[0]!)) {
         const code = parseInt(esc, 8);
         return code === 0 ? ' ' : String.fromCharCode(code);
       }
       if (esc === 'n' || esc === 't' || esc === 'r') return ' ';
-      if (esc === '\\') return ESCAPE_SENTINELS['\\'];
+      if (esc === '\\') return ESCAPE_SENTINELS['\\']!;
       if (esc === "'") return '';
       return esc;
     });
@@ -186,7 +186,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
 
   // Windows drive-letter paths keep their backslashes (`C:\tools\git.exe`) —
   // everywhere else a backslash escapes the following character (`r\m` → `rm`).
-  s = s.replace(/\b[A-Za-z]:\\[^\s;|&(){<>'"]*/g, (m) => m.replace(/\\/g, ESCAPE_SENTINELS['\\']));
+  s = s.replace(/\b[A-Za-z]:\\[^\s;|&(){<>'"]*/g, (m) => m.replace(/\\/g, ESCAPE_SENTINELS['\\']!));
   s = s.replace(/\\(.)/gs, (_m, c: string) => {
     if (/\s/.test(c)) return c === '\n' ? '' : ' ';
     return ESCAPE_SENTINELS[c] ?? c;
@@ -215,7 +215,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
   const assignRe = /(?:^|[\s;|&(){<>])(?:(?:export|local|declare|typeset|readonly)\s+)*([A-Za-z_][A-Za-z0-9_]*)=((?:\$\([^()]*\)|[^\s;|&(){<>}])*)/g;
   let am: RegExpExecArray | null;
   while ((am = assignRe.exec(s)) !== null) {
-    vars.set(am[1], am[2]);
+    vars.set(am[1]!, am[2]!);
   }
 
   // Resolve $NAME / ${NAME} / ${NAME:-default} / ${NAME:+alt} against the
@@ -321,7 +321,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
   const segments: string[] = [];
   const flatParts: string[] = [];
   for (let p = 0; p < parts.length; p++) {
-    const part = parts[p];
+    const part = parts[p]!;
     if (p % 2 === 1) {
       flatParts.push(part); // captured separator — kept verbatim
       continue;
@@ -336,7 +336,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
     let appendsArgs = false;
     let lastWrapper = '';
     for (let spins = 0; i < tokens.length && spins < 32; spins++) {
-      const head = tokens[i];
+      const head = tokens[i]!;
       if (HEAD_MARKERS.has(head) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(head)) {
         i++;
         continue;
@@ -349,7 +349,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
       i++;
       while (i < tokens.length && spins < 32) {
         spins++;
-        const t = tokens[i];
+        const t = tokens[i]!;
         if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { i++; continue; }
         const isFlag = t.startsWith('-') || (w.slashFlags === true && t.startsWith('/'));
         if (!isFlag) break;
@@ -358,7 +358,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
         if (w.opaqueFlags?.has(t)) opaque = true;
       }
       for (let k = w.positional ?? 0; k > 0 && i < tokens.length && spins < 32; k--, spins++) {
-        if (tokens[i].startsWith('-')) break;
+        if (tokens[i]!.startsWith('-')) break;
         i++;
       }
     }
@@ -369,7 +369,7 @@ export function normalizeCommand(command: string, opts?: { structural?: boolean 
     // `curl * | *sh` still match the folded form.
     if (rest.length === 0 && lastWrapper) rest.push(lastWrapper);
     if (appendsArgs && rest.length > 0) rest.push(DYNAMIC);
-    if (rest.length > 0) rest[0] = basenameOf(rest[0]);
+    if (rest.length > 0) rest[0] = basenameOf(rest[0]!);
     const seg = rest.join(' ');
     segments.push(seg);
     // Pad so stripped segments stay separated from neighboring separators
@@ -408,12 +408,12 @@ interface GitInvocation {
 function gitInvocations(tokens: string[]): GitInvocation[] {
   const out: GitInvocation[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const base = basenameOf(tokens[i]);
+    const base = basenameOf(tokens[i]!);
     if (base !== 'git' && base !== 'git.exe') continue;
     let aliased = false;
     let j = i + 1;
     while (j < tokens.length) {
-      const t = tokens[j].replace(CTRL_STRIP_RE, '');
+      const t = tokens[j]!.replace(CTRL_STRIP_RE, '');
       if (GIT_ARG_OPTIONS.has(t)) {
         const val = (tokens[j + 1] ?? '').replace(CTRL_STRIP_RE, '');
         if ((t === '-c' || t === '--config-env') && /^alias\./i.test(val)) aliased = true;
@@ -426,7 +426,7 @@ function gitInvocations(tokens: string[]): GitInvocation[] {
       break;
     }
     if (j >= tokens.length) continue;
-    const sub = tokens[j];
+    const sub = tokens[j]!;
     if (CTRL_RE.test(sub)) {
       out.push({ sub: '', rest: [], dynamicSub: true, aliased });
       continue;
