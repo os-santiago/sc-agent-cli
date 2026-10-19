@@ -154,7 +154,7 @@ function recoverToolCallBlocks(content: string, out: Array<{ name: string; args:
     const nameLine = body.match(/^([A-Za-z_][\w.-]*)\s*(?:\n|\r\n)([\s\S]*)$/);
     if (nameLine) {
       const args = payloadToArgs(nameLine[2] ?? '');
-      if (args !== null) out.push({ name: nameLine[1], args });
+      if (args !== null) out.push({ name: nameLine[1]!, args });
       continue;
     }
     if (tagName) {
@@ -204,7 +204,7 @@ function recoverFunctionBlocks(content: string, out: Array<{ name: string; args:
   const eqRe = /<function\s*=\s*([A-Za-z_][\w.-]*)\s*>([\s\S]*?)<\/function\s*>/gi;
   for (const m of content.matchAll(eqRe)) {
     const args = payloadToArgs(m[2] ?? '');
-    if (args !== null) out.push({ name: m[1], args });
+    if (args !== null) out.push({ name: m[1]!, args });
   }
   const namedRe = /<function\b[^>]*\bname\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/function\s*>/gi;
   for (const m of content.matchAll(namedRe)) {

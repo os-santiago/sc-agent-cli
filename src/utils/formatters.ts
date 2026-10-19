@@ -46,7 +46,7 @@ export async function detectFormatters(workspaceRoot: string): Promise<string[]>
 
 export function runFormatter(command: string, workspaceRoot: string): FormatterResult {
   const parts = command.split(/\s+/);
-  const cmd = parts[0];
+  const cmd = parts[0]!;
   const args = parts.slice(1);
 
   const before = spawnSync('git', ['diff', '--stat'], {

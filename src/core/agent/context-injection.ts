@@ -29,8 +29,8 @@ export interface SystemInjectionOptions {
   userMessage: string;
   workspaceRoot: string;
   config: ProjectConfig;
-  autoApprove?: boolean;
-  sandbox?: SandboxRuntime;
+  autoApprove?: boolean | undefined;
+  sandbox?: SandboxRuntime | undefined;
 }
 
 export interface SystemInjectionResult {
@@ -157,7 +157,7 @@ export function rebudgetSystemMessage(content: string): SystemInjectionResult {
     [{ source: 'system', text: content }],
     resolveContextBudget(),
   );
-  return { text: budgeted.texts.length > 0 ? budgeted.texts[0] : content, report: budgeted.report };
+  return { text: budgeted.texts.length > 0 ? budgeted.texts[0]! : content, report: budgeted.report };
 }
 
 /**

@@ -65,7 +65,7 @@ export interface CandidateAttempt {
   attempt: number;           // 1-based attempt index within that candidate
   errorClass: ProviderErrorClass;
   retryable: boolean;
-  status?: number;           // HTTP status when the failure came from a response
+  status?: number | undefined;  // HTTP status when the failure came from a response
   error: string;             // sanitized error message
   durationMs: number;
 }
@@ -279,7 +279,7 @@ function buildCandidateModel(
 ): ModelConfig {
   const merged: ModelConfig = { ...base, ...(profile ?? {}), model: modelId };
   if (!profile && providerName && KNOWN_PROVIDER_BASE_URLS[providerName]) {
-    merged.baseUrl = KNOWN_PROVIDER_BASE_URLS[providerName];
+    merged.baseUrl = KNOWN_PROVIDER_BASE_URLS[providerName]!;
   }
   if (merged.apiKey?.startsWith('<YOUR_')) merged.apiKey = undefined;
 

@@ -6,33 +6,33 @@ import type { AgentRole, RoleResolution } from '../roles.js';
 export interface AgentOptions {
   workspaceRoot: string;
   config: ProjectConfig;
-  autoApprove?: boolean;
-  systemPrompt?: string;
-  initialPrompt?: string;
-  quiet?: boolean;
-  callbacks?: AgentCallbacks;
-  clearHistory?: boolean;
-  permissionMode?: 'ask_once' | 'always_ask' | 'unlimited';
-  sessionId?: string;
-  resumeCheckpoint?: CheckpointData;
-  auditLog?: string;
-  livelockThreshold?: number;
-  summaryFile?: string;
-  outputFile?: string;
+  autoApprove?: boolean | undefined;
+  systemPrompt?: string | undefined;
+  initialPrompt?: string | undefined;
+  quiet?: boolean | undefined;
+  callbacks?: AgentCallbacks | undefined;
+  clearHistory?: boolean | undefined;
+  permissionMode?: 'ask_once' | 'always_ask' | 'unlimited' | undefined;
+  sessionId?: string | undefined;
+  resumeCheckpoint?: CheckpointData | undefined;
+  auditLog?: string | undefined;
+  livelockThreshold?: number | undefined;
+  summaryFile?: string | undefined;
+  outputFile?: string | undefined;
   /** #421 devcontainer execution evidence — surfaced in the run manifest. */
-  devcontainer?: DevcontainerRunInfo;
+  devcontainer?: DevcontainerRunInfo | undefined;
   /** 'json' suppresses all human stdout (banner, streamed answer) — the run
    *  manifest JSON line is the only stdout output. */
-  outputFormat?: 'text' | 'json';
-  maxSteps?: number;
-  maxSeconds?: number;
-  maxTotalTokens?: number;
+  outputFormat?: 'text' | 'json' | undefined;
+  maxSteps?: number | undefined;
+  maxSeconds?: number | undefined;
+  maxTotalTokens?: number | undefined;
   /**
    * #424 multi-model orchestration — pin this run to a single phase role
    * (`--role`/`SC_ROLE`). When unset, a configured `roles` map expands the
    * headless run into the full planner → executor → reviewer pipeline.
    */
-  role?: AgentRole;
+  role?: AgentRole | undefined;
 }
 
 /**

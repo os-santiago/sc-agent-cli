@@ -60,7 +60,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
       let totalPhysicalRows = 0;
       // Write current content
       for (let i = 0; i < buf.length; i++) {
-        const line = buf[i];
+        const line = buf[i]!;
         const display = i === cursorLine
           ? line.slice(0, cursorCol) + (line[cursorCol] ? chalk.inverse(line[cursorCol]) + line.slice(cursorCol + 1) : chalk.inverse(' '))
           : line;
@@ -88,7 +88,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
       const lines = text.split('\n');
       for (const l of lines) buf.push(l);
       cursorLine = buf.length - 1;
-      cursorCol = buf[cursorLine].length;
+      cursorCol = buf[cursorLine]!.length;
     }
 
     function submit(): void {
@@ -104,14 +104,14 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     }
 
     function insertChar(ch: string): void {
-      const line = buf[cursorLine];
+      const line = buf[cursorLine]!;
       buf[cursorLine] = line.slice(0, cursorCol) + ch + line.slice(cursorCol);
       cursorCol += ch.length;
       renderInput();
     }
 
     function newline(): void {
-      const line = buf[cursorLine];
+      const line = buf[cursorLine]!;
       const rest = line.slice(cursorCol);
       buf[cursorLine] = line.slice(0, cursorCol);
       cursorLine++;
@@ -126,13 +126,13 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
         renderInput();
       } else if (cursorLine > 0) {
         cursorLine--;
-        cursorCol = buf[cursorLine].length;
+        cursorCol = buf[cursorLine]!.length;
         renderInput();
       }
     }
 
     function cursorRight(): void {
-      const line = buf[cursorLine];
+      const line = buf[cursorLine]!;
       if (cursorCol < line.length) {
         cursorCol++;
         renderInput();
@@ -146,12 +146,12 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     function cursorUp(): void {
       if (cursorLine > 0) {
         cursorLine--;
-        cursorCol = Math.min(cursorCol, buf[cursorLine].length);
+        cursorCol = Math.min(cursorCol, buf[cursorLine]!.length);
         renderInput();
       } else if (historyIdx > 0) {
         if (historyIdx === history.length) historyBuf = getFullInput();
         historyIdx--;
-        setFullInput(history[historyIdx]);
+        setFullInput(history[historyIdx]!);
         renderInput();
       }
     }
@@ -159,14 +159,14 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     function cursorDown(): void {
       if (cursorLine < buf.length - 1) {
         cursorLine++;
-        cursorCol = Math.min(cursorCol, buf[cursorLine].length);
+        cursorCol = Math.min(cursorCol, buf[cursorLine]!.length);
         renderInput();
       } else if (historyIdx < history.length) {
         historyIdx++;
         if (historyIdx === history.length) {
           setFullInput(historyBuf);
         } else {
-          setFullInput(history[historyIdx]);
+          setFullInput(history[historyIdx]!);
         }
         renderInput();
       }
@@ -174,13 +174,13 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
 
     function backspace(): void {
       if (cursorCol > 0) {
-        const line = buf[cursorLine];
+        const line = buf[cursorLine]!;
         buf[cursorLine] = line.slice(0, cursorCol - 1) + line.slice(cursorCol);
         cursorCol--;
         renderInput();
       } else if (cursorLine > 0) {
-        const prevLine = buf[cursorLine - 1];
-        const curLine = buf[cursorLine];
+        const prevLine = buf[cursorLine - 1]!;
+        const curLine = buf[cursorLine]!;
         buf[cursorLine - 1] = prevLine + curLine;
         buf.splice(cursorLine, 1);
         cursorLine--;
@@ -190,12 +190,12 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     }
 
     function del(): void {
-      const line = buf[cursorLine];
+      const line = buf[cursorLine]!;
       if (cursorCol < line.length) {
         buf[cursorLine] = line.slice(0, cursorCol) + line.slice(cursorCol + 1);
         renderInput();
       } else if (cursorLine < buf.length - 1) {
-        buf[cursorLine] = line + buf[cursorLine + 1];
+        buf[cursorLine] = line + buf[cursorLine + 1]!;
         buf.splice(cursorLine + 1, 1);
         renderInput();
       }
@@ -207,7 +207,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     }
 
     function end(): void {
-      cursorCol = buf[cursorLine].length;
+      cursorCol = buf[cursorLine]!.length;
       renderInput();
     }
 
@@ -216,7 +216,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
       const full = getFullInput();
       const [matches, matchLine] = completer(full);
       if (matches.length === 1 && matches[0] !== matchLine) {
-        setFullInput(matches[0]);
+        setFullInput(matches[0]!);
         renderInput();
       }
     }
@@ -245,7 +245,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
     function isPasteBurst(): boolean {
       if (PASTE_INTERVALS.length < 2) return false;
       const sorted = [...PASTE_INTERVALS].sort((a, b) => a - b);
-      const median = sorted[Math.floor(sorted.length / 2)];
+      const median = sorted[Math.floor(sorted.length / 2)]!;
       return median < PASTE_THRESHOLD_MS;
     }
 
@@ -317,7 +317,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
 
         // Ctrl+W → delete word backward
         if (ctrl && name === 'w') {
-          const line = buf[cursorLine];
+          const line = buf[cursorLine]!;
           const before = line.slice(0, cursorCol);
           const after = line.slice(cursorCol);
           const trimmed = before.replace(/\s*\S+\s*$/, '');
@@ -329,7 +329,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
 
         // Ctrl+U → clear line
         if (ctrl && name === 'u') {
-          const after = buf[cursorLine].slice(cursorCol);
+          const after = buf[cursorLine]!.slice(cursorCol);
           buf[cursorLine] = after;
           cursorCol = 0;
           renderInput();
@@ -338,7 +338,7 @@ export function readUserInput(history: string[], workspaceRoot: string): Promise
 
         // Ctrl+K → delete to end of line
         if (ctrl && name === 'k') {
-          buf[cursorLine] = buf[cursorLine].slice(0, cursorCol);
+          buf[cursorLine] = buf[cursorLine]!.slice(0, cursorCol);
           renderInput();
           return;
         }

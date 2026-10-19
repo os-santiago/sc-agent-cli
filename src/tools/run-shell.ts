@@ -12,8 +12,8 @@ interface SpawnSpec {
   shell: boolean;
   env?: NodeJS.ProcessEnv;
   /** stdio[3] carries the cBPF blob when a seccomp fd is in play. */
-  seccompFd?: number;
-  seccompBlob?: Buffer;
+  seccompFd?: number | undefined;
+  seccompBlob?: Buffer | undefined;
 }
 
 export const runShellTool: Tool = {

@@ -141,7 +141,7 @@ export function mineCiWorkflows(workspaceRoot: string): CIMiningResult {
         const trimmed = line.trim();
         const scriptMatch = trimmed.match(/^-\s+(.+)$/);
         if (scriptMatch) {
-          const cmd = scriptMatch[1];
+          const cmd = scriptMatch[1]!;
           if (isVerifyCommand(cmd)) {
             gitlabVerifyCmds.push(cmd);
             verifyCommandSet.add(cmd);

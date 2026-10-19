@@ -56,7 +56,7 @@ export interface SandboxProfile {
   writablePaths: string[]; // absolute, resolved
   readOnlyPaths: string[]; // absolute, resolved
   seccomp: boolean;
-  seccompProfile?: string;
+  seccompProfile?: string | undefined;
   /** literal denyPaths entries masked inside the sandbox. */
   denyMaskPaths: string[];
 }
@@ -101,7 +101,7 @@ export function parseEgressRule(raw: string): EgressRule {
 
   const v6 = /^\[([0-9a-f:]+)\](?::(\d+))?$/.exec(entry);
   if (v6) {
-    host = v6[1];
+    host = v6[1]!;
     port = v6[2] !== undefined ? parseInt(v6[2], 10) : null;
   } else {
     const idx = entry.lastIndexOf(':');
@@ -207,7 +207,7 @@ export type SandboxProbe = (argv: string[]) => boolean;
 
 const defaultProbe: SandboxProbe = (argv) => {
   try {
-    const res = spawnSync(argv[0], argv.slice(1), {
+    const res = spawnSync(argv[0]!, argv.slice(1), {
       stdio: 'ignore',
       timeout: 10_000,
     });
@@ -268,7 +268,7 @@ export interface BuildBwrapArgvOptions {
   profile: SandboxProfile;
   capNetAdmin: boolean;
   /** fd number handed to --seccomp (the spawn stdio slot carrying the blob). */
-  seccompFd?: number;
+  seccompFd?: number | undefined;
 }
 
 // Bring loopback up inside the fresh netns, then exec the user command in a
@@ -371,8 +371,8 @@ export interface SandboxSpawnPlan {
   shell: boolean;
   env: NodeJS.ProcessEnv;
   /** extra pipe fd to stream the cBPF blob into bwrap. */
-  seccompFd?: number;
-  seccompBlob?: Buffer;
+  seccompFd?: number | undefined;
+  seccompBlob?: Buffer | undefined;
   execMode: SandboxExecMode;
 }
 
@@ -382,15 +382,15 @@ export class SandboxRuntime {
   readonly profile: SandboxProfile;
   readonly backend: SandboxBackend;
   private readonly env: NodeJS.ProcessEnv;
-  private readonly allowedEnvVars?: string[];
+  private readonly allowedEnvVars?: string[] | undefined;
   private readonly workspaceRoot: string;
-  private readonly onViolation?: (v: SandboxViolation) => void;
-  private readonly onNotice?: (message: string) => void;
+  private readonly onViolation?: ((v: SandboxViolation) => void) | undefined;
+  private readonly onNotice?: ((message: string) => void) | undefined;
   private readonly violationsList: SandboxViolation[] = [];
   private violationOverflow = 0;
-  private proxy?: EgressFilterProxy;
-  private proxyStart?: Promise<number>;
-  private proxyUrlValue?: string;
+  private proxy?: EgressFilterProxy | undefined;
+  private proxyStart?: Promise<number> | undefined;
+  private proxyUrlValue?: string | undefined;
   private seccompBlob?: Buffer;
   private seccompState: 'on' | 'off' | 'unsupported' = 'off';
   private readonly stderrRules: StderrRule[] = [];

@@ -214,7 +214,7 @@ function ipv4ToBytes(ip: string): number[] | null {
 function ipv4ToLong(ip: string): number | null {
   const bytes = ipv4ToBytes(ip);
   if (!bytes) return null;
-  return ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+  return ((bytes[0]! << 24) | (bytes[1]! << 16) | (bytes[2]! << 8) | bytes[3]!) >>> 0;
 }
 
 /** [network base, prefix bits] pairs — RFC1918, loopback, link-local, CGNAT, doc/benchmark ranges, multicast, reserved. */
@@ -269,9 +269,9 @@ function ipv6ToBytes(ip: string): Uint8Array | null {
 
   const halves = s.split('::');
   if (halves.length > 2) return null;
-  const headParts = halves[0] === '' ? [] : halves[0].split(':');
+  const headParts = halves[0] === '' ? [] : halves[0]!.split(':');
   const tailParts =
-    halves.length === 2 ? (halves[1] === '' ? [] : halves[1].split(':')) : [];
+    halves.length === 2 ? (halves[1] === '' ? [] : halves[1]!.split(':')) : [];
 
   const head: number[] = [];
   for (const g of headParts) {
@@ -301,10 +301,10 @@ function ipv6ToBytes(ip: string): Uint8Array | null {
     out[i++] = g & 0xff;
   }
   if (v4Tail) {
-    out[12] = v4Tail[0];
-    out[13] = v4Tail[1];
-    out[14] = v4Tail[2];
-    out[15] = v4Tail[3];
+    out[12] = v4Tail[0]!;
+    out[13] = v4Tail[1]!;
+    out[14] = v4Tail[2]!;
+    out[15] = v4Tail[3]!;
   }
   return out;
 }
@@ -328,9 +328,9 @@ function isBlockedIpv6(ip: string): boolean {
   // ff00::/8 — multicast
   if (b[0] === 0xff) return true;
   // fc00::/7 — unique-local (fc00–fdff)
-  if ((b[0] & 0xfe) === 0xfc) return true;
+  if ((b[0]! & 0xfe) === 0xfc) return true;
   // fe80::/10 link-local + fec0::/10 site-local (deprecated) → fe80–feff
-  if (b[0] === 0xfe && (b[1] & 0x80) !== 0) return true;
+  if (b[0] === 0xfe && (b[1]! & 0x80) !== 0) return true;
   // 64:ff9b::/32 — NAT64 translation prefixes embed a translated IPv4 (RFC6052/8215)
   if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) return true;
   // 100::/64 — discard-only (RFC6666)

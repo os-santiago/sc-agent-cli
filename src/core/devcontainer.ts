@@ -37,18 +37,18 @@ export interface DevcontainerRunInfo {
   requested: boolean;
   exec_path: 'devcontainer' | 'host';
   status: 'devcontainer' | 'devcontainer_unavailable';
-  reason?: DevcontainerUnavailableReason;
-  detail?: string;
-  config_path?: string;
-  marker?: string;
-  hostname?: string;
+  reason?: DevcontainerUnavailableReason | undefined;
+  detail?: string | undefined;
+  config_path?: string | undefined;
+  marker?: string | undefined;
+  hostname?: string | undefined;
 }
 
 export interface DevcontainerPlan {
   execPath: 'devcontainer' | 'host';
-  reason?: DevcontainerUnavailableReason;
-  detail?: string;
-  configPath?: string;
+  reason?: DevcontainerUnavailableReason | undefined;
+  detail?: string | undefined;
+  configPath?: string | undefined;
   /** argv for `spawn('devcontainer', execArgv)` when execPath === 'devcontainer'. */
   execArgv?: string[];
   /** Human-readable command line (audit log / verbose). */

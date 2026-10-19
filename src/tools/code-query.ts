@@ -156,7 +156,7 @@ function parseClasses(code: string, lang: string): ParsedClass[] {
       }
     } else if (lang === '.go') {
       const name = match[1];
-      const type = match[2].toLowerCase() as 'struct' | 'interface';
+      const type = match[2]!.toLowerCase() as 'struct' | 'interface';
       if (name) {
         classes.push({ type, name, methods: [], line });
       }
@@ -201,7 +201,7 @@ export async function analyzeCode(filePath: string): Promise<string> {
   const result: string[] = [`📄 ${filePath} (${lines.length} lines, ${lang})`];
 
   if (classes.length > 0) {
-    result.push(`\n📋 ${classes.length} ${classes[0].type}(s):`);
+    result.push(`\n📋 ${classes.length} ${classes[0]!.type}(s):`);
     for (const cls of classes) {
       result.push(`  ${cls.type === 'interface' ? '📐' : cls.type === 'struct' ? '🧱' : cls.type === 'trait' ? '⭐' : '📦'} ${cls.name} (line ${cls.line})`);
       if (cls.methods.length > 0) {

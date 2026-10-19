@@ -87,7 +87,7 @@ export class PersistentMemory {
   private initPromise: Promise<void> | null = null;
   private memoryDir: string;
   private memoryFile: string;
-  private defaultWorkspaceRoot?: string;
+  private defaultWorkspaceRoot?: string | undefined;
   private workspaceCache = new Map<string, Promise<ResolvedWorkspace | null>>();
 
   constructor(storageDir?: string, workspaceRoot?: string) {
@@ -219,7 +219,7 @@ export class PersistentMemory {
   private findScopedEntryIndex(key: string, wsId: string | null): number {
     let legacyIdx = -1;
     for (let i = 0; i < this.store.entries.length; i++) {
-      const e = this.store.entries[i];
+      const e = this.store.entries[i]!;
       if (e.key !== key || !this.isVisible(e, wsId)) continue;
       if (e.scope !== 'legacy') return i;
       if (legacyIdx < 0) legacyIdx = i;
@@ -283,7 +283,7 @@ export class PersistentMemory {
     await this.init();
     const ws = await this.resolveWorkspace(workspaceRoot);
     const idx = this.findScopedEntryIndex(key, ws?.id ?? null);
-    return idx >= 0 ? this.store.entries[idx] : null;
+    return idx >= 0 ? this.store.entries[idx]! : null;
   }
 
   async recall(key: string, workspaceRoot?: string): Promise<string | null> {
@@ -335,7 +335,7 @@ export class PersistentMemory {
     if (idx < 0) {
       throw new Error(`No memory found with key "${key}".`);
     }
-    const entry = this.store.entries[idx];
+    const entry = this.store.entries[idx]!;
     if (entry.scope === to) return entry;
     entry.scope = to;
     if (to === 'workspace') {

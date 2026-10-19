@@ -87,7 +87,7 @@ export class Agent {
   private isFirstChunk: boolean = true;
   private _thinkingShown: boolean = false;
   private shellInfo: ShellInfo;
-  private callbacks?: AgentCallbacks;
+  private callbacks?: AgentCallbacks | undefined;
   private events: AgentEvents;
   public tokenTracker: TokenTracker;
   private _iterations: number = 0;
@@ -99,7 +99,7 @@ export class Agent {
   private _toolCallCounts = new Map<string, number>();
   private _lastCheckpointIteration: number = 0;
   private _sessionId: string = '';
-  private audit?: AuditLogger;
+  private audit?: AuditLogger | undefined;
   private auditRun: RunAudit;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
   private sandbox?: SandboxRuntime;
@@ -314,10 +314,10 @@ export class Agent {
       // injection guard still accounts for it (and re-trims it if the
       // budget shrank since the original assembly).
       const sysIndex = messages.findIndex((m) => m.role === 'system');
-      const rebudgeted = rebudgetSystemMessage(messages[sysIndex].content);
+      const rebudgeted = rebudgetSystemMessage(messages[sysIndex]!.content);
       this._contextBudgetReport = rebudgeted.report;
-      if (rebudgeted.text !== messages[sysIndex].content) {
-        messages[sysIndex] = { ...messages[sysIndex], content: rebudgeted.text };
+      if (rebudgeted.text !== messages[sysIndex]!.content) {
+        messages[sysIndex] = { ...messages[sysIndex]!, content: rebudgeted.text };
         emitContextBudgetWarning(rebudgeted.report, (line) => this.log(chalk.yellow(line)), this.auditRun);
       }
     }
@@ -649,7 +649,7 @@ export class Agent {
         let toolOutRequested = 0;
         let toolOutInjected = 0;
         for (let i = 0; i < toolResults.length; i++) {
-          const result = toolResults[i];
+          const result = toolResults[i]!;
           toolOutRequested += estimateTokens(result.content);
           result.content = compressToolResult(redactSecrets(result.content));
           if (i === toolResults.length - 1 && hasToolCallsWithoutContent) {

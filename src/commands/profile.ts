@@ -97,8 +97,8 @@ export async function addProfile(
   }
 
   const profile: Partial<ModelConfig> = {
-    baseUrl,
-    model,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(model !== undefined ? { model } : {}),
   };
 
   if (apiKey) {

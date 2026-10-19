@@ -150,7 +150,7 @@ export function applyContextBudget(
 
   for (const { i } of trimOrder) {
     if (overflow <= 0) break;
-    const spend = spends[i];
+    const spend = spends[i]!;
 
     if (spend.tokens_requested <= overflow && spend.source !== NEVER_DROP_SOURCE) {
       // The whole source fits inside the overflow — drop it entirely.
@@ -169,7 +169,7 @@ export function applyContextBudget(
       `\n\n[... context source "${spend.source}" trimmed to ~${allowance} est. tokens ` +
       `(${CONTEXT_BUDGET_ENV_VAR}=${budgetTokens}) ...]`;
     const keepChars = Math.max(0, allowance * CHARS_PER_TOKEN - marker.length);
-    const trimmed = texts[i].slice(0, keepChars) + marker;
+    const trimmed = texts[i]!.slice(0, keepChars) + marker;
     texts[i] = trimmed;
     spend.truncated = true;
     spend.tokens_injected = estimateTokens(trimmed);

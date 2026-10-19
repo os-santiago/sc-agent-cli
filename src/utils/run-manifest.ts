@@ -123,7 +123,7 @@ const FINAL_MESSAGE_MAX = 4000;
 
 export interface RunManifestInput {
   exitReason: RunExitReason;
-  error?: string;
+  error?: string | undefined;
   version: string;
   model: string;
   sessionId: string;
@@ -136,24 +136,24 @@ export interface RunManifestInput {
   iterations: number;
   durationMs: number;
   checkpointPath: string | null;
-  devcontainer?: DevcontainerRunInfo;
-  provider?: string | null;
+  devcontainer?: DevcontainerRunInfo | undefined;
+  provider?: string | null | undefined;
   /** #424 phase segments + role fallbacks + per-role token usage. */
-  phases?: PhaseRecord[];
-  roleFallbacks?: AgentRole[];
-  roleTokens?: Partial<Record<AgentRole, RoleTokenUsage>>;
-  cachedTokens?: number;
+  phases?: PhaseRecord[] | undefined;
+  roleFallbacks?: AgentRole[] | undefined;
+  roleTokens?: Partial<Record<AgentRole, RoleTokenUsage>> | undefined;
+  cachedTokens?: number | undefined;
   /** #462 consensus outcome — terminal reviewer verdict + rework accounting. */
-  review?: { verdict: ReviewerVerdict; explicit: boolean; fixRounds: number; maxFixes: number };
+  review?: { verdict: ReviewerVerdict; explicit: boolean; fixRounds: number; maxFixes: number } | undefined;
   /** Raw run error — used to derive terminalResolution/errorClass/attempts. */
   errorObj?: unknown;
   /** Detected terminal resolution (#446) — supersedes the exitReason mapping when present. */
-  resolutionInfo?: ResolutionResult;
+  resolutionInfo?: ResolutionResult | undefined;
   /** Sandbox posture + violation list from the agent's SandboxRuntime (#423). */
-  sandbox?: SandboxRunInfo;
-  sandboxViolations?: SandboxViolation[];
+  sandbox?: SandboxRunInfo | undefined;
+  sandboxViolations?: SandboxViolation[] | undefined;
   /** Context-spend accounting from the injection budget guard (#422). */
-  contextBudget?: ContextBudgetReport | null;
+  contextBudget?: ContextBudgetReport | null | undefined;
 }
 
 export function buildRunManifest(input: RunManifestInput): RunManifest {
@@ -235,7 +235,7 @@ function errorFields(err: unknown): Pick<RunManifest, 'terminalResolution' | 'er
  */
 export function emitRunManifest(
   manifest: RunManifest,
-  options: { files?: Array<string | undefined>; onStdoutFlushed?: () => void } = {},
+  options: { files?: Array<string | undefined>; onStdoutFlushed?: (() => void) | undefined } = {},
 ): void {
   // #472: the manifest is a persisted artifact + stdout contract — redact
   // every string field (final_message, error, attempt traces) once here so
