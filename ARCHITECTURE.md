@@ -82,7 +82,7 @@ Abstraction over the LLM API. Currently implements `OpenAICompatibleProvider`:
 - **Request format**: `/v1/chat/completions` (OpenAI Messages API)
 - **Streaming**: Server-Sent Events (SSE) with incremental JSON deltas
 - **Tool calling**: Native function calling via `tools` parameter
-- **Platform**: Uses Node.js native `fetch` (v18+)
+- **Platform**: Uses Node.js native `fetch` (v20+, per `engines` in `package.json`)
 
 **Future**: Could add `AnthropicProvider`, `GoogleProvider`, etc., by implementing the same interface.
 
