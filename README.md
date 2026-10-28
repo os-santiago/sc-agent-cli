@@ -123,14 +123,29 @@ sc -yq "count .ts files in src/"
 During a chat session, you can use these commands:
 
 - `/help` - Show available commands and tools
-- `/model` - Switch to a different model profile
-- `/permissions` - Configure permission mode (ask once/always ask/unlimited)
-- `/pre-approved-commands` - Interactive setup wizard for auto-approved tools
-- `/reload` - Reload configuration from disk (apply profile changes)
 - `/clear` - Clear conversation history
+- `/undo` - Undo the last exchange (stack-based)
+- `/rollback <n>` - Rollback the conversation to message index `<n>`
+- `/session` - Export/import session context
+- `/checkpoint` - Save, list, or resume execution checkpoints for long runs
+- `/hud` - Toggle the compact status bar
+- `/env` - Environment diagnostic (detected tools, shell, versions)
+- `/probe` (alias `/repo`) - Auto-detect the repo toolchain, package manager, and commands
 - `/memory`, `/remember [--global] <text>` - Manage persistent memory (scoped per workspace — see [docs/memory.md](docs/memory.md))
+- `/permissions` - Configure permission mode (ask once/always ask/unlimited)
+- `/profile` - Switch permission profile (traditional/blacklist)
+- `/pre-approved-commands` - Interactive setup wizard for auto-approved tools
+- `/storage` - Show storage usage and cleanup options
+- `/reload` - Reload configuration from disk (apply profile changes)
+- `/config` - Show full configuration details
+- `/model` - Switch to a different model profile
 - `/info` - Show current model and configuration
 - `exit` or `quit` - End the session
+
+The full headless/automation flag surface (`--resume`, `--audit-log`,
+`--prompt-file`, `--max-steps`, `--max-seconds`, `--max-total-tokens`,
+`--livelock-threshold`, `--no-commit`, exit codes) is documented in
+[docs/non-interactive-mode.md](docs/non-interactive-mode.md).
 
 **Shell Commands:**
 
@@ -166,6 +181,76 @@ Use `sc init --force` to overwrite an existing `AGENTS.md`.
 ### `sc config-init`
 
 Create the global config file with default profiles.
+
+### `sc config`
+
+Show the full effective configuration (defaults, global config, project config,
+active profile, and environment overrides merged).
+
+### `sc doctor`
+
+Preflight diagnostics for headless/automation use: validates config, provider
+connectivity, API key presence, and the effective permission mode, then exits
+non-zero when a blocking problem is found. This is the automation entry point
+used by the AI-SDLC pipeline.
+
+**Options:**
+
+- `-m, --profile <profile>`: Check a specific profile as if passed to `chat`
+- `--permissions <mode>`: Permissions mode to evaluate: `ask_once`, `always_ask`, or `unlimited`
+
+### `sc resume`
+
+Show the most recent checkpoint for the current workspace and print a summary
+of the interrupted run (iterations, tool calls, timestamp). Run `sc chat`
+afterwards to continue — the checkpoint is restored automatically.
+
+To resume a *specific* run, use `sc chat --resume [ref]`, where `[ref]` is a
+session id, a checkpoint `.json` path, or `latest` (the default when the flag
+is bare):
+
+```bash
+sc resume                                # summary of the latest checkpoint
+sc chat --resume latest "continue"       # resume the latest checkpoint
+sc chat --resume <sessionId> "continue"
+sc chat --resume ~/.sc-agent/checkpoints/<id>.json "continue"
+```
+
+### `sc task <op>`
+
+Manage task templates and checklists in the current project.
+
+| Operation | Description |
+| --------- | ----------- |
+| `sc task create <template> <description>` | Create a task file from a template |
+| `sc task list` | List all tasks in the current project |
+| `sc task templates` | List available task templates |
+
+### `sc probe [path]`
+
+Detect the repository toolchain, package manager, and build/test/lint commands
+for `[path]` (defaults to the current directory) and print the resulting
+profile. The same engine powers the `/probe` chat command and the `repo_probe`
+tool.
+
+Aliases: `repo-profile`, `repo-probe`.
+
+**Options:**
+
+- `-j, --json`: Emit the structured repo profile as JSON
+- `-s, --save`: Save the profile to `.sc-agent/repo-profile.json`
+- `--no-cache`: Bypass the cache and force a fresh repository probe
+- `-q, --quiet`: Suppress terminal output
+- `--prompt`: Output formatted markdown for system-prompt injection
+
+### Headless / automation flags
+
+`sc chat` also accepts the non-interactive/automation flags: `--resume`,
+`--audit-log`, `--prompt-file`, `--max-steps`, `--max-seconds`,
+`--max-total-tokens`, `--livelock-threshold`, `--no-commit`, plus the
+documented exit codes. See
+[docs/non-interactive-mode.md](docs/non-interactive-mode.md) for the full table
+and [docs/exit-codes.md](docs/exit-codes.md) for the exit-code reference.
 
 ## Project Context
 
