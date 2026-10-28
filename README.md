@@ -187,14 +187,28 @@ Create one of these files in your project root to provide:
 
 ## Available Tools
 
-The agent has access to:
+The agent has access to 13 built-in tools:
 
-- **`read_file`**: Read file contents (auto-approved by default)
-- **`write_file`**: Create or overwrite files (requires permission)
-- **`edit_file`**: Apply unified diff patches (requires permission)
-- **`list_dir`**: List directory contents (auto-approved by default)
-- **`search_text`**: Search for text patterns with glob support (auto-approved by default)
-- **`run_shell`**: Execute shell commands (requires permission)
+**Read-only (auto-approved by default)**
+
+- **`read_file`**: Read file contents (supports `offset`/`limit` pagination)
+- **`list_dir`**: List directory contents
+- **`search_text`**: Search for text patterns with glob support
+- **`web_fetch`**: Fetch content from a public http(s) URL (SSRF-guarded)
+- **`memory_read`**: Recall persistent cross-session memory
+- **`code_query`**: Analyze a source file and return its classes, interfaces, methods, and function signatures
+- **`repo_probe`**: Probe the repository for manifests, toolchains, package managers, build/test/lint commands, CI workflows, and frameworks
+
+**Mutating (requires permission)**
+
+- **`write_file`**: Create or overwrite files
+- **`edit_file`**: Apply unified diff patches
+- **`run_shell`**: Execute shell commands
+- **`git`**: Execute native git operations (status, diff, log, show, branch, add, commit)
+- **`memory_write`**: Save persistent cross-session memory
+- **`mcp_validate`**: Test an MCP server by connecting and validating the initialize handshake
+
+Beyond the built-ins, `sc` can load external tools — [MCP servers](docs/mcp-servers.md) and [external tool plugins](docs/plugin-tools.md) — both gated by the same permission system as the built-ins.
 
 ## Security
 
