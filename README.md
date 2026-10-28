@@ -18,12 +18,23 @@ No dependency on a specific subscription or provider — configure your preferre
 
 Requires **Node.js >= 20.0.0** (tested on 20, 22, 24, and 26).
 
+The package is **install-from-source only** — it is not published to the npm
+registry (`package.json` sets `private: true` and a `files` whitelist of
+`bin/`, `dist/`, `README*`, `LICENSE*`).
+
 ```bash
 cd sc-cli
 npm install
 npm run build
 npm link  # Makes 'sc' available globally
 ```
+
+Released versions are tagged `v*.*.*` on `main` with a matching
+[GitHub Release](https://github.com/os-santiago/sc-agent-cli/releases) —
+checkout a tag, then run the same steps. Release notes are generated from
+conventional commits and maintained in `CHANGELOG.md` (the single source of
+truth; `docs/history/RELEASE-NOTES-*.md` are archived pre-automation
+snapshots). See `CONTRIBUTING.md` for the release flow.
 
 ## Quick Start
 

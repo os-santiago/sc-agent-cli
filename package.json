@@ -3,6 +3,13 @@
   "version": "0.4.2",
   "description": "Provider-agnostic CLI agent with tool use, compatible with any OpenAI-compatible API",
   "type": "module",
+  "private": true,
+  "files": [
+    "bin",
+    "dist",
+    "README*",
+    "LICENSE*"
+  ],
   "main": "dist/index.js",
   "bin": {
     "sc": "bin/sc.js",
