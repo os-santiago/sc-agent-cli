@@ -1,0 +1,17 @@
+name: ai-sdlc-probe
+on: [push, workflow_dispatch, pull_request]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: secret-resolution booleans (no values)
+        run: |
+          echo "AI_SDLC_APP_ID:            ${{ secrets.AI_SDLC_APP_ID != '' }}"
+          echo "AI_SDLC_APP_PRIVATE_KEY:   ${{ secrets.AI_SDLC_APP_PRIVATE_KEY != '' }}"
+          echo "AI_SDLC_LEDGER_KEY:        ${{ secrets.AI_SDLC_LEDGER_KEY != '' }}"
+          echo "AI_SDLC_TOKEN:             ${{ secrets.AI_SDLC_TOKEN != '' }}"
+          echo "MODEL_API_KEY:             ${{ secrets.MODEL_API_KEY != '' }}"
+          echo "NVIDIA_API_KEY:            ${{ secrets.NVIDIA_API_KEY != '' }}"
+          echo "vars.AI_SDLC_PROVIDER_URL: ${{ vars.AI_SDLC_PROVIDER_URL != '' }}"
+          echo "parent env ok"
