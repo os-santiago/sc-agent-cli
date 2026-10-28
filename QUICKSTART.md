@@ -10,7 +10,7 @@ Get up and running with SC-Agent CLI in 5 minutes.
 ## Installation
 
 ```bash
-cd sc-cli
+cd sc-agent-cli
 npm install
 npm run build
 npm link

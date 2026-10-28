@@ -92,7 +92,7 @@ sc
 ## Project Structure
 
 ```
-sc-cli/
+sc-agent-cli/
 ├── src/
 │   ├── cli.ts                 # Entry point
 │   ├── commands/              # CLI commands (chat, profile, init)

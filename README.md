@@ -19,7 +19,7 @@ No dependency on a specific subscription or provider — configure your preferre
 Requires **Node.js >= 20.0.0** (tested on 20, 22, 24, and 26).
 
 ```bash
-cd sc-cli
+cd sc-agent-cli
 npm install
 npm run build
 npm link  # Makes 'sc' available globally

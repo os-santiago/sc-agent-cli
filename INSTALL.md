@@ -16,7 +16,7 @@ If you need to upgrade Node, download it from [nodejs.org](https://nodejs.org) o
 ## Step 1: Install Dependencies
 
 ```bash
-cd sc-cli
+cd sc-agent-cli
 npm install
 ```
 
@@ -45,8 +45,8 @@ node bin/sc.js
 Or add an alias to your shell config:
 
 ```bash
-# In ~/.bashrc or ~/.zshrc
-alias sc='node /d/git/sc-cli/bin/sc.js'
+# In ~/.bashrc or ~/.zshrc (invoke from the repo root)
+alias sc='node "$(pwd)/bin/sc.js"'
 ```
 
 ## Step 4: Initialize Configuration
@@ -147,5 +147,5 @@ node bin/sc.js
 npm unlink  # If you used npm link
 rm -rf ~/.sc  # Remove global config
 cd ..
-rm -rf sc-cli
+rm -rf sc-agent-cli
 ```
