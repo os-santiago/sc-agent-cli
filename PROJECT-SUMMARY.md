@@ -188,7 +188,7 @@ Any **OpenAI-compatible** endpoint:
 
 ## License
 
-MIT — free to use, modify, and distribute.
+Apache License 2.0 — free to use, modify, and distribute. See [LICENSE](LICENSE) for details.
 
 ## Credits
 
