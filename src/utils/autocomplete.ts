@@ -111,7 +111,7 @@ function autocompleteFilePath(line: string, workspaceRoot: string): string[] {
   const pathMatch = line.match(/(?:^|\s)(\.{0,2}\/[^\s]*|~\/[^\s]*|[a-zA-Z]:[^\s]*)/);
   if (!pathMatch) return [];
 
-  let partialPath = pathMatch[1];
+  let partialPath = pathMatch[1]!;
   let basePath = workspaceRoot;
 
   // Handle different path types

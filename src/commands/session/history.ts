@@ -54,7 +54,7 @@ export const handleRollback: SlashCommandHandler = async (ctx, input) => {
     console.log(chalk.yellow('\n⚠ Usage: /rollback <message_index>\n'));
     return true;
   }
-  const idx = parseInt(args[1], 10);
+  const idx = parseInt(args[1]!, 10);
   if (idx < 0 || idx >= ctx.history.length) {
     console.log(chalk.yellow(`\n⚠ Index must be 0-${ctx.history.length - 1}\n`));
     return true;

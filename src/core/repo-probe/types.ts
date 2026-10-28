@@ -1,41 +1,41 @@
 export interface ToolchainInfo {
   name: string;
-  version?: string;
-  rawSpec?: string;
-  sourceFile?: string;
+  version?: string | undefined;
+  rawSpec?: string | undefined;
+  sourceFile?: string | undefined;
 }
 
 export interface PackageManagerInfo {
   name: string;
-  version?: string;
-  lockfile?: string;
-  sourceFile?: string;
+  version?: string | undefined;
+  lockfile?: string | undefined;
+  sourceFile?: string | undefined;
 }
 
 export interface FrameworkInfo {
   name: string;
   category: 'test' | 'build' | 'lint' | 'web' | 'typecheck' | 'other';
-  version?: string;
-  sourceFile?: string;
+  version?: string | undefined;
+  sourceFile?: string | undefined;
 }
 
 export interface RepoCommands {
-  install?: string;
-  build?: string;
-  test?: string;
-  lint?: string;
-  typecheck?: string;
-  verify?: string;
-  clean?: string;
-  start?: string;
-  custom?: Record<string, string>;
+  install?: string | undefined;
+  build?: string | undefined;
+  test?: string | undefined;
+  lint?: string | undefined;
+  typecheck?: string | undefined;
+  verify?: string | undefined;
+  clean?: string | undefined;
+  start?: string | undefined;
+  custom?: Record<string, string> | undefined;
 }
 
 export interface CIStep {
-  name?: string;
-  run?: string;
-  uses?: string;
-  with?: Record<string, string>;
+  name?: string | undefined;
+  run?: string | undefined;
+  uses?: string | undefined;
+  with?: Record<string, string> | undefined;
 }
 
 export interface CIWorkflow {
@@ -86,12 +86,12 @@ export interface RepoProfile {
   /** true when `.devcontainer.json` or `.devcontainer/devcontainer.json` exists (#421). */
   devcontainer: boolean;
   /** Workspace-relative path to the devcontainer config file when detected. */
-  devcontainerPath?: string;
+  devcontainerPath?: string | undefined;
   /** Parsed devcontainer configuration details when the file could be read. */
-  devcontainerInfo?: DevcontainerInfo;
+  devcontainerInfo?: DevcontainerInfo | undefined;
   manifests: string[];
-  rawFindings?: UnknownEcosystemFindings;
-  notes?: string[];
+  rawFindings?: UnknownEcosystemFindings | undefined;
+  notes?: string[] | undefined;
 }
 
 export interface ProbeOptions {

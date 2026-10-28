@@ -325,7 +325,7 @@ function extractGo(lines: string[]): RepoMapExtraction {
       }
       if (parenBlock === 'import') {
         const m = /^(?:[\w.]*\s+)?"([^"]+)"/.exec(line);
-        if (m) imports.add(m[1]);
+        if (m) imports.add(m[1]!);
       } else if (!line.startsWith('//')) {
         push(raw); // `Name type` / `Name = value` inside a grouped decl
       }
@@ -339,7 +339,7 @@ function extractGo(lines: string[]): RepoMapExtraction {
     }
     const singleImport = /^import\s+(?:[\w.]*\s+)?"([^"]+)"/.exec(line);
     if (singleImport) {
-      imports.add(singleImport[1]);
+      imports.add(singleImport[1]!);
       continue;
     }
     if (
@@ -399,7 +399,7 @@ function scanLines(lines: string[], spec: LanguageScanner): RepoMapExtraction {
     for (const re of spec.imports) {
       const m = re.exec(line);
       if (m) {
-        for (const part of m[1].split(',')) {
+        for (const part of m[1]!.split(',')) {
           const s = part.trim();
           if (s) imports.add(s);
         }
@@ -522,6 +522,7 @@ export async function generateRepoMap(
       continue; // unreadable file — skip
     }
     const extractor = EXTRACTOR_BY_EXT[path.extname(rel).toLowerCase()];
+    if (!extractor) continue; // extension without a registered extractor
     const ex = extractor(content.split('\n'));
     const remaining = maxTotalLines - lines.length;
     const block = renderFileBlock(rel, ex, maxLinesPerFile);

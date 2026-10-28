@@ -8,7 +8,7 @@ const CONTEXT_FILES = ['AGENTS.md', 'SC-AGENT.md', 'CLAUDE.md'];
 // Cache to avoid re-reading context files in the same session
 interface ContextCache {
   workspaceRoot: string;
-  policyFile?: string;
+  policyFile?: string | undefined;
   content: string | null;
 }
 

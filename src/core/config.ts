@@ -119,7 +119,7 @@ export interface LoadConfigOptions {
    * The stderr warning is unconditional; without this flag nothing is
    * persisted.
    */
-  auditLog?: string;
+  auditLog?: string | undefined;
 }
 
 export async function loadConfig(

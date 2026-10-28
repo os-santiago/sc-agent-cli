@@ -192,7 +192,7 @@ export class PhaseTracker {
       this.records.push({ role: open.role, provider, model, iterations: 0, label: candidateId });
       this.openIdx = this.records.length - 1;
     }
-    this.records[this.openIdx].iterations++;
+    this.records[this.openIdx]!.iterations++;
   }
 
   end(): void {
@@ -260,14 +260,14 @@ export function parseReviewerVerdict(text: string | null | undefined): ReviewerD
   const comments = (text ?? '').trim();
   let verdict: ReviewerVerdict | null = null;
   for (const m of comments.matchAll(/\bverdict\s*[:=]\s*([^\n]+)/gi)) {
-    const value = m[1];
+    const value = m[1]!;
     if (VERDICT_REQUEST_VALUE_RE.test(value)) verdict = 'request_changes';
     else if (VERDICT_APPROVE_VALUE_RE.test(value)) verdict = 'approve';
   }
   if (verdict) return { verdict, comments, explicit: true };
   const lines = comments.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
+    const line = lines[i]!;
     if (REQUEST_CHANGES_LINE_RE.test(line)) return { verdict: 'request_changes', comments, explicit: false };
     if (APPROVE_LINE_RE.test(line)) return { verdict: 'approve', comments, explicit: false };
   }
@@ -304,7 +304,7 @@ export function buildReworkPrompt(task: string, reviewComments: string, round: n
 
 function lastAssistantText(history: Message[]): string {
   for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i];
+    const m = history[i]!;
     if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) return m.content;
   }
   return '';

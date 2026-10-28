@@ -4,9 +4,9 @@ import type { SandboxRuntime } from '../utils/sandbox.js';
 export interface ToolContext {
   workspaceRoot: string;
   config: ProjectConfig;
-  autoApprove?: boolean;
+  autoApprove?: boolean | undefined;
   /** Sandboxed execution runtime (#423) — present when `sandbox.enabled`. */
-  sandbox?: SandboxRuntime;
+  sandbox?: SandboxRuntime | undefined;
 }
 
 export interface Tool {

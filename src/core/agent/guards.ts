@@ -20,7 +20,7 @@ export const MAX_CONSECUTIVE_EMPTY_RESPONSES = 3;
 export const EMPTY_RESPONSE_REPROMPT =
   `[The assistant returned an empty response. Respond to the user's request: output something helpful or call a tool. Do NOT return an empty message.]`;
 
-export function isEmptyModelResponse(response: { content?: string | null; tool_calls?: readonly unknown[] | null }): boolean {
+export function isEmptyModelResponse(response: { content?: string | null | undefined; tool_calls?: readonly unknown[] | null | undefined }): boolean {
   return (!response.content || response.content.trim() === '') &&
     (!response.tool_calls || response.tool_calls.length === 0);
 }
@@ -73,7 +73,7 @@ export interface ProseSignals {
 }
 
 /** Classify a no-tool-call assistant response for the self-heal decision. */
-export function analyzeProseResponse(content: string, opts: { autoApprove?: boolean; hasToolRun: boolean }): ProseSignals {
+export function analyzeProseResponse(content: string, opts: { autoApprove?: boolean | undefined; hasToolRun: boolean }): ProseSignals {
   const hasConversationalGreeting = /\b(hello|hi|hey|how are you|doing well|ready to help|what would you like|how can i help|nice to meet|greetings)\b/i.test(content);
   const hasFutureAction = /\b(i will|i'll|i am going to|let's|let me|i need to|i should|i plan to|first, I|first, let)\b/i.test(content);
   return {
@@ -108,10 +108,10 @@ export function buildSelfHealReprompt(opts: {
   selfHealCount: number;
   iteration: number;
   toolsUsed: ToolUseRecord[];
-  autoApprove?: boolean;
+  autoApprove?: boolean | undefined;
   isFutureIntention: boolean;
   isDeferring: boolean;
-  maxSelfHeal?: number;
+  maxSelfHeal?: number | undefined;
 }): string {
   const max = opts.maxSelfHeal ?? MAX_SELF_HEAL;
   const triedTools = [...new Set(opts.toolsUsed.filter(t => !t.success).map(t => t.name))].join(', ');
