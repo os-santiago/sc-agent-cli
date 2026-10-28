@@ -60,6 +60,8 @@ When multiple API keys are set, the priority is:
 
 Overrides `model.baseUrl` — the OpenAI-compatible endpoint the agent talks to. Wins over the active profile and both config files; the value is validated with `new URL()` at startup, so an invalid URL fails config validation with the same error as a bad config-file value.
 
+**Type:** absolute `http(s)` URL string
+
 **Default:** unset (uses `model.baseUrl` from config/profile)
 
 ```bash
@@ -67,6 +69,8 @@ Overrides `model.baseUrl` — the OpenAI-compatible endpoint the agent talks to.
 export SC_BASE_URL="https://models.github.ai/inference"
 scc chat
 ```
+
+> **Workspace note:** `model.baseUrl` is a *privileged* key, so it cannot be set from project-scoped config (a `.sc-agent.json` merged from inside the workspace). `SC_BASE_URL` is an environment override, so it still applies — but be aware that rerouting the endpoint while a global/env `apiKey` is set sends that credential to the new host. See [Workspace trust boundary](#workspace-trust-boundary-469).
 
 ---
 
@@ -87,12 +91,16 @@ scc chat
 
 Overrides `activeProfile` — selects which entry of `profiles` is merged into `model.*`. Only applied when the named profile exists in `config.profiles`; an unknown name is ignored.
 
+**Type:** profile name (string); equivalent of `--profile` / `-m`. The CLI flag wins when both are set.
+
 **Default:** unset (uses `activeProfile` from config)
 
 ```bash
 export SC_PROFILE=nvidia
 scc chat
 ```
+
+> **Workspace note:** a profile's `baseUrl`/`apiKey` are *privileged* keys, so a project-scoped config cannot define them — but `SC_PROFILE` still activates a profile whose credentials come from the global config or env. See [Workspace trust boundary](#workspace-trust-boundary-469).
 
 ---
 
@@ -248,7 +256,11 @@ Controls the maximum number of agent iterations before stopping. Each iteration 
 3. Processes results
 4. Decides next action
 
+**Type:** positive integer (iteration count); invalid values fall back to the default.
+
 **Default:** `100`
+
+> **Budget flags take precedence for headless runs:** `SC_MAX_STEPS` / `SC_MAX_SECONDS` / `SC_MAX_TOTAL_TOKENS` (and their `--max-*` flags) stop a run *before* this iteration cap is normally reached, so `SC_MAX_ITERATIONS` is the coarse outer bound rather than the knob to reach for in automation. See [non-interactive-mode.md](non-interactive-mode.md) for the headless execution model.
 
 ---
 
@@ -362,13 +374,15 @@ Oldest files are automatically deleted to bring usage down to 90% of the limit.
 
 Stops the run gracefully after N tool executions. Equivalent of `--max-steps <n>`; the flag wins when both are set. Must be a positive integer — anything else is a usage error.
 
+**Type:** positive integer (tool-execution count)
+
 **Default:** unset (no step cap)
 
 ```bash
 SC_MAX_STEPS=25 scc chat -yq "triage issue #123"
 ```
 
-On exhaustion the run ends gracefully: partial work is preserved, an `SC_BUDGET_EXCEEDED steps` marker is emitted, and the process exits with code **22** (see [Headless output markers](#headless-output-markers)).
+On exhaustion the run ends gracefully: partial work is preserved, an `SC_BUDGET_EXCEEDED steps` marker is emitted, and the run exits with code **22** (see [Headless output markers](#headless-output-markers) and [non-interactive-mode.md](non-interactive-mode.md#exit-codes)).
 
 ---
 
@@ -376,13 +390,15 @@ On exhaustion the run ends gracefully: partial work is preserved, an `SC_BUDGET_
 
 Stops the run gracefully after N seconds of wall-clock time. Equivalent of `--max-seconds <n>`; the flag wins when both are set. Must be a positive integer — anything else is a usage error.
 
+**Type:** positive integer (wall-clock seconds)
+
 **Default:** unset (no time cap)
 
 ```bash
 SC_MAX_SECONDS=300 scc chat -yq "update the changelog"
 ```
 
-On exhaustion the run emits `SC_BUDGET_EXCEEDED seconds` and exits with code **22**.
+On exhaustion the run emits `SC_BUDGET_EXCEEDED seconds` and exits with code **22** (see [non-interactive-mode.md](non-interactive-mode.md#exit-codes)).
 
 ---
 
@@ -390,13 +406,15 @@ On exhaustion the run emits `SC_BUDGET_EXCEEDED seconds` and exits with code **2
 
 Stops the run gracefully when estimated session tokens exceed N (chars/4 heuristic, covering the whole conversation including tool outputs). Equivalent of `--max-total-tokens <n>`; the flag wins when both are set. Must be a positive integer — anything else is a usage error.
 
+**Type:** positive integer (estimated token count)
+
 **Default:** unset (no token cap)
 
 ```bash
 SC_MAX_TOTAL_TOKENS=200000 scc chat -yq "refactor the provider layer"
 ```
 
-On exhaustion the run emits `SC_BUDGET_EXCEEDED tokens` and exits with code **22**.
+On exhaustion the run emits `SC_BUDGET_EXCEEDED tokens` and exits with code **22** (see [non-interactive-mode.md](non-interactive-mode.md#exit-codes)).
 
 ---
 
@@ -404,7 +422,11 @@ On exhaustion the run emits `SC_BUDGET_EXCEEDED tokens` and exits with code **22
 
 Forces the interactive status bar (HUD) on or off — wins over `settings.hud` in config.
 
+**Type:** boolean-ish string (see accepted values)
+
 **Accepted values:** `1` or `true` (case-insensitive) enables; any other set value (e.g. `0`, `false`) disables.
+
+**Parallel config:** `settings.hud` in config, or the interactive `/hud` command (which reports the current state and how to override it via `SC_HUD`).
 
 **Default:** unset (uses `settings.hud`, which defaults to enabled)
 
