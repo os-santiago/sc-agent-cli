@@ -1,0 +1,81 @@
+name: Release
+
+# Release artifact pipeline (#468): on a pushed v*.*.* tag, build the packed
+# npm artifact, generate a CycloneDX SBOM, and publish SLSA build-provenance
+# + SBOM attestations (Sigstore, verifiable via `gh attestation verify`).
+# Additive only — ci.yml / security-scan.yml / pr-security-checks.yml are
+# untouched, and attestations live in the repo's attestation store, never in
+# the git tree.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write     # upload release assets (tarball + SBOM)
+  id-token: write     # Sigstore OIDC identity for attestation signing
+  attestations: write # publish attestations to the repository
+
+jobs:
+  release:
+    name: build, attest, publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Pack the npm artifact as dist/scc-<version>.tgz
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          npm pack --pack-destination dist
+          mv "dist/sc-agent-cli-${V}.tgz" "dist/scc-${V}.tgz"
+          ls -la "dist/scc-${V}.tgz"
+
+      - name: Generate CycloneDX SBOM (dist/bom.json)
+        shell: bash
+        run: |
+          # Shipped-artifact SBOM: runtime deps only (dev deps never reach the
+          # packed tarball), resolved deterministically from package-lock.json.
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1 \
+            --output-format JSON \
+            --output-file dist/bom.json \
+            --package-lock-only \
+            --omit dev
+          test -s dist/bom.json
+
+      - name: Attest build provenance (tarball + SBOM)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/scc-*.tgz
+            dist/bom.json
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          sbom-path: dist/bom.json
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          # The GitHub Release may not exist yet for a manually pushed tag —
+          # create it (auto notes) as a fallback; release-please-managed
+          # releases already exist and are left untouched.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" "dist/scc-${V}.tgz" dist/bom.json --clobber

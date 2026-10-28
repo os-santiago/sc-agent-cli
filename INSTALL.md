@@ -141,6 +141,27 @@ Then in another terminal:
 node bin/sc.js
 ```
 
+## Verifying Release Artifacts
+
+Every `v*.*.*` tag runs `.github/workflows/release.yml`, which publishes two
+release assets — `scc-<version>.tgz` (the packed npm artifact) and `bom.json`
+(CycloneDX SBOM) — plus Sigstore attestations for both (build provenance and
+SBOM predicate). Verify provenance before installing:
+
+```bash
+# Download the release assets
+gh release download v0.4.2 -R os-santiago/sc-agent-cli -p 'scc-*.tgz' -p 'bom.json'
+
+# Verify the packed artifact's build provenance
+gh attestation verify scc-0.4.2.tgz -R os-santiago/sc-agent-cli
+
+# Verify the SBOM attestation
+gh attestation verify bom.json -R os-santiago/sc-agent-cli
+```
+
+A successful verification resolves the artifact to this repository's
+workflow identity; any tampering or re-upload fails the check.
+
 ## Uninstalling
 
 ```bash
