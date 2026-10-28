@@ -23,6 +23,6 @@ Closes #
 - [ ] Tests added or updated for behavior changes (colocated `src/**/*.test.ts`, vitest)
 - [ ] User-facing docs updated (`README.md`, `docs/`, `AGENTS.md`) and a `CHANGELOG.md` entry added under `Unreleased` when the change is user-visible
 - [ ] New code is lint-clean (`npx eslint .`)
-- [ ] No secrets, API keys, or credentials committed — see [SECURITY.md](SECURITY.md)
+- [ ] No secrets, API keys, or credentials committed — see [SECURITY.md](../SECURITY.md)
 
 <!-- CI also runs CodeQL, dependency review, and PR security scans — see CONTRIBUTING.md if a flagged pattern is intentional. -->
