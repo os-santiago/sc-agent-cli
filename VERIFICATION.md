@@ -115,11 +115,11 @@ $ node bin/sc.js config-init
 ```
 
 **Result**: ✅ Success
-- Created `~/.sc/config.json`
+- Created `~/.sc-agent/config.json`
 - Config file has correct structure
 - Default profiles loaded (ollama, openai, anthropic)
 
-**Config File Location**: `~/.sc/config.json`
+**Config File Location**: `~/.sc-agent/config.json`
 
 **Config Structure**: ✅ Valid
 ```json
