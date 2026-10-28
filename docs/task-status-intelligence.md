@@ -240,10 +240,15 @@ lee el archivo config.json y modifícalo
 │ ⚠️ Task incomplete - iteration limit reached
 │
 │    The task may not be fully complete.
-│    Reached maximum 10 iterations.
+│    Reached maximum 100 iterations.
 │    Consider increasing SC_MAX_ITERATIONS if needed.
 └─────────────────────────────────────────────────────────┘
 ```
+
+> El límite por defecto es `SC_MAX_ITERATIONS=100`. Para runs headless acotados por
+> presupuesto usa `--max-steps <n>` (o `SC_MAX_STEPS`) y `--max-seconds <n>` (o
+> `SC_MAX_SECONDS`); ambos detienen el run de forma ordenada antes de agotar el
+> límite de iteraciones.
 
 ---
 
@@ -253,7 +258,7 @@ lee el archivo config.json y modifícalo
 │ ❌ Task incomplete - iteration limit reached with errors
 │
 │    The task could not be completed due to:
-│    • Hit maximum iterations (10)
+│    • Hit maximum iterations (100)
 │    • Encountered 3 error(s)
 └─────────────────────────────────────────────────────────┘
 ```
@@ -406,10 +411,14 @@ Pero en algunos casos `exit code 1` SÍ es bloqueante (ej: `git clone` falló).
 
 ### Test 1: Revisión GitHub
 ```bash
-scc chat --unlimited "revisa PRs en https://github.com/owner/repo/pulls"
+scc chat -y "revisa PRs en https://github.com/owner/repo/pulls"
 ```
 
 **Esperado:** ✅ Completed with notes (si hay PR not found o can't approve)
+
+> `-y` (`--yes`) auto-aprueba todas las ejecuciones de herramientas. Para elegir el modo de
+> permisos explícitamente usa `--permissions ask_once|always_ask|unlimited`, o cámbialo dentro
+> de la sesión con `/permissions` (ver [permissions-command.md](permissions-command.md)).
 
 ---
 
@@ -443,8 +452,10 @@ scc chat "escribe en /etc/passwd"
 ## Ver También
 
 - [README.md](../README.md) - Documentación principal
-- [permissions.md](permissions.md) - Sistema de permisos
-- [error-handling.md](error-handling.md) - Manejo de errores
+- [permissions-command.md](permissions-command.md) - Modos de permisos (`/permissions`)
+- [permission-profiles.md](permission-profiles.md) - Perfiles de permisos
+- [loop-detection.md](loop-detection.md) - Detección de errores repetidos
+- [exit-codes.md](exit-codes.md) - Contrato de códigos de salida
 
 ---
 

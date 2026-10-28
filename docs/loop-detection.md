@@ -535,7 +535,8 @@ El warning sugiere "need for a different approach", incentivando al usuario a:
 
 - [github-merge-workflow.md](github-merge-workflow.md) - GitHub PR merge workflow
 - [task-status-intelligence.md](task-status-intelligence.md) - Clasificación de errores
-- [permissions.md](permissions.md) - Sistema de permisos
+- [permissions-command.md](permissions-command.md) - Modos de permisos (`/permissions`)
+- [permission-profiles.md](permission-profiles.md) - Perfiles de permisos
 
 ---
 

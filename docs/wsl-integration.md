@@ -511,7 +511,8 @@ wsl
 ## Ver También
 
 - [github-merge-workflow.md](github-merge-workflow.md) - GitHub PR merge workflow
-- [permissions.md](permissions.md) - Permission system
+- [permissions-command.md](permissions-command.md) - Permission modes (`/permissions`)
+- [permission-profiles.md](permission-profiles.md) - Permission profiles
 - [README.md](../README.md) - Main documentation
 
 ---
