@@ -381,7 +381,9 @@ describe.skipIf(!hasBwrap())('run_shell inside a real bwrap sandbox', () => {
     const { ctx, rt } = sandboxedCtx();
     try {
       await assert.rejects(
-        exec({ command: 'touch /etc/sc-agent-probe-marker' }, ctx),
+        // LC_ALL=C keeps the child's errno text English so the fs-violation
+        // stderr regex matches regardless of the developer's locale (#574).
+        exec({ command: 'LC_ALL=C touch /etc/sc-agent-probe-marker' }, ctx),
         (err: unknown) => {
           assert.ok(err instanceof Error);
           assert.match(err.message, /Command exited with code/);
