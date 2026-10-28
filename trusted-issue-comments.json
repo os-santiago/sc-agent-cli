@@ -1,0 +1,26 @@
+[
+  {
+    "body": "<!-- ai-sdlc:refinement fp:\"6f70a1fedd91c688\" status:\"ready\" armed:\"false\" -->\n✅ **AI-SDLC intake — spec satisfies the Definition of Ready.** Derived acceptance criteria:\n\n- [ ] All files listed under **Where** are updated as described in **Fix**.\n- [ ] Every command under **Verification** returns the result stated in the comment of that command.\n- [ ] The change is documentation-only: no files under `src/` are modified, `npm run build` remains green.\n- [ ] Cross-references (links) introduced or edited resolve to existing files in the repo.\n\nApply `ready-to-implement` to queue this issue for implementation.",
+    "created_at": "2026-10-28T02:26:23Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `6f70a1fedd91`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=6f70a1fedd91c68869a261e8e141831f2b1b5629ace5511e5624fdcaead4538e -->",
+    "created_at": "2026-10-28T02:26:30Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T02:38:25.364Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:pr-opened`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:pr-opened` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T02:38:26Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `6f70a1fedd91`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=6f70a1fedd91c68869a261e8e141831f2b1b5629ace5511e5624fdcaead4538e -->",
+    "created_at": "2026-10-28T02:56:42Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T02:57:09.386Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:queued`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:queued` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T02:57:09Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `6f70a1fedd91`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=6f70a1fedd91c68869a261e8e141831f2b1b5629ace5511e5624fdcaead4538e -->",
+    "created_at": "2026-10-28T14:16:38Z"
+  }
+]
