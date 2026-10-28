@@ -349,6 +349,20 @@ export SC_BASE_URL="https://api.openai.com/v1"
 sc "analyze this code"
 ```
 
+Execution budgets are especially useful for unattended runs — they stop the
+agent gracefully (exit **22**, `SC_BUDGET_EXCEEDED <dimension>` marker) instead
+of letting it run unbounded:
+
+```bash
+export SC_MAX_STEPS=25             # max tool executions
+export SC_MAX_SECONDS=300          # max wall-clock seconds
+export SC_MAX_TOTAL_TOKENS=200000  # max estimated session tokens
+```
+
+See [`docs/environment-variables.md`](environment-variables.md) for the full
+variable reference (`SC_MAX_STEPS`, `SC_MAX_SECONDS`, `SC_MAX_TOTAL_TOKENS`,
+`SC_PROFILE`, `SC_HUD`, `SC_MAX_ITERATIONS`, …).
+
 ---
 
 ## Exit Codes
