@@ -387,4 +387,4 @@ The agent requires explicit permission for sensitive operations (write, edit, sh
 
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

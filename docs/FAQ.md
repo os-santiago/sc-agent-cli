@@ -315,11 +315,11 @@ This creates a single executable with Node + your code bundled.
 
 ### What license is this?
 
-MIT License — free to use, modify, and distribute.
+Apache License 2.0 — free to use, modify, and distribute. See [LICENSE](../LICENSE) for details.
 
 ### Can I use this commercially?
 
-Yes, the MIT license allows commercial use.
+Yes, the Apache License 2.0 permits commercial use.
 
 ### Can I fork and modify?
 
