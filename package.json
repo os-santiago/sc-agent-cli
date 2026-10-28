@@ -43,7 +43,7 @@
   "author": "Sergio Canales",
   "license": "Apache-2.0",
   "dependencies": {
-    "chalk": "^5.3.0",
+    "chalk": "^6.0.1",
     "commander": "^12.0.0",
     "diff": "^5.2.0",
     "ignore": "^5.3.0",
