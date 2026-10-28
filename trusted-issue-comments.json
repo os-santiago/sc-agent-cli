@@ -1,0 +1,38 @@
+[
+  {
+    "body": "<!-- ai-sdlc:refinement fp:\"c555b81b4b896595\" status:\"ready\" armed:\"false\" -->\n✅ **AI-SDLC intake — spec satisfies the Definition of Ready.** Derived acceptance criteria:\n\n- [ ] All files listed under **Where** are updated as described in **Fix**.\n- [ ] Every command under **Verification** returns the result stated in the comment of that command.\n- [ ] The change is documentation-only: no files under `src/` are modified, `npm run build` remains green.\n- [ ] Cross-references (links) introduced or edited resolve to existing files in the repo.\n\nApply `ready-to-implement` to queue this issue for implementation.",
+    "created_at": "2026-10-28T02:26:17Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `c555b81b4b89`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=c555b81b4b896595b6466e4d82101d439bac96f24cca04588e67a69c8ec4494c -->",
+    "created_at": "2026-10-28T02:26:24Z"
+  },
+  {
+    "body": "ai-sdlc: the engine exhausted its bounded budget before finishing (exit 22, stall class `budget`) — re-scope the issue into a smaller task or raise `engine.max_seconds`/`engine.max_steps` in .ai-sdlc.yaml, then re-apply the trigger label. Run: https://github.com/os-santiago/sc-agent-cli/actions/runs/40620903920",
+    "created_at": "2026-10-28T02:42:31Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T02:42:42.564Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:not-ready`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:not-ready` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T02:42:43Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `c555b81b4b89`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=c555b81b4b896595b6466e4d82101d439bac96f24cca04588e67a69c8ec4494c -->",
+    "created_at": "2026-10-28T02:56:37Z"
+  },
+  {
+    "body": "ai-sdlc: the engine exhausted its bounded budget before finishing (exit 22, stall class `budget`) — re-scope the issue into a smaller task or raise `engine.max_seconds`/`engine.max_steps` in .ai-sdlc.yaml, then re-apply the trigger label. Run: https://github.com/os-santiago/sc-agent-cli/actions/runs/40623813844",
+    "created_at": "2026-10-28T03:12:28Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T03:12:39.587Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:not-ready`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:not-ready` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T03:12:40Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `c555b81b4b89`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=c555b81b4b896595b6466e4d82101d439bac96f24cca04588e67a69c8ec4494c -->",
+    "created_at": "2026-10-28T14:16:32Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T14:16:47.886Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:queued`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:queued` first, then re-apply the trigger.\n\nThis forbidden pair reappeared after prior repairs — applied `needs-human`\n(cause: `label-drift-loop`) instead of fighting silently.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T14:16:48Z"
+  }
+]
