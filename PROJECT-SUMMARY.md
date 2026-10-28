@@ -84,7 +84,7 @@ sc profile use ollama
 sc
 
 # Use with OpenAI
-# Edit ~/.sc/config.json with your API key
+# Edit ~/.sc-agent/config.json with your API key
 sc profile use openai
 sc
 ```

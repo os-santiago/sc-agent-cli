@@ -144,8 +144,8 @@ node bin/sc.js
 ## Uninstalling
 
 ```bash
-npm unlink  # If you used npm link
-rm -rf ~/.sc  # Remove global config
+npm unlink -g sc-agent-cli  # If you used npm link (or: npm rm -g sc-agent-cli)
+rm -rf ~/.sc-agent  # Remove global config, memory, and checkpoints
 cd ..
 rm -rf sc-cli
 ```
