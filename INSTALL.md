@@ -55,7 +55,7 @@ alias sc='node /d/git/sc-cli/bin/sc.js'
 sc config-init
 ```
 
-This creates `~/.sc-agent/config.json` with default profiles (Ollama, OpenAI, Anthropic).
+This creates `~/.sc-agent/config.json` with 5 pre-configured profiles (ollama, openai, anthropic, nvidia, llama-3.3-70b).
 
 ## Step 5: Configure Your Model
 

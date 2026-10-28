@@ -33,7 +33,7 @@ npm link  # Makes 'sc' available globally
 sc config-init
 ```
 
-This creates `~/.sc-agent/config.json` with default profiles (Ollama, OpenAI, Anthropic).
+This creates `~/.sc-agent/config.json` with 5 pre-configured profiles (ollama, openai, anthropic, nvidia, llama-3.3-70b).
 
 ### 2. Configure your preferred model
 
@@ -165,7 +165,7 @@ Use `sc init --force` to overwrite an existing `AGENTS.md`.
 
 ### `sc config-init`
 
-Create the global config file with default profiles.
+Create the global config file with 5 pre-configured profiles (ollama, openai, anthropic, nvidia, llama-3.3-70b).
 
 ## Project Context
 
