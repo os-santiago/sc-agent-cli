@@ -490,7 +490,7 @@ $ sc -q "analyze entire codebase" | head -20
 
 - [README.md](../README.md) - Main documentation
 - [QUICKSTART.md](../QUICKSTART.md) - Getting started guide
-- [permissions.md](permissions.md) - Permission system
+- [permission-profiles.md](permission-profiles.md) - Permission system
 
 ---
 

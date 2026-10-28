@@ -443,8 +443,8 @@ scc chat "escribe en /etc/passwd"
 ## Ver También
 
 - [README.md](../README.md) - Documentación principal
-- [permissions.md](permissions.md) - Sistema de permisos
-- [error-handling.md](error-handling.md) - Manejo de errores
+- [permission-profiles.md](permission-profiles.md) - Sistema de permisos
+- [loop-detection.md](loop-detection.md) - Manejo de errores (detección de loops)
 
 ---
 

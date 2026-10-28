@@ -1,0 +1,46 @@
+[
+  {
+    "body": "<!-- ai-sdlc:refinement fp:\"b7036d4cdb236e24\" status:\"ready\" armed:\"false\" -->\n✅ **AI-SDLC intake — spec satisfies the Definition of Ready.** Derived acceptance criteria:\n\n- [ ] All files listed under **Where** are updated as described in **Fix**.\n- [ ] Every command under **Verification** returns the result stated in the comment of that command.\n- [ ] The change is documentation-only: no files under `src/` are modified, `npm run build` remains green.\n- [ ] Cross-references (links) introduced or edited resolve to existing files in the repo.\n\nApply `ready-to-implement` to queue this issue for implementation.",
+    "created_at": "2026-10-28T02:26:07Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `b7036d4cdb23`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=b7036d4cdb236e242a7d4797beb65c924ea1ea8c31728b49c6220144b36e6e2d -->",
+    "created_at": "2026-10-28T02:26:13Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T02:26:31.406Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:queued`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:queued` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T02:26:32Z"
+  },
+  {
+    "body": "ai-sdlc: the engine exhausted its bounded budget before finishing (exit 22, stall class `budget`) — re-scope the issue into a smaller task or raise `engine.max_seconds`/`engine.max_steps` in .ai-sdlc.yaml, then re-apply the trigger label. Run: https://github.com/os-santiago/sc-agent-cli/actions/runs/40620890215",
+    "created_at": "2026-10-28T02:41:49Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `b7036d4cdb23`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=b7036d4cdb236e242a7d4797beb65c924ea1ea8c31728b49c6220144b36e6e2d -->",
+    "created_at": "2026-10-28T02:56:29Z"
+  },
+  {
+    "body": "ai-sdlc: the engine exhausted its bounded budget before finishing (exit 22, stall class `budget`) — re-scope the issue into a smaller task or raise `engine.max_seconds`/`engine.max_steps` in .ai-sdlc.yaml, then re-apply the trigger label. Run: https://github.com/os-santiago/sc-agent-cli/actions/runs/40623803827",
+    "created_at": "2026-10-28T03:12:15Z"
+  },
+  {
+    "body": "⚖️ **AI-SDLC label-contradiction repair** — 2026-10-28T03:12:28.324Z\n\nA forbidden label combination was repaired (spec/labels.md → Forbidden combinations):\n\n- removed: `ready-to-implement`\n- vetoed by: `scc:not-ready`\n\nBlocker labels always outrank the dispatch trigger. Resolve or remove\n`scc:not-ready` first, then re-apply the trigger.\n\n<!-- ai-sdlc:label-veto -->\n",
+    "created_at": "2026-10-28T03:12:29Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `b7036d4cdb23`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=b7036d4cdb236e242a7d4797beb65c924ea1ea8c31728b49c6220144b36e6e2d -->",
+    "created_at": "2026-10-28T14:16:24Z"
+  },
+  {
+    "body": "ai-sdlc: the engine exhausted its bounded budget before finishing (exit 22, stall class `budget`) — re-scope the issue into a smaller task or raise `engine.max_seconds`/`engine.max_steps` in .ai-sdlc.yaml, then re-apply the trigger label. Run: https://github.com/os-santiago/sc-agent-cli/actions/runs/40704245154",
+    "created_at": "2026-10-28T14:32:10Z"
+  },
+  {
+    "body": "🛡️ **AI-SDLC intake:** Definition-of-Ready failed: `R5 no skip-label` — see spec/definition-of-ready.md. Refine and re-apply `ready-to-implement`.",
+    "created_at": "2026-10-28T14:46:57Z"
+  },
+  {
+    "body": "✅ **AI-SDLC intake:** DoR passed — queued for implementation (approved surface `b7036d4cdb23`). Follow the opened PR for progress.\n<!-- ai-sdlc:dor sha256=b7036d4cdb236e242a7d4797beb65c924ea1ea8c31728b49c6220144b36e6e2d -->",
+    "created_at": "2026-10-28T15:06:49Z"
+  }
+]

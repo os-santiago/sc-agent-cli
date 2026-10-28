@@ -526,7 +526,7 @@ git push
 
 - [task-status-intelligence.md](task-status-intelligence.md) - Clasificación de errores
 - [loop-detection.md](loop-detection.md) - Detección de loops
-- [permissions.md](permissions.md) - Sistema de permisos
+- [permission-profiles.md](permission-profiles.md) - Sistema de permisos
 
 ---
 
