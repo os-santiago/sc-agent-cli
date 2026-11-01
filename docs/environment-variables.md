@@ -168,9 +168,9 @@ Maximum total time (ms) per provider attempt, including the streamed body.
 
 ### SC_ZERO_MUTATION_REPROMPTS
 
-Controls how many times the agent may block a turn that would complete with zero workspace mutations in unattended mode (`-y` / `--permissions unlimited`). When a prompt requests file changes but the model answers with prose only, the run is re-prompted to execute mutating tools instead of silently finishing as `SCC_NO_CHANGES`.
+Controls how many times the agent may block a turn that would complete with zero workspace mutations in unattended mode (`-y` / `--permissions unlimited`). When a prompt requests file changes but the model answers with prose only — or runs mutating tools that leave no git-visible diff — the run is re-prompted to execute mutating tools instead of silently finishing as `SCC_NO_CHANGES`. Once the budget is spent the run records a zero-mutation stall and resolves as `SCC_ZERO_MUTATIONS` / exit `12` (#449).
 
-**Default:** `2` (`0` disables the guard)
+**Default:** `2` (`0` disables the guard and stall escalation)
 
 ```bash
 # Give a weak/routed model more chances to actually apply changes

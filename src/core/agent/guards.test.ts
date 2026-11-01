@@ -15,6 +15,7 @@ import {
   DEFAULT_ZERO_MUTATION_REPROMPTS,
   resolveZeroMutationRepromptBudget,
   countWorkspaceMutations,
+  isZeroMutationTurn,
   shouldRepromptZeroMutation,
   buildZeroMutationReprompt,
   HARMONY_CHANNEL_TAG,
@@ -172,20 +173,28 @@ test('shouldRepromptZeroMutation requires unattended run, mutation intent, and n
     userMessage: 'fix the bug in src/main.ts',
     content: 'I would fix it by editing the file.',
     worktreeChanged: false,
+    gitTracked: true,
   };
   assert.equal(shouldRepromptZeroMutation(base), true);
   // Interactive sessions never hit this guard
   assert.equal(shouldRepromptZeroMutation({ ...base, unattendedRun: false }), false);
   // Phase-suppressed
   assert.equal(shouldRepromptZeroMutation({ ...base, suppressGuards: true }), false);
-  // Budget exhausted
+  // Budget exhausted — still a zero-mutation turn, but no re-prompt
   assert.equal(shouldRepromptZeroMutation({ ...base, repromptsUsed: 2 }), false);
-  // A mutating tool already ran
-  assert.equal(shouldRepromptZeroMutation({ ...base, mutatingCalls: 1 }), false);
+  assert.equal(isZeroMutationTurn({ ...base, repromptsUsed: 2 }), true);
+  // Mutating calls ran but left no worktree trace — the git diff is the
+  // authority, so this still counts as zero workspace changes (#449)
+  assert.equal(shouldRepromptZeroMutation({ ...base, mutatingCalls: 1 }), true);
+  // Outside git the classified call count is the only signal
+  assert.equal(shouldRepromptZeroMutation({ ...base, mutatingCalls: 1, gitTracked: false }), false);
   // Read-only prompt
   assert.equal(shouldRepromptZeroMutation({ ...base, userMessage: 'explain what src/main.ts does' }), false);
   // Explicit no-changes verdict honored
   assert.equal(shouldRepromptZeroMutation({ ...base, content: 'No changes are required — the fix is already applied.' }), false);
+  // Explicit terminal verdicts honored — a bare COMPLETED is not
+  assert.equal(shouldRepromptZeroMutation({ ...base, content: 'VERDICT: BLOCKED — missing permissions.' }), false);
+  assert.equal(shouldRepromptZeroMutation({ ...base, content: 'VERDICT: COMPLETED — done.' }), true);
   // Worktree changed through an unclassified path (e.g. shell heredoc write)
   assert.equal(shouldRepromptZeroMutation({ ...base, worktreeChanged: true }), false);
 });

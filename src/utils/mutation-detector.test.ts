@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,9 +11,11 @@ import {
   countMutatingToolCalls,
   getWorkspaceGitState,
   hasWorktreeChanges,
+  hasWorktreeChangesExcluding,
   detectSessionMutations,
   expectsWorkspaceMutation,
   declaresNoChangesNeeded,
+  declaresTerminalVerdict,
 } from './mutation-detector.js';
 import type { Message } from '../core/types.js';
 
@@ -354,6 +356,76 @@ test('declaresNoChangesNeeded detects explicit no-change verdicts (#448)', () =>
   assert.equal(declaresNoChangesNeeded(''), false);
 });
 
+test('declaresTerminalVerdict honors non-mutating terminal markers but not COMPLETED (#449)', () => {
+  assert.equal(declaresTerminalVerdict('VERDICT: NOT_ACTIONABLE - requires org admin'), true);
+  assert.equal(declaresTerminalVerdict('[VERDICT: BLOCKED] database unavailable'), true);
+  assert.equal(declaresTerminalVerdict('VERDICT: NO_CHANGES - nothing to modify'), true);
+  assert.equal(declaresTerminalVerdict('RESOLUTION: NOT_ACTIONABLE'), true);
+  assert.equal(declaresTerminalVerdict('verdict: blocked'), true);
+
+  // A bare completion claim with zero mutations is the failure shape the
+  // guard exists to catch — it must NOT count as a terminal verdict.
+  assert.equal(declaresTerminalVerdict('VERDICT: COMPLETED - fix applied'), false);
+  assert.equal(declaresTerminalVerdict('RESOLUTION: COMPLETED'), false);
+  assert.equal(declaresTerminalVerdict('I have completed the requested changes.'), false);
+  assert.equal(declaresTerminalVerdict(''), false);
+});
+
+test('detectSessionMutations treats the git worktree as authoritative when tracked (#449)', () => {
+  // Signature regression: mutating tool calls ran but left no git-visible
+  // change (no-op write / reverted edit / untracked path). hasMutations must
+  // be false so the batch exit path cannot report success.
+  const noOpWriteHistory: Message[] = [
+    {
+      role: 'assistant',
+      content: 'Writing the fix',
+      tool_calls: [
+        {
+          id: '1',
+          type: 'function',
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'src/a.ts' }) },
+        },
+        {
+          id: '2',
+          type: 'function',
+          function: { name: 'git', arguments: JSON.stringify({ operation: 'commit' }) },
+        },
+      ],
+    },
+  ];
+
+  const res = detectSessionMutations(
+    noOpWriteHistory,
+    { status: '', head: 'abc' },
+    { status: '', head: 'abc' },
+  );
+  assert.equal(res.mutatingToolCalls, 2); // diagnostics still count attempts
+  assert.equal(res.worktreeChanged, false);
+  assert.equal(res.hasMutations, false);
+});
+
+test('detectSessionMutations falls back to mutating tool calls when git is unavailable (#449)', () => {
+  // Non-git workspace: classified calls are the only mutation signal.
+  const writeHistory: Message[] = [
+    {
+      role: 'assistant',
+      content: 'Writing the fix',
+      tool_calls: [
+        {
+          id: '1',
+          type: 'function',
+          function: { name: 'write_file', arguments: JSON.stringify({ path: 'src/a.ts' }) },
+        },
+      ],
+    },
+  ];
+
+  const res = detectSessionMutations(writeHistory, null, null);
+  assert.equal(res.mutatingToolCalls, 1);
+  assert.equal(res.worktreeChanged, false);
+  assert.equal(res.hasMutations, true);
+});
+
 test('getWorkspaceGitState and hasWorktreeChanges work on actual git repo', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'sc-git-test-'));
   try {
@@ -385,3 +457,100 @@ test('getWorkspaceGitState and hasWorktreeChanges work on actual git repo', () =
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// Porcelain keeps the same ` M` code when an already-modified tracked file
+// is edited again — pre-digest snapshots were identical and the
+// zero-mutation guard read a real edit as "no changes" (#532 review).
+test('hasWorktreeChangesExcluding detects further edits to a pre-modified tracked file (#532)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-git-digest-'));
+  try {
+    spawnSync('git', ['init', '-b', 'main'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
+    writeFileSync(join(tmp, 'file.txt'), 'v1');
+    spawnSync('git', ['add', '.'], { cwd: tmp });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
+
+    // Dirty the file before the run snapshot: porcelain is ` M` in both.
+    writeFileSync(join(tmp, 'file.txt'), 'v2');
+    const before = getWorkspaceGitState(tmp);
+    assert.ok(before !== null);
+
+    writeFileSync(join(tmp, 'file.txt'), 'v3');
+    const after = getWorkspaceGitState(tmp);
+    assert.ok(after !== null);
+
+    assert.equal(before.status, after.status);
+    assert.equal(hasWorktreeChanges(before, after), true);
+    assert.equal(hasWorktreeChangesExcluding(before, after), true);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Content churn inside an excluded engine artifact must not flip the
+// digest comparison either — the artifact filter applies to digest lines
+// the same way it applies to status lines (#532 review).
+test('hasWorktreeChangesExcluding ignores digest churn in excluded artifacts', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'sc-git-digest-artifact-'));
+  try {
+    spawnSync('git', ['init', '-b', 'main'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
+    writeFileSync(join(tmp, 'file.txt'), 'v1');
+    spawnSync('git', ['add', '.'], { cwd: tmp });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
+
+    writeFileSync(join(tmp, 'audit.jsonl'), '{}\n');
+    const before = getWorkspaceGitState(tmp);
+    assert.ok(before !== null);
+
+    appendFileSync(join(tmp, 'audit.jsonl'), '{}\n');
+    const after = getWorkspaceGitState(tmp);
+    assert.ok(after !== null);
+
+    assert.equal(
+      hasWorktreeChangesExcluding(before, after, [join(tmp, 'audit.jsonl')]),
+      false,
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Symlinked workspace roots: `git rev-parse --show-toplevel` reports the
+// realpath while callers hand in lexical paths — an engine artifact resolved
+// against the lexical workspace root could never match the same file's
+// repo-root-resolved porcelain entry, so the exclusion silently failed on
+// macOS (/var → /private/var) and Windows (8.3 short names) and a run-owned
+// audit log counted as a worktree mutation (#449/#556). Windows symlink
+// creation needs privileges — this regression runs on POSIX only.
+test.skipIf(process.platform === 'win32')(
+  'hasWorktreeChangesExcluding matches excluded artifacts under a symlinked workspace root (#449)',
+  () => {
+    const real = mkdtempSync(join(tmpdir(), 'sc-symlink-real-'));
+    const link = join(tmpdir(), `sc-symlink-link-${process.pid}`);
+    try {
+      symlinkSync(real, link, 'dir');
+      spawnSync('git', ['init', '-b', 'main'], { cwd: real });
+
+      const before = getWorkspaceGitState(link);
+      assert.ok(before?.root);
+      // Sanity check the premise: git reports the canonical top-level, not
+      // the symlinked cwd it was invoked with.
+      assert.notEqual(before.root, link);
+
+      writeFileSync(join(real, 'audit.jsonl'), '{}');
+      const after = getWorkspaceGitState(link);
+
+      assert.equal(hasWorktreeChangesExcluding(before, after), true);
+      assert.equal(
+        hasWorktreeChangesExcluding(before, after, [join(link, 'audit.jsonl')]),
+        false,
+      );
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
+  },
+);

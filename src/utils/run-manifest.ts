@@ -21,6 +21,7 @@ export type RunExitReason =
   | 'success'
   | 'error'
   | 'no_changes'
+  | 'zero_mutations'
   | 'budget_exceeded'
   | 'interrupted';
 
