@@ -48,9 +48,9 @@ function onBlock(yaml: string): string {
 
 /** The `secret-scan` job block — from `  secret-scan:` to the next job key. */
 function secretScanJob(yaml: string): string {
-  const start = /^  secret-scan:\s*$/m.exec(yaml);
+  const start = /^ {2}secret-scan:\s*$/m.exec(yaml);
   assert.ok(start, 'security-scan.yml missing the secret-scan job');
-  const nextJob = /^  \w[\w-]*:\s*$/gm;
+  const nextJob = /^ {2}\w[\w-]*:\s*$/gm;
   nextJob.lastIndex = start.index + 1;
   const end = nextJob.exec(yaml);
   return yaml.slice(start.index, end ? end.index : yaml.length);

@@ -207,6 +207,7 @@ sc-agent          # Run the CLI
 npm test          # Unit/integration suite (vitest, src/**/*.test.ts)
 npm run test:e2e  # E2E smoke suite — spawns built bin/sc.js vs a mock provider
                   # (test/e2e/, requires `npm run build` first; see its README)
+npm run lint      # eslint . — advisory until the baseline violations are cleaned
 ```
 
 ## Common Tasks
