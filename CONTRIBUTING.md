@@ -56,6 +56,7 @@ npm run build && npm test              # the same gates CI runs
 | `npm test` | Run the full vitest suite (`vitest run`) |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:coverage` | Vitest with v8 coverage (thresholds in `vitest.config.ts`) |
+| `npm run test:sandbox` | Opt-in bwrap integration suite (`test/sandbox/`; set `SC_SANDBOX_TESTS=1`) |
 | `npm start` | Run the CLI from source (`node bin/sc.js`) |
 | `npx eslint .` | Lint with the flat config in `eslint.config.mjs` |
 
@@ -104,6 +105,19 @@ npm run build && npm run test:e2e
 
 See [`test/e2e/README.md`](test/e2e/README.md) for how the mock provider and
 spawn helpers work.
+
+### Sandbox integration suite
+
+`test/sandbox/` exercises `run_shell` through a real bubblewrap boundary.
+It is opt-in only — never part of `npm test` or the coverage floor:
+
+```bash
+SC_SANDBOX_TESTS=1 npm run test:sandbox
+```
+
+Every suite skips automatically unless `SC_SANDBOX_TESTS=1` is set **and**
+`hasBwrap()` detects a working Linux bwrap/userns setup. CI runs it on the
+Linux leg only. See [`test/sandbox/README.md`](test/sandbox/README.md).
 
 ### End-to-end / manual verification
 

@@ -207,6 +207,8 @@ sc-agent          # Run the CLI
 npm test          # Unit/integration suite (vitest, src/**/*.test.ts)
 npm run test:e2e  # E2E smoke suite — spawns built bin/sc.js vs a mock provider
                   # (test/e2e/, requires `npm run build` first; see its README)
+npm run test:sandbox # Opt-in bwrap integration suite (test/sandbox/) —
+                  # requires SC_SANDBOX_TESTS=1 + hasBwrap(); Linux CI leg only
 ```
 
 ## Common Tasks

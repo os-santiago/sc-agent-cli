@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { Writable } from 'node:stream';
 import type { Tool, ToolContext } from './tool.js';
 import { requestPermission } from '../utils/permissions.js';
 import { formatSandboxViolations } from '../utils/sandbox.js';
@@ -125,10 +126,16 @@ export const runShellTool: Tool = {
       // Feed the cBPF program into the fd bwrap reads its seccomp rules from.
       if (spec.seccompFd !== undefined && spec.seccompBlob) {
         try {
-          const fdStream = child.stdio?.[spec.seccompFd];
-          if (fdStream && typeof fdStream === 'object' && 'write' in fdStream) {
-            (fdStream as NodeJS.WritableStream).write(spec.seccompBlob);
-            (fdStream as NodeJS.WritableStream).end();
+          const fdStream = child.stdio?.[spec.seccompFd] as Writable | null | undefined;
+          if (fdStream && typeof fdStream.write === 'function') {
+            // The fd is an evented pipe: a child that exits before draining
+            // it turns the write into an async 'error' (EPIPE/ECONNRESET),
+            // not a synchronous throw. Unhandled, that crashes the whole
+            // process — swallow it; the child's 'error'/'close' events
+            // report the real spawn outcome.
+            fdStream.on('error', () => {});
+            fdStream.write(spec.seccompBlob);
+            fdStream.end();
           }
         } catch {
           // Spawn raced a failure — the 'error'/'close' handlers report it.

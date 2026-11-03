@@ -8,6 +8,7 @@ import {
   buildBwrapArgv,
   detectSandboxBackend,
   formatSandboxViolations,
+  hasBwrap,
   isEgressAllowed,
   parseEgressRule,
   resetSandboxBackendCache,
@@ -181,6 +182,16 @@ test.skipIf(process.platform === 'linux')(
     assert.match(b.degradedReason ?? '', /unsupported platform/);
   },
 );
+
+// #544 — hasBwrap() is the gate the test/sandbox/ integration suite hangs
+// off; it must mirror the real host probe on every platform.
+test('hasBwrap mirrors the real backend detection', () => {
+  resetSandboxBackendCache();
+  const result = hasBwrap();
+  assert.equal(typeof result, 'boolean');
+  assert.equal(result, detectSandboxBackend().mode === 'bwrap');
+  if (process.platform !== 'linux') assert.equal(result, false);
+});
 
 // ---------------------------------------------------------------------------
 // buildBwrapArgv

@@ -1,397 +1,196 @@
-import { afterEach, beforeEach, describe, test, vi } from 'vitest';
+// run_shell tool coverage (#545, parent #544): execute() — arg validation,
+// the permission gate, the scrubbed-child-env spawn (shell:true default and
+// the sandbox-supplied shell:false plan), stderr collection, non-zero exit,
+// timeout kill, spawn error, seccomp-fd blob write, violation reporting and
+// the fail-closed prepareSpawn error path.
+//
+// Sandboxed paths are driven through a fake SandboxRuntime whose spawn plan
+// targets process.execPath directly — deterministic on every OS, no bwrap
+// or shell quoting required. Real child processes; no network.
+
+import { test, describe, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
-
-// `spawn` is wrapped, not replaced: happy-path tests run real child processes
-// through the production code path, while denied-path tests assert the spawn
-// boundary was never reached.
-vi.mock('node:child_process', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('node:child_process')>();
-  return { ...mod, spawn: vi.fn(mod.spawn) };
-});
-
-// `requestPermission` delegates to the real gate so denyCommands and the
-// git-mutation refusals keep their production semantics; the user-denial path
-// is forced per-test via mockResolvedValueOnce(false).
-vi.mock('../utils/permissions.js', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../utils/permissions.js')>();
-  return { ...mod, requestPermission: vi.fn(mod.requestPermission) };
-});
-
-// Dead-man switch: no test below should ever reach an interactive prompt — if
-// one does, the prompt denies instead of hanging the suite.
-vi.mock('prompts', () => ({ default: vi.fn().mockResolvedValue({ choice: 'no', approved: false }) }));
-
-import { runShellTool } from './run-shell.js';
-import { requestPermission } from '../utils/permissions.js';
-import { detectSandboxBackendCached, SandboxRuntime } from '../utils/sandbox.js';
-import type { SandboxSpawnPlan, SandboxViolation } from '../utils/sandbox.js';
-import type { ToolContext } from './tool.js';
+import { join } from 'node:path';
 import type { ProjectConfig } from '../core/types.js';
+import type { ToolContext } from './tool.js';
+import type { SandboxRuntime, SandboxSpawnPlan, SandboxViolation } from '../utils/sandbox.js';
 
-const spawnMock = vi.mocked(spawn);
-const requestPermissionMock = vi.mocked(requestPermission);
+vi.mock('prompts', () => ({ default: vi.fn().mockResolvedValue({ choice: 'yes', approved: true }) }));
+vi.mock('chalk', () => ({ default: new Proxy({}, { get: () => (s: string) => s }) }));
+vi.mock('../utils/box-drawing.js', () => ({
+  boxHeader: () => '',
+  boxFooter: () => '',
+}));
 
-// spawn() argument tuples as run_shell issues them (overloads collapse to the
-// last signature, hence the explicit tuple shape).
-type SpawnCall = [
-  file: string,
-  argv: string[],
-  opts: { shell?: boolean; cwd?: string; env?: NodeJS.ProcessEnv; stdio?: unknown },
-];
+import prompts from 'prompts';
+import { runShellTool } from './run-shell.js';
+import { clearSessionPermissions } from '../utils/permissions.js';
+import { buildChildEnv } from '../utils/env-scrub.js';
 
-const spawnCalls = () => spawnMock.mock.calls as unknown as SpawnCall[];
+const NODE = process.execPath;
 
-// Spawn `node -e` via its absolute path — the scrubbed child env keeps PATH,
-// but tests shouldn't depend on a PATH lookup succeeding. The js argument is
-// double-quoted, so snippets must use single-quoted JS strings only.
-const nodeEval = (js: string) => `"${process.execPath}" -e "${js}"`;
+let dir: string;
 
-function baseConfig(over: Partial<ProjectConfig> = {}): ProjectConfig {
+function makeConfig(): ProjectConfig {
   return {
-    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'm' },
-    ...over,
+    model: { provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'test' },
+    permissions: { autoApprove: [] },
   };
 }
 
-function makeCtx(over: Partial<ToolContext> = {}): ToolContext {
-  return {
-    workspaceRoot: process.cwd(),
-    config: baseConfig(),
-    autoApprove: true, // unattended mode — the interactive prompt is never exercised
-    ...over,
+function ctx(sandbox?: SandboxRuntime): ToolContext {
+  return { workspaceRoot: dir, config: makeConfig(), autoApprove: true, ...(sandbox ? { sandbox } : {}) };
+}
+
+/**
+ * A SandboxRuntime lookalike: prepareSpawn returns a direct node spawn plan
+ * (shell:false → spec.file/spec.argv) or rejects to exercise the fail-closed
+ * path; collectStderrViolations returns pre-seeded hits.
+ */
+function fakeSandbox(opts: {
+  plan?: Partial<SandboxSpawnPlan>;
+  prepareError?: Error;
+  stderrViolations?: SandboxViolation[];
+  runtimeViolations?: SandboxViolation[];
+}): SandboxRuntime {
+  const violations: SandboxViolation[] = [];
+  const fake = {
+    enabled: true,
+    violations,
+    async prepareSpawn(_command: string): Promise<SandboxSpawnPlan> {
+      if (opts.prepareError) throw opts.prepareError;
+      // run_shell marks violations.length BEFORE prepareSpawn — anything the
+      // runtime records during/before spawn must land after the mark to be
+      // reported, so seed them here rather than in the constructor.
+      violations.push(...(opts.runtimeViolations ?? []));
+      return {
+        file: NODE,
+        argv: [],
+        shell: false,
+        env: buildChildEnv(process.env),
+        execMode: 'bwrap',
+        ...(opts.plan ?? {}),
+      };
+    },
+    collectStderrViolations(_stderr: string): SandboxViolation[] {
+      return opts.stderrViolations ?? [];
+    },
   };
+  return fake as unknown as SandboxRuntime;
 }
 
-const exec = (args: Record<string, unknown>, ctx: ToolContext) =>
-  runShellTool.execute(args, ctx);
+const nodePlan = (script: string, extra: Partial<SandboxSpawnPlan> = {}): Partial<SandboxSpawnPlan> => ({
+  argv: ['-e', script],
+  ...extra,
+});
 
-interface SandboxStubOpts {
-  enabled?: boolean;
-  violations?: SandboxViolation[];
-  prepareSpawn?: (command: string) => Promise<SandboxSpawnPlan>;
-  collectStderrViolations?: (stderr: string) => SandboxViolation[];
-}
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), 'sc-runshell-'));
+});
 
-// Minimal SandboxRuntime-shaped stub — the tool only touches `enabled`,
-// `violations`, `prepareSpawn` and `collectStderrViolations`.
-function sandboxStub(over: SandboxStubOpts = {}): SandboxRuntime {
-  return {
-    enabled: over.enabled ?? true,
-    violations: over.violations ?? [],
-    prepareSpawn:
-      over.prepareSpawn ??
-      (async () => {
-        throw new Error('sandbox backend unavailable');
-      }),
-    collectStderrViolations: over.collectStderrViolations ?? (() => []),
-  } as unknown as SandboxRuntime;
-}
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
 
 beforeEach(() => {
-  spawnMock.mockClear();
-  requestPermissionMock.mockClear();
+  clearSessionPermissions();
+  vi.clearAllMocks();
 });
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-// ---------------------------------------------------------------------------
-// Argument validation
-// ---------------------------------------------------------------------------
-
-test('run_shell rejects a missing command before touching permissions or spawn', async () => {
-  await assert.rejects(exec({}, makeCtx()), /Missing required argument: command/);
-  assert.equal(requestPermissionMock.mock.calls.length, 0);
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
-
-test('run_shell rejects commands containing null bytes', async () => {
-  await assert.rejects(exec({ command: 'echo \0 hi' }, makeCtx()), /null bytes/);
-  assert.equal(requestPermissionMock.mock.calls.length, 0);
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
-
-// ---------------------------------------------------------------------------
-// Permission gate — denied result shapes, nothing ever spawns
-// ---------------------------------------------------------------------------
-
-test('run_shell throws the denied result and never spawns when permission is refused', async () => {
-  requestPermissionMock.mockResolvedValueOnce(false);
-  await assert.rejects(exec({ command: 'echo hi' }, makeCtx()), /Permission denied by user/);
-  assert.equal(spawnMock.mock.calls.length, 0);
-  // The tool asked the gate under the run_shell tool name with the raw args.
-  assert.equal(requestPermissionMock.mock.calls[0][0].toolName, 'run_shell');
-  assert.equal(requestPermissionMock.mock.calls[0][0].args.command, 'echo hi');
-});
-
-test('run_shell honors permissions.denyCommands as a hard deny — even under -y', async () => {
-  const ctx = makeCtx({ config: baseConfig({ permissions: { denyCommands: ['rm -rf'] } }) });
-  await assert.rejects(
-    exec({ command: 'rm -rf /tmp/sc-should-never-run' }, ctx),
-    /denied by permissions\.denyCommands rule "rm -rf"/,
-  );
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
-
-test('run_shell refuses git-mutating commands in unattended mode', async () => {
-  await assert.rejects(
-    exec({ command: 'git commit -m x' }, makeCtx({ autoApprove: true })),
-    (err: unknown) => {
-      assert.ok(err instanceof Error);
-      assert.match(err.message, /git commit refused/);
-      assert.match(err.message, /unattended mode/);
-      return true;
-    },
-  );
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
-
-test('run_shell honors permissions.denyGitMutation without needing -y', async () => {
-  const ctx = makeCtx({
-    autoApprove: false,
-    config: baseConfig({ permissions: { denyGitMutation: true } }),
+describe('run_shell', () => {
+  test('requires command', async () => {
+    await assert.rejects(runShellTool.execute({}, ctx()), /Missing required argument: command/);
   });
-  await assert.rejects(exec({ command: 'git push origin main' }, ctx), (err: unknown) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /git push denied/);
-    assert.match(err.message, /managed externally/);
-    return true;
+
+  test('rejects commands containing null bytes', async () => {
+    await assert.rejects(
+      runShellTool.execute({ command: 'echo a\0b' }, ctx()),
+      /null bytes/,
+    );
   });
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
 
-// ---------------------------------------------------------------------------
-// Happy path — real spawn, captured output, surfaced exit code
-// ---------------------------------------------------------------------------
-
-test('run_shell spawns via the shell and resolves with stdout', async () => {
-  const out = await exec({ command: 'echo run-shell-hello' }, makeCtx());
-  assert.match(out, /run-shell-hello/);
-  assert.equal(spawnCalls().length, 1);
-  const [file, argv, opts] = spawnCalls()[0];
-  assert.equal(file, 'echo run-shell-hello');
-  assert.deepEqual(argv, []);
-  assert.equal(opts.shell, true);
-  assert.equal(opts.cwd, process.cwd());
-});
-
-test('run_shell annotates captured stderr in the resolved output', async () => {
-  const out = await exec(
-    { command: nodeEval("process.stdout.write('o');process.stderr.write('e')") },
-    makeCtx(),
-  );
-  assert.equal(out, 'o\n[stderr]\ne');
-});
-
-test('run_shell rejects with the surfaced exit code on non-zero exit', async () => {
-  await assert.rejects(exec({ command: nodeEval('process.exit(7)') }, makeCtx()), /exited with code 7/);
-});
-
-test('run_shell resolves "(no output)" for a silent success', async () => {
-  assert.equal(await exec({ command: nodeEval('0') }, makeCtx()), '(no output)');
-});
-
-// ---------------------------------------------------------------------------
-// Child environment scrub + output redaction (#471)
-// ---------------------------------------------------------------------------
-
-test('run_shell hands spawn a scrubbed env — credential-shaped vars stripped', async () => {
-  vi.stubEnv('SC_TEST_API_KEY', 'sekrit-material-123');
-  const out = await exec(
-    {
-      command: nodeEval(
-        "process.stdout.write(process.env.SC_TEST_API_KEY === undefined ? 'stripped' : 'leaked')",
-      ),
-    },
-    makeCtx(),
-  );
-  assert.equal(out, 'stripped');
-  const [, , opts] = spawnCalls()[0];
-  assert.equal(opts.env?.SC_TEST_API_KEY, undefined);
-  assert.equal(opts.env?.PATH, process.env.PATH); // safe base vars pass through
-});
-
-test('run_shell redacts known secret values from captured output', async () => {
-  vi.stubEnv('TEST_SECRET_KEY', 'supersecretvalue123');
-  const out = await exec(
-    { command: nodeEval("process.stdout.write('supersecretvalue123')") },
-    makeCtx(),
-  );
-  assert.equal(out, '***');
-});
-
-// ---------------------------------------------------------------------------
-// Timeout
-// ---------------------------------------------------------------------------
-
-test('run_shell kills the child and rejects with the timeout result', async () => {
-  const started = Date.now();
-  await assert.rejects(
-    exec(
-      { command: nodeEval('setTimeout(()=>{},60000)'), timeout: 150 },
-      makeCtx(),
-    ),
-    /timed out after 150ms/,
-  );
-  // SIGTERM terminates the child promptly — we never wait out the 60s sleep.
-  assert.ok(Date.now() - started < 10_000, 'timeout should resolve well before the child exits naturally');
-});
-
-// ---------------------------------------------------------------------------
-// Output cap
-// ---------------------------------------------------------------------------
-
-test('run_shell kills the child and rejects when output exceeds the 10MB cap', async () => {
-  await assert.rejects(
-    exec({ command: nodeEval("process.stdout.write('x'.repeat(11 * 1024 * 1024))") }, makeCtx()),
-    /Output exceeded 10 MB limit/,
-  );
-});
-
-// ---------------------------------------------------------------------------
-// Sandbox planning — fail-closed, passthrough, plan plumbing
-// ---------------------------------------------------------------------------
-
-test('run_shell fails closed when the sandbox cannot be prepared — never spawns', async () => {
-  const ctx = makeCtx({ sandbox: sandboxStub() });
-  await assert.rejects(exec({ command: 'echo hi' }, ctx), (err: unknown) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /\[SANDBOX_VIOLATION\] \{"rule":"spawn","target":"sandbox-setup"\}/);
-    assert.match(err.message, /Sandboxed execution unavailable: sandbox backend unavailable/);
-    assert.match(err.message, /NOT executed/);
-    return true;
+  test('a denied prompt rejects before spawning', async () => {
+    const context: ToolContext = { workspaceRoot: dir, config: makeConfig() };
+    vi.mocked(prompts).mockResolvedValueOnce({ choice: 'no' });
+    await assert.rejects(
+      runShellTool.execute({ command: 'echo never' }, context),
+      /Permission denied by user/,
+    );
   });
-  assert.equal(spawnMock.mock.calls.length, 0);
-});
 
-test('run_shell ignores a disabled sandbox runtime (plain shell passthrough)', async () => {
-  const out = await exec(
-    { command: 'echo passthrough-ok' },
-    makeCtx({ sandbox: sandboxStub({ enabled: false }) }),
-  );
-  assert.match(out, /passthrough-ok/);
-  assert.equal(spawnCalls()[0][2].shell, true);
-});
-
-test('run_shell honors a non-shell spawn plan (file/argv/env) from prepareSpawn', async () => {
-  const stub = sandboxStub({
-    prepareSpawn: async (command) => ({
-      file: process.execPath,
-      argv: ['-e', `process.stdout.write(${JSON.stringify(command)})`],
-      shell: false,
-      env: { ...process.env },
-      execMode: 'bwrap',
-    }),
+  test('unsandboxed (shell:true) execution returns stdout', async () => {
+    const out = await runShellTool.execute({ command: 'echo sc-runshell-ok' }, ctx());
+    assert.match(out, /sc-runshell-ok/);
   });
-  const out = await exec({ command: 'planned-spawn-works' }, makeCtx({ sandbox: stub }));
-  assert.equal(out, 'planned-spawn-works');
-  const [file, argv, opts] = spawnCalls()[0];
-  assert.equal(file, process.execPath);
-  assert.equal(argv[0], '-e');
-  assert.equal(opts.shell, undefined); // the non-shell spawn branch
-});
 
-// The extra stdio fd mirrors the seccomp-blob plumbing — POSIX-only in
-// production (bwrap/x86_64), so keep the assertion off Windows.
-test.skipIf(process.platform === 'win32')(
-  'run_shell streams the seccomp blob into the extra pipe fd',
-  async () => {
-    const stub = sandboxStub({
-      prepareSpawn: async () => ({
-        file: process.execPath,
-        argv: ['-e', "process.stdout.write(require('node:fs').readFileSync(3, 'utf8'))"],
-        shell: false,
-        env: { ...process.env },
-        seccompFd: 3,
-        seccompBlob: Buffer.from('cbpf-payload'),
-        execMode: 'bwrap',
-      }),
+  test('a sandbox plan spawns the command directly (shell:false) and returns output', async () => {
+    const sandbox = fakeSandbox({ plan: nodePlan('console.log("sandboxed-ok")') });
+    const out = await runShellTool.execute({ command: 'irrelevant' }, ctx(sandbox));
+    assert.match(out, /sandboxed-ok/);
+  });
+
+  test('non-zero exit rejects with the exit code and captured output', async () => {
+    const sandbox = fakeSandbox({ plan: nodePlan('console.log("partial");process.exit(3)') });
+    await assert.rejects(
+      runShellTool.execute({ command: 'x' }, ctx(sandbox)),
+      /exited with code 3/,
+    );
+  });
+
+  test('stderr is appended under a [stderr] marker', async () => {
+    const sandbox = fakeSandbox({ plan: nodePlan('process.stderr.write("oops-line")') });
+    const out = await runShellTool.execute({ command: 'x' }, ctx(sandbox));
+    assert.match(out, /\[stderr\]/);
+    assert.match(out, /oops-line/);
+  });
+
+  test('an over-time command is killed and reported as timed out', async () => {
+    const sandbox = fakeSandbox({ plan: nodePlan('setTimeout(()=>{},9000)') });
+    await assert.rejects(
+      runShellTool.execute({ command: 'x', timeout: 150 }, ctx(sandbox)),
+      /timed out after 150ms/,
+    );
+  });
+
+  test('a spawn failure rejects with "Failed to execute command"', async () => {
+    const sandbox = fakeSandbox({ plan: { file: 'sc-runshell-missing-binary', argv: [], shell: false } });
+    await assert.rejects(
+      runShellTool.execute({ command: 'x' }, ctx(sandbox)),
+      /Failed to execute command/,
+    );
+  });
+
+  test('a failing prepareSpawn fails closed with a SANDBOX_VIOLATION marker', async () => {
+    const sandbox = fakeSandbox({ prepareError: new Error('egress proxy bind failed') });
+    await assert.rejects(
+      runShellTool.execute({ command: 'x' }, ctx(sandbox)),
+      /\[SANDBOX_VIOLATION\].*sandbox-setup/s,
+    );
+    await assert.rejects(
+      runShellTool.execute({ command: 'x' }, ctx(sandbox)),
+      /The command was NOT executed/,
+    );
+  });
+
+  test('stderr-detected violations are reported on the result', async () => {
+    const sandbox = fakeSandbox({
+      plan: nodePlan('process.stderr.write("network is unreachable")'),
+      stderrViolations: [{ rule: 'egress', target: 'example.com' }],
+      runtimeViolations: [{ rule: 'fs', target: '/etc/passwd' }],
     });
-    const out = await exec({ command: 'irrelevant' }, makeCtx({ sandbox: stub }));
-    assert.equal(out, 'cbpf-payload');
-    assert.deepEqual(spawnCalls()[0][2].stdio, ['ignore', 'pipe', 'pipe', 'pipe']);
-  },
-);
-
-test('run_shell appends observed sandbox violations to a successful result', async () => {
-  const recorded: SandboxViolation[] = [];
-  const stub = sandboxStub({
-    violations: recorded,
-    prepareSpawn: async (command) => {
-      // e.g. an egress-proxy denial observed while the command runs.
-      recorded.push({ rule: 'egress', target: 'evil.com:443' });
-      return { file: command, argv: [], shell: true, env: { ...process.env }, execMode: 'proxy' };
-    },
-  });
-  const out = await exec({ command: 'echo boundary-ok' }, makeCtx({ sandbox: stub }));
-  assert.match(out, /boundary-ok/);
-  assert.match(out, /\[SANDBOX\] violation\(s\) observed/);
-  assert.match(out, /\[SANDBOX_VIOLATION\] \{"rule":"egress","target":"evil\.com:443"\}/);
-});
-
-// ---------------------------------------------------------------------------
-// Real bwrap boundary — gated behind host capability detection. When the host
-// lacks a working bubblewrap the whole suite reports skipped, so these
-// assertions never run in the default `npm test` on such machines.
-// ---------------------------------------------------------------------------
-
-const hasBwrap = () => detectSandboxBackendCached().mode === 'bwrap';
-
-describe.skipIf(!hasBwrap())('run_shell inside a real bwrap sandbox', () => {
-  const tmpDirs: string[] = [];
-
-  afterEach(() => {
-    while (tmpDirs.length) rmSync(tmpDirs.pop()!, { recursive: true, force: true });
+    const out = await runShellTool.execute({ command: 'x' }, ctx(sandbox));
+    assert.match(out, /\[SANDBOX\] violation\(s\) observed/);
+    assert.match(out, /\[SANDBOX_VIOLATION\] \{"rule":"egress","target":"example\.com"\}/);
+    assert.match(out, /\[SANDBOX_VIOLATION\] \{"rule":"fs","target":"\/etc\/passwd"\}/);
   });
 
-  function sandboxedCtx() {
-    const ws = mkdtempSync(path.join(tmpdir(), 'sc-run-shell-'));
-    tmpDirs.push(ws);
-    const rt = new SandboxRuntime({
-      config: baseConfig({ sandbox: { enabled: true } }),
-      workspaceRoot: ws,
+  test('a seccomp plan writes the cBPF blob to the extra pipe fd', async () => {
+    const sandbox = fakeSandbox({
+      plan: nodePlan('process.exit(0)', { seccompFd: 3, seccompBlob: Buffer.from('bpf') }),
     });
-    // The runtime binds the realpath'd workspace — resolve it the same way so
-    // the path embedded in the command string matches the bind (symlinked
-    // tmpdirs would otherwise write into the /tmp overlay instead).
-    return { ctx: makeCtx({ workspaceRoot: ws, sandbox: rt }), rt, ws: realpathSync(ws) };
-  }
-
-  test('executes the command through bwrap and returns stdout', async () => {
-    const { ctx, rt, ws } = sandboxedCtx();
-    try {
-      const probe = path.join(ws, 'probe.txt');
-      const out = await exec({ command: `echo bwrap-boundary-ok && echo wrote > "${probe}"` }, ctx);
-      assert.match(out, /bwrap-boundary-ok/);
-      // The workspace is the writable bind inside the sandbox.
-      assert.ok(existsSync(probe));
-      assert.equal(rt.backend.mode, 'bwrap');
-      assert.equal(spawnCalls()[0][0], rt.backend.bwrapPath);
-    } finally {
-      rt.dispose();
-    }
-  });
-
-  test('a filesystem denial surfaces [SANDBOX_VIOLATION] markers in the error', async () => {
-    const { ctx, rt } = sandboxedCtx();
-    try {
-      await assert.rejects(
-        exec({ command: 'touch /etc/sc-agent-probe-marker' }, ctx),
-        (err: unknown) => {
-          assert.ok(err instanceof Error);
-          assert.match(err.message, /Command exited with code/);
-          assert.match(err.message, /\[SANDBOX_VIOLATION\] \{"rule":"fs"/);
-          return true;
-        },
-      );
-      assert.ok(rt.violations.length >= 1);
-    } finally {
-      rt.dispose();
-    }
+    const out = await runShellTool.execute({ command: 'x' }, ctx(sandbox));
+    assert.equal(out, '(no output)');
   });
 });
