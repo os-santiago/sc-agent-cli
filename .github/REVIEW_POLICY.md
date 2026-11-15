@@ -10,6 +10,8 @@ A new commit does not automatically dismiss a request for changes.
 bypass settings. Twenty named checks are bound to their GitHub integration IDs.
 GitHub treats successful, neutral or skipped required checks as satisfying a
 status requirement; a failing, pending or missing required check blocks merge.
+The title workflow also runs on `synchronize`, so each new head receives its
+required title result without needing a title edit.
 Review conversations must be resolved after verifying the correction; an outdated
 thread is not automatically resolved. General PR discussion comments have no
 resolvable state in GitHub.
