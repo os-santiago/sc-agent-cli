@@ -54,7 +54,7 @@ export const editFileTool: Tool = {
     const parsed = parseSingleFilePatch(patch);
     // diff@5 searches offsets starting at oldStart, including positions beyond
     // EOF. A huge model-supplied anchor can otherwise monopolize the event loop.
-    const sourceLines = content.split(/\r\n|[\n\v\f\r\x85]/).length;
+    const sourceLines = content.split(/\r\n|\n/).length;
     const outsideSource = parsed.hunks.some(hunk => hunk.oldStart > sourceLines + 1);
     const patched = outsideSource ? false : applyPatch(content, parsed);
 
@@ -66,6 +66,20 @@ export const editFileTool: Tool = {
         `The file may have been modified since the patch was generated. ` +
         `First lines of patch:\n${contextLines}`
       );
+    }
+
+    // applyPatch records the actual offset it matched. EOF declarations must
+    // refer to the real end of the original file, even when a hunk relocates.
+    const logicalSourceLines = sourceLines - (content.endsWith('\n') || content === '' ? 1 : 0);
+    for (const hunk of parsed.hunks) {
+      const offset = (hunk as typeof hunk & { offset?: number }).offset ?? 0;
+      if (hunk.lines.some(line => line.startsWith('\\'))
+        && hunk.oldStart + offset + hunk.oldLines - 1 !== logicalSourceLines) {
+        throw new Error('Failed to apply patch: invalid unified diff format. EOF marker does not refer to the end of the file.');
+      }
+      if (content.endsWith('\n') && hunk.lines.some((line, i) => line.startsWith('\\') && hunk.lines[i - 1][0] !== '+')) {
+        throw new Error('Patch does not match file content: the original file has a final newline.');
+      }
     }
 
     if (patched === content) {
@@ -89,7 +103,7 @@ function parseSingleFilePatch(patch: string): ParsedDiff {
 
   // The library accepts NaN anchors and normalizes a missing one-line body
   // to zero lines, even in strict mode. Check the original declarations too.
-  const headers = patch.split(/\r\n|[\n\v\f\r\x85]/).filter(line => line.startsWith('@@'));
+  const headers = patch.split(/\r\n|\n/).filter(line => line.startsWith('@@'));
   if (headers.length !== files[0].hunks.length) throw invalid();
   for (let i = 0; i < headers.length; i++) {
     const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/.exec(headers[i]);
@@ -102,6 +116,23 @@ function parseSingleFilePatch(patch: string): ParsedDiff {
       || oldLines !== hunk.oldLines || newLines !== hunk.newLines
       || hunk.lines.some(line => line.startsWith('\\') && line !== '\\ No newline at end of file')) {
       throw invalid();
+    }
+  }
+  let oldEOF = false, newEOF = false;
+  for (const hunk of files[0].hunks) {
+    for (let i = 0; i < hunk.lines.length; i++) {
+      const line = hunk.lines[i];
+      if (line.startsWith('\\')) {
+        const previous = hunk.lines[i - 1];
+        // diff@5 loops forever when removing EOF newlines from an empty
+        // replacement. Represent an empty result with a zero-line range.
+        if (!previous || previous.length < 2 || !['+', '-', ' '].includes(previous[0])) throw invalid();
+        if (previous[0] !== '+') oldEOF = true;
+        if (previous[0] !== '-') newEOF = true;
+      } else if ((oldEOF && line[0] !== '+') || (newEOF && line[0] !== '-')) {
+        // No later context or content may follow that side's EOF marker.
+        throw invalid();
+      }
     }
   }
   return files[0];

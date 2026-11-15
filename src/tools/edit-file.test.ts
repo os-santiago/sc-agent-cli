@@ -1,6 +1,6 @@
 import { test, vi, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { requestPermission } from '../utils/permissions.js';
@@ -42,6 +42,15 @@ function makeCtx(overrides: Partial<ProjectConfig> = {}): ToolContext {
 
 const exec = (args: Record<string, unknown>, ctx?: ToolContext) =>
   editFileTool.execute(args, ctx ?? makeCtx());
+
+function snapshotFile(target: string) {
+  const fd = openSync(target, 'r');
+  try {
+    return { content: readFileSync(fd, 'utf8'), mtimeNs: fstatSync(fd, { bigint: true }).mtimeNs };
+  } finally {
+    closeSync(fd);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Happy paths
@@ -199,10 +208,9 @@ test.each([
   const target = path.join(ws, 'f.txt');
   writeFileSync(target, 'alpha\n');
   utimesSync(target, new Date('2000-01-01'), new Date('2000-01-01'));
-  const before = statSync(target, { bigint: true });
+  const before = snapshotFile(target);
   await assert.rejects(exec({ path: 'f.txt', patch }), error);
-  assert.equal(readFileSync(target, 'utf8'), 'alpha\n');
-  assert.equal(statSync(target, { bigint: true }).mtimeNs, before.mtimeNs);
+  assert.deepEqual(snapshotFile(target), before);
 });
 
 test.each([
@@ -235,4 +243,17 @@ test('edit_file preserves the explicit missing-final-newline marker', async () =
   const patch = '@@ -1 +1 @@\n-alpha\n\\ No newline at end of file\n+beta\n\\ No newline at end of file\n';
   await exec({ path: 'f.txt', patch });
   assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf8'), 'beta');
+});
+
+test.each([
+  ['alpha\ntail\n\n', '@@ -1,2 +1,2 @@\n-alpha\n+beta\n\\ No newline at end of file\n tail\n', /invalid unified diff format/],
+  ['alpha\ntail\n', '@@ -1 +1 @@\n-alpha\n+beta\n\\ No newline at end of file\n', /EOF marker does not refer/],
+  ['alpha\n', '@@ -1 +1 @@\n-alpha\n\\ No newline at end of file\n+beta\n', /original file has a final newline/],
+])('edit_file rejects misplaced EOF declarations without writing: %j', async (original, patch, error) => {
+  const target = path.join(ws, 'f.txt');
+  writeFileSync(target, original);
+  utimesSync(target, new Date('2000-01-01'), new Date('2000-01-01'));
+  const before = snapshotFile(target);
+  await assert.rejects(exec({ path: 'f.txt', patch }), error);
+  assert.deepEqual(snapshotFile(target), before);
 });
