@@ -8,8 +8,9 @@ name: PR Title
 on:
   pull_request_target:
     # `edited` is the load-bearing trigger — renaming the title re-runs the
-    # check so the blocking status follows the current title.
-    types: [opened, edited, reopened]
+    # check so the blocking status follows the current title. Synchronize also
+    # attaches the required result to each new PR head commit.
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read

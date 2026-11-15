@@ -1,0 +1,151 @@
+{
+  "name": "main-branch-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/main"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": false,
+        "allowed_merge_methods": [
+          "merge",
+          "squash",
+          "rebase"
+        ]
+      }
+    },
+    {
+      "type": "required_linear_history"
+    },
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "required_status_checks": [
+          {
+            "context": "Analyze Code Changes",
+            "integration_id": 15368
+          },
+          {
+            "context": "Backdoor Pattern Detection",
+            "integration_id": 15368
+          },
+          {
+            "context": "Check Permission Changes",
+            "integration_id": 15368
+          },
+          {
+            "context": "CodeQL",
+            "integration_id": 57789
+          },
+          {
+            "context": "CodeQL Security Analysis",
+            "integration_id": 15368
+          },
+          {
+            "context": "Data Exfiltration Prevention",
+            "integration_id": 15368
+          },
+          {
+            "context": "Dependency Review",
+            "integration_id": 15368
+          },
+          {
+            "context": "Dependency Vulnerability Scan",
+            "integration_id": 15368
+          },
+          {
+            "context": "License Compliance Check",
+            "integration_id": 15368
+          },
+          {
+            "context": "Malware & Backdoor Detection",
+            "integration_id": 15368
+          },
+          {
+            "context": "Secret Scanning",
+            "integration_id": 15368
+          },
+          {
+            "context": "Static Code Analysis (Bandit)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Supply Chain Security",
+            "integration_id": 15368
+          },
+          {
+            "context": "Validate PR title",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (macos-latest, node 22)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (ubuntu-latest, node 20)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (ubuntu-latest, node 22)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (ubuntu-latest, node 24)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (ubuntu-latest, node 26)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (windows-latest, node 22)",
+            "integration_id": 15368
+          }
+        ],
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 5170512,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 11546953,
+      "actor_type": "User",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 178504369,
+      "actor_type": "User",
+      "bypass_mode": "always"
+    }
+  ]
+}
