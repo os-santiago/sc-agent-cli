@@ -58,6 +58,12 @@ export class McpClient {
     });
 
     this.child.stdout!.on('data', (d: Buffer) => this.onData(d));
+    // stdin may fail before the child emits close (for example EPIPE).
+    // A stream error is separate from ChildProcess.error and must be handled.
+    this.child.stdin!.on('error', (e) => {
+      this.onDeath(new Error(`stdin failed: ${e.message}`));
+      this.kill();
+    });
     this.child.stderr!.on('data', (d: Buffer) => {
       this.stderrTail.push(d.toString('utf-8'));
       if (this.stderrTail.length > 20) this.stderrTail.shift();
@@ -99,6 +105,8 @@ export class McpClient {
   }
 
   kill(): void {
+    // Logical shutdown is immediate even though process termination is async.
+    this.onDeath(new Error(`MCP server "${this.name}" was closed`));
     try {
       this.child?.kill();
     } catch {
@@ -108,7 +116,16 @@ export class McpClient {
 
   private notify(method: string, params: Record<string, unknown>): void {
     if (!this.isAlive()) return;
-    this.child!.stdin!.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
+    this.write({ jsonrpc: '2.0', method, params });
+  }
+
+  private write(message: Record<string, unknown>): void {
+    try {
+      this.child!.stdin!.write(JSON.stringify(message) + '\n');
+    } catch (error) {
+      this.onDeath(new Error(`stdin write failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.kill();
+    }
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -122,7 +139,7 @@ export class McpClient {
         rejectPromise(new Error(`MCP "${this.name}" ${method} timed out after ${this.timeoutMs}ms`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve: resolvePromise, reject: rejectPromise, timer });
-      this.child!.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+      this.write({ jsonrpc: '2.0', id, method, params });
     });
   }
 
