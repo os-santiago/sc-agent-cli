@@ -149,6 +149,24 @@ If you discover a security vulnerability, please report it via:
 - AGPL-3.0 (copyleft)
 - Proprietary/Commercial
 
+### Temporary development-tool override
+
+`package.json` pins `minimatch` to `11.0.8` through npm overrides because the
+current ESLint and TypeScript-ESLint parents request the affected 10.x line.
+This resolves [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+without changing SCC runtime dependencies. The patched version also includes
+the subsequent wildcard compile-time fix released in 11.0.7.
+
+The exception to the license list above is limited to development-only
+`minimatch` and its required `@isaacs/nonrecursive-glob-match` dependency,
+both distributed under `BlueOak-1.0.0`. Retain their license notices.
+
+Remove the override when the lint-tool parents resolve patched versions without
+it. Any update must pass a clean `npm ci`, `npm ls minimatch`, build, unit/coverage
+and CLI smoke tests, plus a direct ESLint comparison against the base revision.
+The advisory applies to pattern preprocessing with `optimizationLevel >= 2`;
+this dependency finding does not establish exploitation in SCC's runtime.
+
 ---
 
 ## Secrets Management
