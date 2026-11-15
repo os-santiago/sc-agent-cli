@@ -7,6 +7,7 @@ import { requestPermission } from '../utils/permissions.js';
 import { editFileTool } from './edit-file.js';
 import type { ToolContext } from './tool.js';
 import type { ProjectConfig } from '../core/types.js';
+import { createPatch } from 'diff';
 
 // Mocked permission layer — tests drive approval/denial explicitly instead of
 // hitting the interactive prompt or the real config store.
@@ -151,7 +152,7 @@ test('edit_file resolves an ambiguous hunk at the position nearest its header', 
   assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'x\ny\nx\nz\n');
 });
 
-test('edit_file fails when competing hunks leave no valid position', async () => {
+test('edit_file rejects out-of-order hunks', async () => {
   // Hunk 1 anchors at the "a\nc" pair (line 4); hunk 2's "a\nb" body also fits
   // at line 2, but patch hunks must not overlap already-claimed text, so the
   // ambiguous match surfaces as a failure instead of a corrupt apply.
@@ -169,7 +170,7 @@ test('edit_file fails when competing hunks leave no valid position', async () =>
   ].join('\n');
   await assert.rejects(
     exec({ path: 'f.txt', patch }),
-    /Patch does not match file content/,
+    /invalid unified diff format/,
   );
   assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf-8'), 'q\na\nb\na\nc\n');
 });
@@ -243,6 +244,19 @@ test('edit_file preserves the explicit missing-final-newline marker', async () =
   const patch = '@@ -1 +1 @@\n-alpha\n\\ No newline at end of file\n+beta\n\\ No newline at end of file\n';
   await exec({ path: 'f.txt', patch });
   assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf8'), 'beta');
+});
+
+test.each([
+  ['alpha\r\n', 'beta\r\n'],
+  ['alpha\r\n', 'beta'],
+  ['alpha', 'beta\n'],
+  ['alpha\nbeta\n', 'alpha\nβeta😀'],
+  ['alpha\n\n', 'beta\n\n'],
+  ['a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk', 'A\nb\nc\nd\ne\nf\ng\nh\ni\nj\nK'],
+])('edit_file preserves generated patch semantics: %j', async (original, expected) => {
+  writeFileSync(path.join(ws, 'f.txt'), original);
+  await exec({ path: 'f.txt', patch: createPatch('f.txt', original, expected, undefined, undefined, { context: 1 }) });
+  assert.equal(readFileSync(path.join(ws, 'f.txt'), 'utf8'), expected);
 });
 
 test.each([
