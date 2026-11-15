@@ -49,7 +49,9 @@ it('rejects all pending and future requests immediately on explicit shutdown', a
   } finally { await f.cleanup(); }
 });
 
-it('isolates a real closed input pipe while the server process remains alive', async () => {
+// Closing CRT fd 0 does not close Node's inherited pipe handle on Windows.
+// All platforms also exercise the stream error event and real process shutdown.
+it.skipIf(process.platform === 'win32')('isolates a real closed input pipe while the server process remains alive', async () => {
   const f = await fixture();
   try {
     expect(await f.client.callTool('close-input', {})).toBe('input closed');
@@ -57,6 +59,18 @@ it('isolates a real closed input pipe while the server process remains alive', a
     await expect(f.client.callTool('stall', { data: 'x'.repeat(262144) })).rejects.toThrow(/stdin failed/);
     expect(f.client.isAlive()).toBe(false);
     await expect(f.client.callTool('stall', {})).rejects.toThrow(/stdin failed/);
+  } finally { await f.cleanup(); }
+});
+
+it('contains a stdin stream error with pending requests on every platform', async () => {
+  const f = await fixture();
+  try {
+    const pending = f.client.callTool('stall', {}).catch(e => e);
+    expect(f.child.exitCode).toBe(null);
+    expect(() => f.child.stdin!.emit('error', new Error('broken input pipe'))).not.toThrow();
+    expect((await pending).message).toMatch(/stdin failed: broken input pipe/);
+    expect(f.client.isAlive()).toBe(false);
+    await expect(f.client.callTool('stall', {})).rejects.toThrow(/stdin failed: broken input pipe/);
   } finally { await f.cleanup(); }
 });
 
