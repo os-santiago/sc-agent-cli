@@ -191,7 +191,7 @@ The agent has access to:
 
 - **`read_file`**: Read file contents (auto-approved by default)
 - **`write_file`**: Create or overwrite files (requires permission)
-- **`edit_file`**: Apply unified diff patches (requires permission)
+- **`edit_file`**: Apply a single-file unified diff (requires permission). Malformed patches, content mismatches and unchanged output are errors, with no file write. Read the current file before retrying; tool arguments are never silently unescaped. Abbreviated hunk counts and explicit missing-final-newline markers are supported.
 - **`list_dir`**: List directory contents (auto-approved by default)
 - **`search_text`**: Search for text patterns with glob support (auto-approved by default)
 - **`run_shell`**: Execute shell commands (requires permission)
