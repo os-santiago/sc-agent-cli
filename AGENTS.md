@@ -163,7 +163,7 @@
 - **`collectFiles` depth limit**: Max 20 directory depth to prevent stack overflow on deeply nested trees
 - **`unlinkSync` error propagation**: Logs warning with error message instead of silent catch during cleanup
 - **`web-fetch` redirect limit**: `redirect: 'manual'` with counter (max 10), prevents infinite redirect loops
-- **`edit-file` error distinction**: Distinguishes malformed patch (missing `@@` headers) from content mismatch; shows first 10 lines of patch on failure
+- **`edit-file` error distinction**: Strictly validates single-file unified diffs, hunk counts, integer anchors, non-overlapping ordered ranges and EOF markers before applying; distinguishes invalid format, content mismatch and unchanged output. Failed/no-op patches do not write. Anchors beyond the source are rejected before offset search to bound work. EOF edits require exact current source positions; line endings and literal escapes are preserved. Uses pinned `diff@8.0.4` with bundled types and upstream parser denial-of-service fixes. Agents must read the current file before retrying (#625).
 - **Sensitive key redaction**: Expanded key patterns (25+ keys: `passwd`, `accessToken`, `refreshToken`, `jwt`, `sshKey`, `credentials`, etc.)
 - **History persistence warnings**: All silent catch blocks for history/input persistence now show yellow warning on failure
 
