@@ -362,6 +362,10 @@ Oldest files are automatically deleted to bring usage down to 90% of the limit.
 
 Stops the run gracefully after N tool executions. Equivalent of `--max-steps <n>`; the flag wins when both are set. Must be a positive integer — anything else is a usage error.
 
+A read-only reviewer may use one remaining model iteration for a tools-disabled
+final verdict at the exact tool limit; all other budgets still apply. See
+[reviewer completion and exit codes](exit-codes.md#reviewer-completion-at-the-tool-limit).
+
 **Default:** unset (no step cap)
 
 ```bash
