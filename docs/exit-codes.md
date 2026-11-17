@@ -55,6 +55,26 @@ Graceful run outcomes bypass `classifyError` — the batch path sets
 `process.exitCode` directly: `10`/`11` on zero-mutation terminals, `22` on
 budget exhaustion.
 
+### Reviewer completion at the tool limit
+
+For a read-only reviewer phase, `--max-steps` bounds tool dispatches. When
+that phase consumes its exact remaining allowance, it may use one remaining
+model iteration to return a new explicit `VERDICT: approve` or
+`VERDICT: request_changes`. This final request disables tools; the local
+dispatcher also rejects structured or embedded tool calls. It never extends
+time, token, cancellation or iteration limits, and never reprompts on an empty,
+missing or ambiguous verdict. Those failures retain exit `22` and no review
+decision. A reviewer batch larger than the remaining tool allowance is rejected
+before any tool in that batch executes.
+
+A valid final verdict preserves the normal read-only exit `10`; it is not
+publication approval. An explicit completed reviewer-only decision takes
+precedence over generic refusal wording such as "blocked due to" in its
+criticism, for both the exit code and manifest resolution.
+Consumers must inspect the explicit review decision and
+their own evidence. Executor and planner phases keep their existing behavior.
+An outer controller's independent provider-call and byte quotas still apply.
+
 ### HTTP failures are always `24`, never `20`/`21`
 
 Every HTTP/transport failure traverses the failover contract

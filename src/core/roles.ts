@@ -239,6 +239,13 @@ export function resolveMaxRoleFixes(env: NodeJS.ProcessEnv = process.env): numbe
 // `VERDICT: approve` or `VERDICT: request_changes`. The LAST classifiable
 // marker wins — reviewers may restate a verdict after summarizing. Leading
 // markdown decoration (`**`, `_`, backticks) is tolerated.
+// Share marker syntax with the bounded final-turn ambiguity check. Count
+// even an empty/unclassifiable marker there; it cannot grant approval.
+const REVIEWER_VERDICT_MARKER_SOURCE = String.raw`\bverdict\s*[:=]`;
+export function countReviewerVerdictMarkers(text: string): number {
+  return [...text.matchAll(new RegExp(REVIEWER_VERDICT_MARKER_SOURCE, 'gi'))].length;
+}
+
 const VERDICT_REQUEST_VALUE_RE = /^[*_`\s]*(requests?[\s_-]*changes?|changes?[\s_-]*(requested|required|needed)|rework|reject(?:ed)?|needs?[\s_-]*(?:work|changes?|fix\w*|rework))\b/i;
 const VERDICT_APPROVE_VALUE_RE = /^[*_`\s]*(approve[ds]?|accepted?|lgtm|pass(?:ed)?|ship[\s_-]*it)\b/i;
 
@@ -259,7 +266,7 @@ const APPROVE_LINE_RE = /\bapproved?\b|\blgtm\b|\blooks?\s+good\b|\bno\s+(?:rema
 export function parseReviewerVerdict(text: string | null | undefined): ReviewerDecision {
   const comments = (text ?? '').trim();
   let verdict: ReviewerVerdict | null = null;
-  for (const m of comments.matchAll(/\bverdict\s*[:=]\s*([^\n]+)/gi)) {
+  for (const m of comments.matchAll(new RegExp(`${REVIEWER_VERDICT_MARKER_SOURCE}\\s*([^\\n]+)`, 'gi'))) {
     const value = m[1];
     if (VERDICT_REQUEST_VALUE_RE.test(value)) verdict = 'request_changes';
     else if (VERDICT_APPROVE_VALUE_RE.test(value)) verdict = 'approve';

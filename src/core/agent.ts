@@ -3,7 +3,7 @@ import type { Message, StreamDelta, AgentCallbacks, ToolCall } from './types.js'
 import { OpenAICompatibleProvider } from './provider.js';
 import { resolveFailoverChain } from './failover.js';
 import type { CandidateAttempt } from './failover.js';
-import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS } from './roles.js';
+import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS, countReviewerVerdictMarkers } from './roles.js';
 import type { AgentRole, PhaseRecord, RoleResolution } from './roles.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
@@ -290,6 +290,7 @@ export class Agent {
     let messages: Message[] = redactDeep(history);
     const readOnlyPhase = phase?.readOnly ?? false;
     const suppressGuards = phase?.suppressCompletionGuards ?? false;
+    const boundedReviewer = readOnlyPhase && phase?.routing?.role === 'reviewer';
 
     verbose(`Prompt received: ${userMessage.length} chars, ~${estimateMessageTokens({ role: 'user', content: userMessage })} tokens (estimated)`);
     verbose(`Auto-approve: ${!!this.options.autoApprove}, Quiet: ${!!this.options.quiet}`);
@@ -329,6 +330,7 @@ export class Agent {
     const MAX_ITERATIONS = parseInt(process.env.SC_MAX_ITERATIONS || '100', 10);
     const runStartTime = Date.now();
     let budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
+    let reviewerFinalRequested = false;
     let iterations = 0;
     let selfHealCount = 0;
     let emptyResponseCount = 0;
@@ -372,14 +374,20 @@ export class Agent {
         break;
       }
 
-      // Execution budgets (#408): graceful stop before the next LLM call —
-      // a budget hit ends the run cleanly instead of an external SIGKILL.
+      // A reviewer may spend one remaining model turn on a verdict after
+      // using its exact tool allowance. Time/tokens always take precedence.
+      let reviewerFinal = false;
       if (this.options.maxSeconds && Date.now() - runStartTime >= this.options.maxSeconds * 1000) {
         budgetExceeded = 'seconds';
-      } else if (this.options.maxSteps && this._toolRunCount >= this.options.maxSteps) {
-        budgetExceeded = 'steps';
       } else if (this.options.maxTotalTokens && this.tokenTracker.getUsage().totalTokens >= this.options.maxTotalTokens) {
         budgetExceeded = 'tokens';
+      } else if (this.options.maxSteps && this._toolRunCount >= this.options.maxSteps) {
+        if (boundedReviewer && toolsUsed.length > 0 && !reviewerFinalRequested && this._toolRunCount === this.options.maxSteps) {
+          reviewerFinal = reviewerFinalRequested = true;
+          messages.push({role: 'user', content: 'Your read-tool budget is exhausted. No tools remain. Give one final review based only on the observations already obtained. End with exactly one standalone VERDICT: approve or VERDICT: request_changes line. If the evidence is insufficient, request_changes. Do not request additional tools.'});
+        } else {
+          budgetExceeded = 'steps';
+        }
       }
       if (budgetExceeded) {
         this._budgetExceeded = budgetExceeded;
@@ -439,9 +447,10 @@ export class Agent {
             // #424 read-only phases (planner/reviewer) never see mutating
             // tools in the schema — defense in depth alongside the dispatch
             // gate in executeToolCall.
-            tools: ALL_TOOLS
+            tools: reviewerFinal ? [] : ALL_TOOLS
               .filter((t) => !readOnlyPhase || !READ_ONLY_PHASE_DENIED_TOOLS.has(t.definition.function.name))
               .map((t) => t.definition),
+            ...(reviewerFinal ? {tool_choice: 'none' as const} : {}),
             // Respect the configured transport mode. Some OpenAI-compatible
             // providers return empty streamed tool deltas while non-streaming
             // responses contain valid tool calls.
@@ -496,6 +505,30 @@ export class Agent {
         response.content?.length ?? 0, response.tool_calls?.length ?? 0,
         resEstTokens,
       );
+
+      // Never dispatch, recover embedded calls, reprompt, or reuse an earlier
+      // verdict on this final turn. The provider's tool schema is not a gate.
+      if (reviewerFinal) {
+        const { hasEmbeddedActionMarkup } = await import('../utils/embedded-tool-calls.js');
+        const text = response.content;
+        if (this.options.maxSeconds && Date.now() - runStartTime >= this.options.maxSeconds * 1000) {
+          budgetExceeded = 'seconds';
+        } else if (this.options.maxTotalTokens && this.tokenTracker.getUsage().totalTokens >= this.options.maxTotalTokens) {
+          budgetExceeded = 'tokens';
+        } else if (signal?.aborted || response.tool_calls?.length || typeof text !== 'string'
+          || hasEmbeddedActionMarkup(text) || /[\0\r]/.test(text) || /```|~~~/.test(text)
+          || countReviewerVerdictMarkers(text) !== 1
+          || !/^VERDICT: (approve|request_changes)$/.test(text.trim().split('\n').at(-1) ?? '')) {
+          budgetExceeded = 'steps';
+        }
+        if (budgetExceeded) {
+          this._budgetExceeded = budgetExceeded;
+        } else {
+          messages.push({role: 'assistant', content: redactSecrets(text!)});
+          continueLoop = false;
+        }
+        break;
+      }
 
       // Save checkpoint every 5 iterations for long-running sessions
       this._lastCheckpointIteration = await maybeAutoSaveCheckpoint({
@@ -597,6 +630,12 @@ export class Agent {
 
       // Handle tool calls if any - PARALLEL EXECUTION
       if (response.tool_calls && response.tool_calls.length > 0) {
+        // Refuse an oversized reviewer batch as a whole before any dispatch.
+        if (boundedReviewer && this.options.maxSteps
+          && response.tool_calls.length > this.options.maxSteps - this._toolRunCount) {
+          budgetExceeded = this._budgetExceeded = 'steps';
+          break;
+        }
         consecutiveNoToolResponses = 0;
         this.log(chalk.gray(`\n${boxHeader('Tools', 2)}`));
 
@@ -756,6 +795,11 @@ export class Agent {
       }
     }
 
+    if (boundedReviewer && continueLoop && this.options.maxSteps && this._toolRunCount >= this.options.maxSteps) {
+      // An exhausted iteration/cancellation bound cannot expose stale prose
+      // as a completed review when no final response was obtained.
+      this._budgetExceeded = budgetExceeded ?? 'steps';
+    }
     const hitIterationLimit = iterations >= MAX_ITERATIONS;
     const outcome = classifyRunOutcome(toolsUsed, hitIterationLimit);
     for (const line of summarizeRunOutcome(toolsUsed, outcome, MAX_ITERATIONS)) {

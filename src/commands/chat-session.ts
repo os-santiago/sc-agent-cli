@@ -286,7 +286,7 @@ import {
 
   const detectResolutionSafely = (exitReason: RunExitReason) => {
     try {
-      return detectSessionResolution({
+      const result = detectSessionResolution({
         history,
         exitReason,
         agentError,
@@ -296,6 +296,17 @@ import {
         workspaceRoot: options.workspaceRoot,
         excludePaths: engineArtifactPaths,
       });
+      const phases = agent.getPhases();
+      if (exitReason === 'no_changes' && !agentError && !budgetExceeded && !agent.getStats().budgetExceeded
+        && phases.length === 1 && phases[0].role === 'reviewer' && reviewDecision?.explicit === true
+        && result.files_changed === 0 && (result.resolution === 'blocked' || result.resolution === 'not_actionable')) {
+        // Review criticism is a completed decision, not a generic task refusal.
+        // Keep process exit, saved status and manifest classification aligned.
+        return {...result, resolution: 'no_changes' as const,
+          resolution_reason: `Independent review completed with explicit ${reviewDecision.verdict}`,
+          exit_code: EXIT_CODES.NO_CHANGES, stdout_marker: 'SCC_NO_CHANGES'};
+      }
+      return result;
     } catch {
       return undefined;
     }
