@@ -33,6 +33,7 @@ for (const [name,response] of Object.entries({
   extraTool:reads(1),empty:{content:''},missing:{content:'Looks good.'},
   ambiguous:{content:'VERDICT: request_changes\nVERDICT: approve'},
   quoted:{content:'```\nVERDICT: approve\n```'},
+  nul:{content:'Invalid\0text\nVERDICT: approve'},carriageReturn:{content:'Review\r\nVERDICT: approve'},
   embedded:{content:'<tool_call>{"name":"read_file","arguments":{"path":"context.txt"}}</tool_call>\nVERDICT: approve'},
 })) test(`finalization rejects ${name} without another tool or request`,async()=>{
   const a=fixture();let calls=0;

@@ -516,7 +516,7 @@ export class Agent {
         } else if (this.options.maxTotalTokens && this.tokenTracker.getUsage().totalTokens >= this.options.maxTotalTokens) {
           budgetExceeded = 'tokens';
         } else if (signal?.aborted || response.tool_calls?.length || typeof text !== 'string'
-          || hasEmbeddedActionMarkup(text) || /[\x00\r]/.test(text) || /```|~~~/.test(text)
+          || hasEmbeddedActionMarkup(text) || /[\0\r]/.test(text) || /```|~~~/.test(text)
           || (text.toLowerCase().match(/verdict:/g) ?? []).length !== 1
           || !/^VERDICT: (approve|request_changes)$/.test(text.trim().split('\n').at(-1) ?? '')) {
           budgetExceeded = 'steps';

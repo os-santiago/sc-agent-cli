@@ -27,6 +27,8 @@ for(const [name,final] of Object.entries({
  extraTool:batch(),empty:{kind:'message',content:''},missing:{kind:'message',content:'Looks good.'},
  embedded:{kind:'message',content:'<tool_call>{"name":"read_file","arguments":{"path":"context-0.txt"}}</tool_call>\nVERDICT: approve'},
  multiple:{kind:'message',content:'VERDICT: request_changes\nVERDICT: approve'},
+  nul:{kind:'message',content:'Invalid\0text\nVERDICT: approve'},
+  carriageReturn:{kind:'message',content:'Review\r\nVERDICT: approve'},
 } satisfies Record<string,MockCompletion>))test(`real reviewer rejects ${name} finalization`,async()=>{
  const {result,requests}=await run(final);assert.equal(result.code,22,describeRun(result));assert.equal(requests.length,3);
  const m=lastManifest(result.stdout) as ReturnType<typeof lastManifest>&{review?:unknown};assert.equal(m.tool_calls_total,8);assert.equal(m.exit_reason,'budget_exceeded');assert.ok(!m.review);
