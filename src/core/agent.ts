@@ -3,7 +3,7 @@ import type { Message, StreamDelta, AgentCallbacks, ToolCall } from './types.js'
 import { OpenAICompatibleProvider } from './provider.js';
 import { resolveFailoverChain } from './failover.js';
 import type { CandidateAttempt } from './failover.js';
-import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS } from './roles.js';
+import { PhaseTracker, READ_ONLY_PHASE_DENIED_TOOLS, countReviewerVerdictMarkers } from './roles.js';
 import type { AgentRole, PhaseRecord, RoleResolution } from './roles.js';
 import { ALL_TOOLS } from '../tools/registry.js';
 import type { ToolContext } from '../tools/tool.js';
@@ -517,7 +517,7 @@ export class Agent {
           budgetExceeded = 'tokens';
         } else if (signal?.aborted || response.tool_calls?.length || typeof text !== 'string'
           || hasEmbeddedActionMarkup(text) || /[\0\r]/.test(text) || /```|~~~/.test(text)
-          || (text.toLowerCase().match(/verdict:/g) ?? []).length !== 1
+          || countReviewerVerdictMarkers(text) !== 1
           || !/^VERDICT: (approve|request_changes)$/.test(text.trim().split('\n').at(-1) ?? '')) {
           budgetExceeded = 'steps';
         }
