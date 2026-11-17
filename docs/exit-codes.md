@@ -68,7 +68,10 @@ decision. A reviewer batch larger than the remaining tool allowance is rejected
 before any tool in that batch executes.
 
 A valid final verdict preserves the normal read-only exit `10`; it is not
-publication approval. Consumers must inspect the explicit review decision and
+publication approval. An explicit completed reviewer-only decision takes
+precedence over generic refusal wording such as "blocked due to" in its
+criticism, for both the exit code and manifest resolution.
+Consumers must inspect the explicit review decision and
 their own evidence. Executor and planner phases keep their existing behavior.
 An outer controller's independent provider-call and byte quotas still apply.
 

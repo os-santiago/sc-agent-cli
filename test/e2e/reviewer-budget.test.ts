@@ -23,6 +23,12 @@ for(const verdict of ['approve','request_changes'])test(`real reviewer completes
  const m=lastManifest(result.stdout) as ReturnType<typeof lastManifest>&{review:{verdict:string;explicit:boolean}};
  assert.equal(m.tool_calls_total,8);assert.equal(m.iterations,3);assert.equal(m.review.verdict,verdict);assert.equal(m.review.explicit,true);assert.equal(m.exit_reason,'no_changes');
 });
+for(const criticism of ['The review is blocked due to insufficient evidence.', 'This implementation is not actionable.'])test(`explicit request_changes outranks refusal heuristic: ${criticism}`,async()=>{
+ const {result,requests}=await run({kind:'message',content:`${criticism}\nVERDICT: request_changes`});
+ assert.equal(result.code,10,describeRun(result));assert.equal(requests.length,3);
+ const m=lastManifest(result.stdout) as ReturnType<typeof lastManifest>&{review:{verdict:string;explicit:boolean}};
+ assert.equal(m.review.verdict,'request_changes');assert.equal(m.review.explicit,true);assert.equal(m.exit_reason,'no_changes');assert.equal(m.resolution,'no_changes');
+});
 for(const [name,final] of Object.entries({
  extraTool:batch(),empty:{kind:'message',content:''},missing:{kind:'message',content:'Looks good.'},
  embedded:{kind:'message',content:'<tool_call>{"name":"read_file","arguments":{"path":"context-0.txt"}}</tool_call>\nVERDICT: approve'},
