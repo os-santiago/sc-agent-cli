@@ -11,6 +11,7 @@ import {
   MAX_SELF_HEAL,
   analyzeProseResponse,
   shouldSelfHeal,
+  workSettledSinceLastMutation,
   buildSelfHealReprompt,
   DEFAULT_ZERO_MUTATION_REPROMPTS,
   resolveZeroMutationRepromptBudget,
@@ -111,6 +112,17 @@ test('shouldSelfHeal accepts a final summary after completed work', () => {
   assert.equal(shouldSelfHeal(signals, { suppressGuards: false, hasToolRun: true, selfHealCount: 0, completedWork: true }), false);
   const plan = analyzeProseResponse('The parser change is next. I will update kv.go and add the missing error tests now.', { autoApprove: true, hasToolRun: true });
   assert.equal(shouldSelfHeal(plan, { suppressGuards: false, hasToolRun: true, selfHealCount: 0, completedWork: true }), true);
+});
+
+test('workSettledSinceLastMutation needs a mutation with no failure after it', () => {
+  const edit = { name: 'edit_file', success: true, args: { path: 'kv.go', patch: 'x' } };
+  const read = { name: 'read_file', success: true, args: { path: 'kv.go' } };
+  const failedShell = { name: 'run_shell', success: false, args: { command: 'go test ./...' } };
+  assert.equal(workSettledSinceLastMutation([]), false);
+  assert.equal(workSettledSinceLastMutation([read]), false);
+  assert.equal(workSettledSinceLastMutation([read, edit, read]), true);
+  assert.equal(workSettledSinceLastMutation([edit, failedShell, read]), false);
+  assert.equal(workSettledSinceLastMutation([failedShell, edit]), true);
 });
 
 test('shouldSelfHeal skips purely conversational/short responses', () => {

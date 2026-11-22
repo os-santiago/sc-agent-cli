@@ -87,8 +87,8 @@ export function analyzeProseResponse(content: string, opts: { autoApprove?: bool
 }
 
 /**
- * `completedWork` means the workspace changed during this run and the last
- * tool call succeeded. Prose after that is a final summary: describing error
+ * `completedWork` means the workspace changed during this run, through a
+ * successful mutating call, and no tool call has failed since. Prose after that is a final summary: describing error
  * handling ("returns an error"), a check it could not run, or a suggestion is
  * not an unfixed failure, and re-prompting it only loops into a livelock. A
  * stated plan with nothing executed still self-heals.
@@ -175,6 +175,18 @@ export function countWorkspaceMutations(toolsUsed: ToolUseRecord[]): number {
     (n, t) => n + (t.success && isWorkspaceMutatingToolCall(t.name, t.args) ? 1 : 0),
     0
   );
+}
+
+/**
+ * True when the run made at least one successful workspace mutation and no
+ * tool call has failed since the last one: the change stands, unchallenged.
+ */
+export function workSettledSinceLastMutation(toolsUsed: ToolUseRecord[]): boolean {
+  let lastMutation = -1;
+  toolsUsed.forEach((t, i) => {
+    if (t.success && isWorkspaceMutatingToolCall(t.name, t.args)) lastMutation = i;
+  });
+  return lastMutation >= 0 && toolsUsed.slice(lastMutation + 1).every(t => t.success);
 }
 
 export interface ZeroMutationCheck {

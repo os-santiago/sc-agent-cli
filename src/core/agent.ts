@@ -55,6 +55,7 @@ import {
   buildLivelockError,
   analyzeProseResponse,
   shouldSelfHeal,
+  workSettledSinceLastMutation,
   buildSelfHealReprompt,
   MAX_SELF_HEAL,
   resolveZeroMutationRepromptBudget,
@@ -731,8 +732,7 @@ export class Agent {
         }
 
         const signals = analyzeProseResponse(content, { autoApprove: this.options.autoApprove, hasToolRun });
-        const lastTool = toolsUsed[toolsUsed.length - 1];
-        const completedWork = unattendedRun && lastTool?.success === true
+        const completedWork = unattendedRun && !suppressGuards && workSettledSinceLastMutation(toolsUsed)
           && hasWorktreeChanges(runGitStateBefore, getWorkspaceGitState(this.options.workspaceRoot));
         const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount, completedWork });
 
