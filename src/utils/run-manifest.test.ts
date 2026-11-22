@@ -284,3 +284,16 @@ test('buildRunManifest keeps provider_error for genuine provider failures', () =
   assert.equal(m.terminalResolution, 'provider_error');
   assert.equal(m.errorClass, 'rate_limit');
 });
+
+test('final_message_sha256 binds the unredacted final message without leaking it', async () => {
+  const { createHash } = await import('node:crypto');
+  const { redactDeep } = await import('./secret-redaction.js');
+  const raw = 'Tests pass: yes\nVERDICT: approve';
+  const digest = createHash('sha256').update(raw, 'utf8').digest('hex');
+  const history: Message[] = [{ role: 'user', content: 'review' }, { role: 'assistant', content: 'Tests pass: [REDACTED]\nVERDICT: approve' }];
+  const m = buildRunManifest(baseInput({ history, finalMessageSha256: digest }));
+  assert.equal(m.final_message_sha256, digest);
+  assert.equal(redactDeep(m).final_message_sha256, digest);
+  assert.equal(buildRunManifest(baseInput({ history, finalMessageSha256: 'not-a-digest' })).final_message_sha256, undefined);
+  assert.equal(buildRunManifest(baseInput({ history: [{ role: 'user', content: 'x' }], finalMessageSha256: digest })).final_message_sha256, undefined);
+});

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import chalk from 'chalk';
 import type { Message, StreamDelta, AgentCallbacks, ToolCall } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
@@ -103,6 +104,8 @@ export class Agent {
   private audit?: AuditLogger;
   private auditRun: RunAudit;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
+  /** SHA-256 of the raw (unredacted) text of the last non-empty assistant message. */
+  private _finalMessageSha256: string | null = null;
   private sandbox?: SandboxRuntime;
   private _contextBudgetReport: ContextBudgetReport | null = null;
 
@@ -193,6 +196,22 @@ export class Agent {
   }
 
   /** Append-only phase segments for the run manifest (#424). */
+  /**
+   * SHA-256 hex of the last non-empty assistant message as the provider
+   * returned it, before secret redaction. History and the run manifest hold
+   * the redacted text; a digest leaks nothing, and it lets a caller bind the
+   * manifest to independently observed provider output.
+   */
+  getFinalMessageSha256(): string | null {
+    return this._finalMessageSha256;
+  }
+
+  private noteAssistantText(text: unknown): void {
+    if (typeof text === 'string' && text.trim().length > 0) {
+      this._finalMessageSha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+    }
+  }
+
   getPhases(): PhaseRecord[] {
     return this.phaseTracker.getPhases();
   }
@@ -525,6 +544,7 @@ export class Agent {
         if (budgetExceeded) {
           this._budgetExceeded = budgetExceeded;
         } else {
+          this.noteAssistantText(text);
           messages.push({role: 'assistant', content: redactSecrets(text!)});
           continueLoop = false;
         }
@@ -544,6 +564,7 @@ export class Agent {
       // Add assistant response to history (#472: masked copy — the model can
       // echo secrets it saw in tool output into content or write_file args).
       // `response` itself stays raw: tool_calls execute verbatim below.
+      this.noteAssistantText(response.content);
       const assistantMessage: Message = {
         role: 'assistant',
         content: typeof response.content === 'string' ? redactSecrets(response.content) : response.content,
