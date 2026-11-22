@@ -55,6 +55,7 @@ import {
   buildLivelockError,
   analyzeProseResponse,
   shouldSelfHeal,
+  workSettledSinceLastMutation,
   buildSelfHealReprompt,
   MAX_SELF_HEAL,
   resolveZeroMutationRepromptBudget,
@@ -731,7 +732,10 @@ export class Agent {
         }
 
         const signals = analyzeProseResponse(content, { autoApprove: this.options.autoApprove, hasToolRun });
-        const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount });
+        // The successful mutating call is the evidence; a porcelain status
+        // comparison would miss a re-edit of an already modified file.
+        const completedWork = unattendedRun && !suppressGuards && workSettledSinceLastMutation(toolsUsed);
+        const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount, completedWork });
 
         // Metrics: log self-heal decision
         if (process.env.SC_DEBUG_METRICS) {

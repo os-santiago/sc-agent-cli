@@ -86,16 +86,26 @@ export function analyzeProseResponse(content: string, opts: { autoApprove?: bool
   };
 }
 
+/**
+ * `completedWork` means the run changed the workspace through a successful
+ * mutating call and no tool call has failed since. Prose after that is a final summary: describing error
+ * handling ("returns an error"), a check it could not run, or a suggestion is
+ * not an unfixed failure, and re-prompting it only loops into a livelock. A
+ * stated plan with nothing executed still self-heals.
+ */
 export function shouldSelfHeal(
   signals: ProseSignals,
-  opts: { suppressGuards: boolean; hasToolRun: boolean; selfHealCount: number; maxSelfHeal?: number },
+  opts: { suppressGuards: boolean; hasToolRun: boolean; selfHealCount: number; maxSelfHeal?: number; completedWork?: boolean },
 ): boolean {
   const max = opts.maxSelfHeal ?? MAX_SELF_HEAL;
+  const unresolved = opts.completedWork
+    ? signals.isFutureIntention
+    : signals.isDeferring || signals.isFutureIntention || signals.hasFailurePhrase || (signals.hasErrorIndicators && opts.hasToolRun);
   return (
     !opts.suppressGuards &&
     !signals.isConversational &&
     !signals.isShortResponse &&
-    (signals.isDeferring || signals.isFutureIntention || signals.hasFailurePhrase || (signals.hasErrorIndicators && opts.hasToolRun))
+    unresolved
     && opts.selfHealCount < max
   );
 }
@@ -165,6 +175,18 @@ export function countWorkspaceMutations(toolsUsed: ToolUseRecord[]): number {
     (n, t) => n + (t.success && isWorkspaceMutatingToolCall(t.name, t.args) ? 1 : 0),
     0
   );
+}
+
+/**
+ * True when the run made at least one successful workspace mutation and no
+ * tool call has failed since the last one: the change stands, unchallenged.
+ */
+export function workSettledSinceLastMutation(toolsUsed: ToolUseRecord[]): boolean {
+  let lastMutation = -1;
+  toolsUsed.forEach((t, i) => {
+    if (t.success && isWorkspaceMutatingToolCall(t.name, t.args)) lastMutation = i;
+  });
+  return lastMutation >= 0 && toolsUsed.slice(lastMutation + 1).every(t => t.success);
 }
 
 export interface ZeroMutationCheck {

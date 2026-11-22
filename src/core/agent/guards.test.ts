@@ -11,6 +11,7 @@ import {
   MAX_SELF_HEAL,
   analyzeProseResponse,
   shouldSelfHeal,
+  workSettledSinceLastMutation,
   buildSelfHealReprompt,
   DEFAULT_ZERO_MUTATION_REPROMPTS,
   resolveZeroMutationRepromptBudget,
@@ -101,6 +102,27 @@ test('shouldSelfHeal fires on failure prose but honors suppression and the cap',
   assert.equal(shouldSelfHeal(failing, { suppressGuards: false, hasToolRun: true, selfHealCount: MAX_SELF_HEAL }), false);
   assert.equal(shouldSelfHeal(failing, { suppressGuards: false, hasToolRun: true, selfHealCount: 4, maxSelfHeal: 5 }), true);
   assert.equal(shouldSelfHeal(failing, { suppressGuards: false, hasToolRun: true, selfHealCount: 5, maxSelfHeal: 5 }), false);
+});
+
+test('shouldSelfHeal accepts a final summary after completed work', () => {
+  const summary = 'Updated kv.Parse so a trailing separator and empty input no longer return an error. '
+    + 'A pair without "=" still fails with ErrSyntax. I was unable to run the tests here; I recommend running go test.';
+  const signals = analyzeProseResponse(summary, { autoApprove: true, hasToolRun: true });
+  assert.equal(shouldSelfHeal(signals, { suppressGuards: false, hasToolRun: true, selfHealCount: 0 }), true);
+  assert.equal(shouldSelfHeal(signals, { suppressGuards: false, hasToolRun: true, selfHealCount: 0, completedWork: true }), false);
+  const plan = analyzeProseResponse('The parser change is next. I will update kv.go and add the missing error tests now.', { autoApprove: true, hasToolRun: true });
+  assert.equal(shouldSelfHeal(plan, { suppressGuards: false, hasToolRun: true, selfHealCount: 0, completedWork: true }), true);
+});
+
+test('workSettledSinceLastMutation needs a mutation with no failure after it', () => {
+  const edit = { name: 'edit_file', success: true, args: { path: 'kv.go', patch: 'x' } };
+  const read = { name: 'read_file', success: true, args: { path: 'kv.go' } };
+  const failedShell = { name: 'run_shell', success: false, args: { command: 'go test ./...' } };
+  assert.equal(workSettledSinceLastMutation([]), false);
+  assert.equal(workSettledSinceLastMutation([read]), false);
+  assert.equal(workSettledSinceLastMutation([read, edit, read]), true);
+  assert.equal(workSettledSinceLastMutation([edit, failedShell, read]), false);
+  assert.equal(workSettledSinceLastMutation([failedShell, edit]), true);
 });
 
 test('shouldSelfHeal skips purely conversational/short responses', () => {
