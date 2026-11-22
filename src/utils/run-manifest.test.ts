@@ -289,11 +289,14 @@ test('final_message_sha256 binds the unredacted final message without leaking it
   const { createHash } = await import('node:crypto');
   const { redactDeep } = await import('./secret-redaction.js');
   const raw = 'Tests pass: yes\nVERDICT: approve';
-  const digest = createHash('sha256').update(raw, 'utf8').digest('hex');
-  const history: Message[] = [{ role: 'user', content: 'review' }, { role: 'assistant', content: 'Tests pass: [REDACTED]\nVERDICT: approve' }];
-  const m = buildRunManifest(baseInput({ history, finalMessageSha256: digest }));
-  assert.equal(m.final_message_sha256, digest);
-  assert.equal(redactDeep(m).final_message_sha256, digest);
-  assert.equal(buildRunManifest(baseInput({ history, finalMessageSha256: 'not-a-digest' })).final_message_sha256, undefined);
-  assert.equal(buildRunManifest(baseInput({ history: [{ role: 'user', content: 'x' }], finalMessageSha256: digest })).final_message_sha256, undefined);
+  const redacted = 'Tests pass: [REDACTED]\nVERDICT: approve';
+  const sha256 = createHash('sha256').update(raw, 'utf8').digest('hex');
+  const history: Message[] = [{ role: 'user', content: 'review' }, { role: 'assistant', content: redacted }];
+  const m = buildRunManifest(baseInput({ history, finalMessageDigest: { redacted, sha256 } }));
+  assert.equal(m.final_message_sha256, sha256);
+  assert.equal(redactDeep(m).final_message_sha256, sha256);
+  assert.equal(buildRunManifest(baseInput({ history, finalMessageDigest: { redacted, sha256: 'not-a-digest' } })).final_message_sha256, undefined);
+  assert.equal(buildRunManifest(baseInput({ history: [{ role: 'user', content: 'x' }], finalMessageDigest: { redacted, sha256 } })).final_message_sha256, undefined);
+  // A digest recorded for another message (for example after a failed run kept older history) is never emitted.
+  assert.equal(buildRunManifest(baseInput({ history, finalMessageDigest: { redacted: 'newer message', sha256 } })).final_message_sha256, undefined);
 });

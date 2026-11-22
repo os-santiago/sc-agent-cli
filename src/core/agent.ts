@@ -104,8 +104,8 @@ export class Agent {
   private audit?: AuditLogger;
   private auditRun: RunAudit;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
-  /** SHA-256 of the raw (unredacted) text of the last non-empty assistant message. */
-  private _finalMessageSha256: string | null = null;
+  /** The last non-empty assistant message: its redacted text and the SHA-256 of its raw text. */
+  private _finalMessage: { redacted: string; sha256: string } | null = null;
   private sandbox?: SandboxRuntime;
   private _contextBudgetReport: ContextBudgetReport | null = null;
 
@@ -201,13 +201,13 @@ export class Agent {
    * the redacted text; a digest leaks nothing, and it lets a caller bind the
    * manifest to independently observed provider output.
    */
-  getFinalMessageSha256(): string | null {
-    return this._finalMessageSha256;
+  getFinalMessageDigest(): { redacted: string; sha256: string } | null {
+    return this._finalMessage;
   }
 
   private noteAssistantText(text: unknown): void {
     if (typeof text === 'string' && text.trim().length > 0) {
-      this._finalMessageSha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+      this._finalMessage = { redacted: redactSecrets(text), sha256: createHash('sha256').update(text, 'utf8').digest('hex') };
     }
   }
 
@@ -293,7 +293,7 @@ export class Agent {
 
   async run(userMessage: string, history: Message[] = [], signal?: AbortSignal, phase?: AgentRunPhaseOptions): Promise<Message[]> {
     // The digest describes this run's final message only; never a stale one.
-    this._finalMessageSha256 = null;
+    this._finalMessage = null;
     // #424: a phase-scoped run re-roots the provider at the role's candidate
     // and opens a manifest segment; the finally guarantees the run's default
     // chain is restored even when the phase throws.
