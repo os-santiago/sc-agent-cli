@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import chalk from 'chalk';
 import type { Message, StreamDelta, AgentCallbacks, ToolCall } from './types.js';
 import { OpenAICompatibleProvider } from './provider.js';
@@ -103,6 +104,8 @@ export class Agent {
   private audit?: AuditLogger;
   private auditRun: RunAudit;
   private _budgetExceeded: 'steps' | 'seconds' | 'tokens' | null = null;
+  /** The last non-empty assistant message: its redacted text and the SHA-256 of its raw text. */
+  private _finalMessage: { redacted: string; sha256: string } | null = null;
   private sandbox?: SandboxRuntime;
   private _contextBudgetReport: ContextBudgetReport | null = null;
 
@@ -192,6 +195,22 @@ export class Agent {
     ));
   }
 
+  /**
+   * SHA-256 hex of the last non-empty assistant message as the provider
+   * returned it, before secret redaction. History and the run manifest hold
+   * the redacted text; a digest leaks nothing, and it lets a caller bind the
+   * manifest to independently observed provider output.
+   */
+  getFinalMessageDigest(): { redacted: string; sha256: string } | null {
+    return this._finalMessage;
+  }
+
+  private noteAssistantText(text: unknown): void {
+    if (typeof text === 'string' && text.trim().length > 0) {
+      this._finalMessage = { redacted: redactSecrets(text), sha256: createHash('sha256').update(text, 'utf8').digest('hex') };
+    }
+  }
+
   /** Append-only phase segments for the run manifest (#424). */
   getPhases(): PhaseRecord[] {
     return this.phaseTracker.getPhases();
@@ -273,6 +292,8 @@ export class Agent {
   }
 
   async run(userMessage: string, history: Message[] = [], signal?: AbortSignal, phase?: AgentRunPhaseOptions): Promise<Message[]> {
+    // The digest describes this run's final message only; never a stale one.
+    this._finalMessage = null;
     // #424: a phase-scoped run re-roots the provider at the role's candidate
     // and opens a manifest segment; the finally guarantees the run's default
     // chain is restored even when the phase throws.
@@ -525,6 +546,7 @@ export class Agent {
         if (budgetExceeded) {
           this._budgetExceeded = budgetExceeded;
         } else {
+          this.noteAssistantText(text);
           messages.push({role: 'assistant', content: redactSecrets(text!)});
           continueLoop = false;
         }
@@ -544,6 +566,7 @@ export class Agent {
       // Add assistant response to history (#472: masked copy — the model can
       // echo secrets it saw in tool output into content or write_file args).
       // `response` itself stays raw: tool_calls execute verbatim below.
+      this.noteAssistantText(response.content);
       const assistantMessage: Message = {
         role: 'assistant',
         content: typeof response.content === 'string' ? redactSecrets(response.content) : response.content,

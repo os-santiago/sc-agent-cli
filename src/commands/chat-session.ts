@@ -323,6 +323,7 @@ import {
       model: currentConfig.model.model,
       sessionId,
       history,
+      finalMessageDigest: agent.getFinalMessageDigest(),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       // #424: the tracker prices each role at its serving model when the

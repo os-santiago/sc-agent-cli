@@ -89,6 +89,8 @@ export interface RunManifest {
   duration_ms: number;
   /** Last non-empty assistant message (truncated) or null. */
   final_message: string | null;
+  /** SHA-256 hex of that message before secret redaction, when known. */
+  final_message_sha256?: string;
   /** Path to the resumable checkpoint file when one exists. */
   checkpoint: string | null;
   /** Error description on failure exits, null otherwise. */
@@ -154,6 +156,12 @@ export interface RunManifestInput {
   sandboxViolations?: SandboxViolation[];
   /** Context-spend accounting from the injection budget guard (#422). */
   contextBudget?: ContextBudgetReport | null;
+  /**
+   * The agent's last assistant message as {redacted text, raw SHA-256}
+   * (Agent.getFinalMessageDigest). Emitted only when that text is exactly the
+   * published final message, so the digest never describes another message.
+   */
+  finalMessageDigest?: { redacted: string; sha256: string } | null;
 }
 
 export function buildRunManifest(input: RunManifestInput): RunManifest {
@@ -197,6 +205,9 @@ export function buildRunManifest(input: RunManifestInput): RunManifest {
     estimated_cost_usd: input.costUsd,
     duration_ms: input.durationMs,
     final_message: lastAssistant ? String(lastAssistant.content).slice(0, FINAL_MESSAGE_MAX) : null,
+    ...(lastAssistant && input.finalMessageDigest && /^[a-f0-9]{64}$/.test(input.finalMessageDigest.sha256)
+      && String(lastAssistant.content) === input.finalMessageDigest.redacted
+      ? { final_message_sha256: input.finalMessageDigest.sha256 } : {}),
     checkpoint: input.checkpointPath,
     error: input.error ?? null,
     ...(input.devcontainer ? { devcontainer: input.devcontainer } : {}),
