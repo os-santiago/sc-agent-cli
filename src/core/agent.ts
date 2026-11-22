@@ -195,7 +195,6 @@ export class Agent {
     ));
   }
 
-  /** Append-only phase segments for the run manifest (#424). */
   /**
    * SHA-256 hex of the last non-empty assistant message as the provider
    * returned it, before secret redaction. History and the run manifest hold
@@ -212,6 +211,7 @@ export class Agent {
     }
   }
 
+  /** Append-only phase segments for the run manifest (#424). */
   getPhases(): PhaseRecord[] {
     return this.phaseTracker.getPhases();
   }
@@ -292,6 +292,8 @@ export class Agent {
   }
 
   async run(userMessage: string, history: Message[] = [], signal?: AbortSignal, phase?: AgentRunPhaseOptions): Promise<Message[]> {
+    // The digest describes this run's final message only; never a stale one.
+    this._finalMessageSha256 = null;
     // #424: a phase-scoped run re-roots the provider at the role's candidate
     // and opens a manifest segment; the finally guarantees the run's default
     // chain is restored even when the phase throws.
