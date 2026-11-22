@@ -87,8 +87,8 @@ export function analyzeProseResponse(content: string, opts: { autoApprove?: bool
 }
 
 /**
- * `completedWork` means the workspace changed during this run, through a
- * successful mutating call, and no tool call has failed since. Prose after that is a final summary: describing error
+ * `completedWork` means the run changed the workspace through a successful
+ * mutating call and no tool call has failed since. Prose after that is a final summary: describing error
  * handling ("returns an error"), a check it could not run, or a suggestion is
  * not an unfixed failure, and re-prompting it only loops into a livelock. A
  * stated plan with nothing executed still self-heals.

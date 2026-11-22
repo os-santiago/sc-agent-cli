@@ -732,8 +732,9 @@ export class Agent {
         }
 
         const signals = analyzeProseResponse(content, { autoApprove: this.options.autoApprove, hasToolRun });
-        const completedWork = unattendedRun && !suppressGuards && workSettledSinceLastMutation(toolsUsed)
-          && hasWorktreeChanges(runGitStateBefore, getWorkspaceGitState(this.options.workspaceRoot));
+        // The successful mutating call is the evidence; a porcelain status
+        // comparison would miss a re-edit of an already modified file.
+        const completedWork = unattendedRun && !suppressGuards && workSettledSinceLastMutation(toolsUsed);
         const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount, completedWork });
 
         // Metrics: log self-heal decision
