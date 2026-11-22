@@ -731,7 +731,10 @@ export class Agent {
         }
 
         const signals = analyzeProseResponse(content, { autoApprove: this.options.autoApprove, hasToolRun });
-        const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount });
+        const lastTool = toolsUsed[toolsUsed.length - 1];
+        const completedWork = unattendedRun && lastTool?.success === true
+          && hasWorktreeChanges(runGitStateBefore, getWorkspaceGitState(this.options.workspaceRoot));
+        const doSelfHeal = shouldSelfHeal(signals, { suppressGuards, hasToolRun, selfHealCount, completedWork });
 
         // Metrics: log self-heal decision
         if (process.env.SC_DEBUG_METRICS) {

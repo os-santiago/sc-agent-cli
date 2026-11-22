@@ -86,16 +86,26 @@ export function analyzeProseResponse(content: string, opts: { autoApprove?: bool
   };
 }
 
+/**
+ * `completedWork` means the workspace changed during this run and the last
+ * tool call succeeded. Prose after that is a final summary: describing error
+ * handling ("returns an error"), a check it could not run, or a suggestion is
+ * not an unfixed failure, and re-prompting it only loops into a livelock. A
+ * stated plan with nothing executed still self-heals.
+ */
 export function shouldSelfHeal(
   signals: ProseSignals,
-  opts: { suppressGuards: boolean; hasToolRun: boolean; selfHealCount: number; maxSelfHeal?: number },
+  opts: { suppressGuards: boolean; hasToolRun: boolean; selfHealCount: number; maxSelfHeal?: number; completedWork?: boolean },
 ): boolean {
   const max = opts.maxSelfHeal ?? MAX_SELF_HEAL;
+  const unresolved = opts.completedWork
+    ? signals.isFutureIntention
+    : signals.isDeferring || signals.isFutureIntention || signals.hasFailurePhrase || (signals.hasErrorIndicators && opts.hasToolRun);
   return (
     !opts.suppressGuards &&
     !signals.isConversational &&
     !signals.isShortResponse &&
-    (signals.isDeferring || signals.isFutureIntention || signals.hasFailurePhrase || (signals.hasErrorIndicators && opts.hasToolRun))
+    unresolved
     && opts.selfHealCount < max
   );
 }
